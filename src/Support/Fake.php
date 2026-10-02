@@ -28,6 +28,38 @@ final class Fake
 
     private const WORDS = ['reliable', 'handmade', 'everyday', 'lightweight', 'durable', 'refined', 'practical', 'seasonal', 'limited', 'popular', 'tested', 'trusted', 'simple', 'modern', 'original'];
 
+    /** 2000-01-01 UTC, where unique dates start counting from. */
+    private const EPOCH = 946684800;
+
+    /** A century of distinct days. */
+    private const UNIQUE_DAYS = 36500;
+
+    private const COLORS = 0x1000000;
+
+    /**
+     * How many distinct values a unique field can hold, or null when it's as good as unlimited.
+     * A unique enum of three options can only ever fill three rows; the seed command checks
+     * this before it starts rather than failing on the fourth insert.
+     */
+    public static function capacity(Field $field): ?int
+    {
+        if (! $field->unique) {
+            return null;
+        }
+
+        return match (true) {
+            $field->kind === 'enum' => count($field->options),
+            $field->kind === 'boolean' => 2,
+            $field->kind === 'int' && $field->format === 'percent' => 101,
+            $field->kind === 'int' && $field->format === 'rating' => 5,
+            $field->kind === 'float' && $field->format === 'percent' => 1001,
+            $field->kind === 'float' && $field->format === 'rating' => 41,
+            $field->kind === 'date' => self::UNIQUE_DAYS,
+            $field->format === 'color' => self::COLORS,
+            default => null,
+        };
+    }
+
     /**
      * One row, keyed by column name (without id or timestamps).
      *
@@ -57,23 +89,28 @@ final class Fake
     private static function value(Field $field, int $number, string $first, string $last, bool $isPerson): string|int|float|bool
     {
         return match ($field->kind) {
-            'enum' => self::pick($field->options),
-            'boolean' => mt_rand(1, 10) > 3,
+            // A unique field walks its range by number instead of drawing at random; capacity() says how far that goes.
+            'enum' => $field->unique ? $field->options[$number % count($field->options)] : self::pick($field->options),
+            'boolean' => $field->unique ? $number % 2 === 0 : mt_rand(1, 10) > 3,
             'int' => match (true) {
-                $field->format === 'percent' => mt_rand(0, 100),
-                $field->format === 'rating' => mt_rand(1, 5),
+                $field->format === 'percent' => $field->unique ? $number % 101 : mt_rand(0, 100),
+                $field->format === 'rating' => $field->unique ? 1 + $number % 5 : mt_rand(1, 5),
                 $field->unique => $number,
                 default => mt_rand(0, 500),
             },
             'float' => match (true) {
-                $field->format === 'percent' => round(mt_rand(0, 1000) / 10, 1),
-                $field->format === 'rating' => round(mt_rand(10, 50) / 10, 1),
+                $field->format === 'percent' => round(($field->unique ? $number % 1001 : mt_rand(0, 1000)) / 10, 1),
+                $field->format === 'rating' => round(($field->unique ? 10 + $number % 41 : mt_rand(10, 50)) / 10, 1),
                 $field->unique => round($number + mt_rand(0, 99) / 100, 2),
                 default => round(mt_rand(199, 49999) / 100, 2),
             },
-            'date' => date('Y-m-d', time() - mt_rand(-30, 365) * 86400),
-            'datetime' => date('Y-m-d H:i:s', time() - mt_rand(0, 365 * 86400)),
-            'text' => self::sentence(mt_rand(8, 24)),
+            'date' => $field->unique
+                ? gmdate('Y-m-d', self::EPOCH + ($number % self::UNIQUE_DAYS) * 86400)
+                : date('Y-m-d', time() - mt_rand(-30, 365) * 86400),
+            'datetime' => $field->unique
+                ? gmdate('Y-m-d H:i:s', self::EPOCH + $number)
+                : date('Y-m-d H:i:s', time() - mt_rand(0, 365 * 86400)),
+            'text' => self::sentence(mt_rand(8, 24)).($field->unique ? " {$number}" : ''),
             default => self::string($field, $number, $first, $last, $isPerson),
         };
     }
@@ -86,9 +123,11 @@ final class Fake
             // Always numbered: two people called Ada Okafor must not share an address.
             $field->format === 'email' || str_contains($name, 'email') => strtolower("{$first}.{$last}{$number}@example.com"),
             $field->format === 'url' || str_contains($name, 'website') || str_ends_with($name, 'url') => 'https://example.com/'.strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
-            $field->format === 'tel' || str_contains($name, 'phone') => sprintf('+256 7%02d %03d %03d', mt_rand(0, 99), mt_rand(0, 999), mt_rand(0, 999)),
+            $field->format === 'tel' || str_contains($name, 'phone') => $field->unique
+                ? '+256 7'.str_pad((string) $number, 10, '0', STR_PAD_LEFT)
+                : sprintf('+256 7%02d %03d %03d', mt_rand(0, 99), mt_rand(0, 999), mt_rand(0, 999)),
             $field->format === 'slug' => strtolower(self::pick(self::ADJECTIVES).'-'.self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
-            $field->format === 'color' => sprintf('#%06x', mt_rand(0, 0xFFFFFF)),
+            $field->format === 'color' => sprintf('#%06x', $field->unique ? $number % self::COLORS : mt_rand(0, 0xFFFFFF)),
             in_array($name, ['sku', 'code', 'reference', 'ref', 'number'], true) => strtoupper(substr(self::pick(self::NOUNS), 0, 3)).'-'.str_pad((string) $number, 6, '0', STR_PAD_LEFT),
             $name === 'firstname' => $first,
             $name === 'lastname' => $last,
@@ -100,8 +139,9 @@ final class Fake
             default => ucfirst(self::sentence(mt_rand(2, 4), false)),
         };
 
-        // Formats that carry the number already are unique; everything else gets it appended.
-        if ($field->unique && ! str_contains($value, (string) $number)) {
+        // Emails, URLs, slugs, codes and phone numbers end in the number already, and a colour
+        // is derived from it; everything else gets it appended.
+        if ($field->unique && $field->format !== 'color' && ! preg_match('/'.$number.'(@|$)/', $value)) {
             $value .= " {$number}";
         }
 
