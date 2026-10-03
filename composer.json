@@ -1,8 +1,30 @@
 {
     "name": "nevela/laravel",
-    "description": "Nevela: Laravel as the authority behind Flare's Next.js frontend. Resource-driven generation and a Flare-compatible REST contract.",
+    "description": "Nevela for Laravel: describe a resource once and generate its model, migration, validation, policy and REST API, plus the Next.js dashboard screens for it.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "laravel",
+        "nevela",
+        "generator",
+        "crud",
+        "rest-api",
+        "nextjs",
+        "dashboard",
+        "scaffold"
+    ],
+    "homepage": "https://nevela-docs.vercel.app",
+    "authors": [
+        {
+            "name": "Mark Cole MUKISA",
+            "homepage": "https://github.com/MarkColeMukisa"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/MarkColeMukisa/nevela/issues",
+        "source": "https://github.com/MarkColeMukisa/nevela",
+        "docs": "https://nevela-docs.vercel.app"
+    },
     "require": {
         "php": "^8.2",
         "illuminate/support": "^11.0|^12.0|^13.0",
@@ -13,15 +35,24 @@
     "require-dev": {
         "phpunit/phpunit": "^11.0"
     },
+    "suggest": {
+        "laravel/sanctum": "Required for the token sign-in endpoints and the default auth:sanctum middleware (php artisan install:api)."
+    },
     "autoload": {
-        "psr-4": { "Nevela\\Laravel\\": "src/" }
+        "psr-4": {
+            "Nevela\\Laravel\\": "src/"
+        }
     },
     "autoload-dev": {
-        "psr-4": { "Nevela\\Laravel\\Tests\\": "tests/" }
+        "psr-4": {
+            "Nevela\\Laravel\\Tests\\": "tests/"
+        }
     },
     "extra": {
         "laravel": {
-            "providers": ["Nevela\\Laravel\\NevelaServiceProvider"]
+            "providers": [
+                "Nevela\\Laravel\\NevelaServiceProvider"
+            ]
         }
     },
     "minimum-stability": "stable"
