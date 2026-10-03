@@ -163,18 +163,18 @@ final class ResourceGenerator
             $imports[] = "import {$var} from \"./".Naming::kebab($d->name).'.resource";';
             $names[] = $var;
         }
-        $importLines = implode("\n", $imports);
         $list = implode(', ', $names);
+        // An app with no resources yet still needs the registry to exist and be empty.
+        $body = $names === []
+            ? 'export const resources = [] as const;'
+            : implode("\n", $imports)."\n\nexport { {$list} };\nexport const resources = [{$list}] as const;";
         $m = self::M;
         $e = self::E;
 
         return new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/index.ts', <<<TS
         // Registry of every resource descriptor (maintained by `php artisan nevela:generate`).
         {$m}
-        {$importLines}
-
-        export { {$list} };
-        export const resources = [{$list}] as const;
+        {$body}
         {$e}
 
         TS);

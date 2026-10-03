@@ -62,6 +62,12 @@ final class GeneratorTest extends TestCase
         $this->assertStringContainsString('import orderItemResource from "./order-item.resource";', $registry);
         $this->assertStringContainsString('export const resources = [orderItemResource, productResource] as const;', $registry);
 
+        // A new app has no resources: the registry is empty, not missing.
+        $empty = $generator->registry([])->contents;
+        $this->assertStringContainsString("export const resources = [] as const;\n", $empty);
+        $this->assertStringNotContainsString('import ', $empty);
+        $this->assertStringNotContainsString('export {', $empty);
+
         $pages = [];
         foreach ($generator->pages($item) as $file) {
             $pages[$file->path] = $file;

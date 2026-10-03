@@ -28,13 +28,14 @@ final class GenerateCommand extends Command
 
             return self::FAILURE;
         }
+        // With no descriptors there is still an (empty) route file and web registry to
+        // write, so a new app's dashboard builds before its first resource exists.
+        $status = self::generate($this, $targets, $all, (bool) $this->option('force'));
         if ($all === []) {
             $this->components->warn('No descriptors yet. Start with: php artisan nevela:resource Product --fields="name:string, price:money"');
-
-            return self::SUCCESS;
         }
 
-        return self::generate($this, $targets, $all, (bool) $this->option('force'));
+        return $status;
     }
 
     /** @param list<Descriptor> $targets @param list<Descriptor> $all */
