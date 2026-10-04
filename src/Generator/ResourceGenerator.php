@@ -148,6 +148,86 @@ final class ResourceGenerator
     }
 
     /**
+     * `php nevela <command>` at the top of the project, so nobody has to `cd` into the
+     * Laravel app first. It hands the command to artisan in the same process: the arguments
+     * arrive exactly as they were typed, with no second round of shell quoting.
+     *
+     * @param  string  $api  The Laravel app's folder relative to the project root, e.g. "apps/api"
+     */
+    public function launcher(string $api): GeneratedFile
+    {
+        $api = trim(str_replace('\\', '/', $api), '/');
+        $m = self::M;
+        $e = self::E;
+
+        return new GeneratedFile(GeneratedFile::TARGET_ROOT, 'nevela', <<<PHP
+        #!/usr/bin/env php
+        <?php
+
+        // Run Nevela from the top of the project: php nevela <command>
+        // Maintained by `php artisan nevela:generate`. Add your own shortcuts below the block.
+        {$m}
+        \$api = __DIR__.'/{$api}';
+        \$args = array_slice(\$_SERVER['argv'], 1);
+        \$name = array_shift(\$args) ?? 'help';
+
+        // What you type => the artisan command it runs.
+        \$nevela = ['resource', 'generate', 'seed', 'user', 'update'];
+        \$artisan = ['migrate', 'tinker', 'test', 'serve'];
+
+        if (\$name === 'dev') {
+            // The API and the dashboard together.
+            passthru('node '.escapeshellarg(__DIR__.'/scripts/dev.mjs'), \$status);
+            exit(\$status);
+        }
+
+        if (in_array(\$name, \$nevela, true)) {
+            // A new resource is no use until its table exists, so make it in the same step.
+            if (\$name === 'resource' && ! in_array('--no-migrate', \$args, true)) {
+                \$args[] = '--migrate';
+            }
+            \$args = array_values(array_diff(\$args, ['--no-migrate']));
+            \$command = ['nevela:'.\$name, ...\$args];
+        } elseif (in_array(\$name, \$artisan, true)) {
+            \$command = [\$name, ...\$args];
+        } elseif (\$name === 'artisan') {
+            \$command = \$args; // anything else: php nevela artisan route:list
+        } else {
+            echo <<<'HELP'
+
+              Nevela, from the top of your project.
+
+              php nevela resource Product --fields="name:string, price:money"   add a resource and migrate
+              php nevela generate              regenerate after editing a descriptor
+              php nevela seed Product          fill a resource with records
+              php nevela user                  create someone who can sign in
+              php nevela update                update Nevela and the dashboard
+              php nevela dev                   run the API and the dashboard
+
+              php nevela migrate               php artisan migrate
+              php nevela artisan <command>     any other artisan command
+
+
+            HELP;
+            exit(in_array(\$name, ['help', '--help', '-h'], true) ? 0 : 1);
+        }
+
+        if (! is_file(\$api.'/artisan')) {
+            fwrite(STDERR, "There is no Laravel app at {\$api}.\\n");
+            exit(1);
+        }
+
+        chdir(\$api);
+        \$_SERVER['argv'] = \$argv = ['artisan', ...\$command];
+        \$_SERVER['argc'] = \$argc = count(\$argv);
+
+        require \$api.'/artisan';
+        {$e}
+
+        PHP);
+    }
+
+    /**
      * The web app's registry of every descriptor: what the dashboard's sidebar, home page
      * and stores are built from.
      *

@@ -13,6 +13,13 @@ return [
     */
     'web_path' => env('NEVELA_WEB_PATH', base_path('../web')),
 
+    /*
+    | The top of the project, where the `php nevela` launcher is written. Null works it
+    | out: two folders up when this app is at <project>/apps/<name>. Set a path if yours
+    | is somewhere else, or false to have no launcher.
+    */
+    'root_path' => env('NEVELA_ROOT_PATH'),
+
     /* URL prefix and middleware for generated resource routes (routes/nevela.php). */
     'prefix' => 'api',
     'middleware' => ['api', 'auth:sanctum'],

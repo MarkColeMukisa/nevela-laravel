@@ -20,6 +20,9 @@ final class GeneratedFile
 
     public const TARGET_WEB = 'web';
 
+    /** The top of the project, above the Laravel app and the dashboard. */
+    public const TARGET_ROOT = 'root';
+
     public readonly string $contents;
 
     public function __construct(

@@ -82,6 +82,30 @@ final class GeneratorTest extends TestCase
         $this->assertStringContainsString('<ResourceTable resource={orderItemResource} searchParams={await searchParams} />', $pages[$dir.'page.tsx']->contents);
     }
 
+    public function test_the_root_launcher_is_valid_php_and_points_at_the_laravel_app(): void
+    {
+        $dir = sys_get_temp_dir().'/nevela-launcher-'.bin2hex(random_bytes(4));
+        $file = (new ResourceGenerator)->launcher('apps\\api');
+        $report = (new Writer(['root' => $dir]))->write([$file]);
+
+        $this->assertSame('nevela', $file->path);
+        $this->assertSame('created', $report[0]['status']);
+        $written = file_get_contents("{$dir}/nevela");
+        $this->assertStringStartsWith("#!/usr/bin/env php\n<?php\n", $written);
+        $this->assertStringContainsString("\$api = __DIR__.'/apps/api';", $written);
+        $this->assertStringContainsString("\$command = ['nevela:'.\$name, ...\$args];", $written);
+
+        exec('php -l '.escapeshellarg("{$dir}/nevela").' 2>&1', $out, $code);
+        $this->assertSame(0, $code, implode("\n", $out));
+
+        // With nothing to forward to, it prints help and says so with its exit code.
+        exec('php '.escapeshellarg("{$dir}/nevela").' help 2>&1', $help, $helpCode);
+        $this->assertSame(0, $helpCode);
+        $this->assertStringContainsString('php nevela update', implode("\n", $help));
+        exec('php '.escapeshellarg("{$dir}/nevela").' nonsense 2>&1', $ignored, $unknownCode);
+        $this->assertSame(1, $unknownCode);
+    }
+
     public function test_regeneration_after_adding_a_field_only_touches_generated_blocks(): void
     {
         $dir = sys_get_temp_dir().'/nevela-regen-'.bin2hex(random_bytes(4));

@@ -15,7 +15,8 @@ final class MakeResourceCommand extends Command
         {--fields= : "name:string, sku:string!, price:money, status:enum(draft|live), notes:text?"}
         {--icon= : Lucide icon name for the dashboard, e.g. package}
         {--group= : Sidebar group in the dashboard}
-        {--force : Overwrite an existing descriptor}';
+        {--force : Overwrite an existing descriptor}
+        {--migrate : Run the new migration straight away}';
 
     protected $description = 'Describe a resource once, then generate its Laravel API and Flare dashboard descriptor';
 
@@ -50,8 +51,14 @@ final class MakeResourceCommand extends Command
         Nevela::forget();
         $status = GenerateCommand::generate($this, [$descriptor], Nevela::all(), false);
 
+        if ($status === self::SUCCESS && $this->option('migrate')) {
+            $status = $this->call('migrate');
+        }
+
         $this->newLine();
-        $this->line('  Next: <fg=cyan>php artisan migrate</>, then tighten <fg=cyan>app/Policies/'.$descriptor->name.'Policy.php</>.');
+        $this->line($this->option('migrate')
+            ? '  Next: tighten <fg=cyan>app/Policies/'.$descriptor->name.'Policy.php</>.'
+            : '  Next: <fg=cyan>php artisan migrate</>, then tighten <fg=cyan>app/Policies/'.$descriptor->name.'Policy.php</>.');
         $this->line("  API:  GET|POST /{$this->prefix()}{$descriptor->slug} · GET|PUT|PATCH|DELETE /{$this->prefix()}{$descriptor->slug}/{id} · GET /{$this->prefix()}{$descriptor->slug}/_stats");
 
         return $status;

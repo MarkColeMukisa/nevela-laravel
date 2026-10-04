@@ -38,6 +38,25 @@ final class GenerateCommand extends Command
         return $status;
     }
 
+    /**
+     * The top of the project, where `php nevela` lives: nevela.root_path if set, otherwise
+     * two levels up when the app sits in <project>/apps/<name>. Null for a Laravel app that
+     * isn't inside such a project, which gets no launcher.
+     */
+    public static function projectRoot(): ?string
+    {
+        $configured = config('nevela.root_path');
+        if ($configured === false) {
+            return null;
+        }
+        if (is_string($configured) && $configured !== '') {
+            return is_dir($configured) ? rtrim((string) realpath($configured), '/\\') : null;
+        }
+        $base = base_path();
+
+        return basename(dirname($base)) === 'apps' ? dirname($base, 2) : null;
+    }
+
     /** @param list<Descriptor> $targets @param list<Descriptor> $all */
     public static function generate(Command $command, array $targets, array $all, bool $force): int
     {
@@ -53,11 +72,22 @@ final class GenerateCommand extends Command
         if (($web = config('nevela.web_path')) && is_dir($web)) {
             $roots['web'] = $web;
         }
+        if ($root = self::projectRoot()) {
+            $roots['root'] = $root;
+            $apiFromRoot = ltrim(str_replace('\\', '/', substr(base_path(), strlen($root))), '/');
+            $files[] = $generator->launcher($apiFromRoot);
+        }
 
         $report = (new Writer($roots, $force))->write($files);
         $edited = 0;
+        // Shown relative to the Laravel app, like the dashboard's files: ../../nevela
+        $rootShown = isset($apiFromRoot) ? rtrim(str_repeat('../', substr_count($apiFromRoot, '/') + 1), '/') : '';
         foreach ($report as $row) {
-            $path = str_replace([base_path().DIRECTORY_SEPARATOR, '\\'], ['', '/'], $row['path']);
+            $path = $row['path'];
+            if (isset($roots['root']) && str_starts_with($path, $roots['root'].DIRECTORY_SEPARATOR) && ! str_starts_with($path, base_path().DIRECTORY_SEPARATOR)) {
+                $path = $rootShown.substr($path, strlen($roots['root']));
+            }
+            $path = str_replace([base_path().DIRECTORY_SEPARATOR, '\\'], ['', '/'], $path);
             $command->components->twoColumnDetail($path, match ($row['status']) {
                 'created' => '<fg=green>created</>',
                 'updated' => '<fg=blue>updated</>',
