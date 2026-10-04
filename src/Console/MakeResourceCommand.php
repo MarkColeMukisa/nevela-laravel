@@ -43,6 +43,14 @@ final class MakeResourceCommand extends Command
 
             return self::FAILURE;
         }
+        // Checked before anything is written: a relation needs the resource it points at.
+        foreach ($descriptor->fields as $field) {
+            if ($field->kind === 'belongsTo' && $field->target !== $descriptor->name && ! is_file($dir.DIRECTORY_SEPARATOR.Naming::kebab((string) $field->target).'.json')) {
+                $this->components->error("{$field->name} belongs to {$field->target}, which doesn't exist yet. Create it first: php artisan nevela:resource {$field->target} --fields=\"name:string\"");
+
+                return self::FAILURE;
+            }
+        }
         if (! is_dir($dir)) {
             mkdir($dir, 0775, true);
         }

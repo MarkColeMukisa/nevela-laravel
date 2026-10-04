@@ -7,6 +7,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Fake;
@@ -63,7 +64,29 @@ final class SeedCommand extends Command
             }
         }
 
+        // --fresh deletes first, and a record others are required to belong to can't be deleted.
+        // Said here, before any placeholder pictures are made for a run that can't happen.
+        if ($fresh) {
+            foreach (Nevela::all() as $other) {
+                foreach ($other->fields as $field) {
+                    if ($field->kind === 'belongsTo' && $field->target === $resource->name && $field->required && $other->name !== $resource->name
+                        && ($children = (int) DB::table($other->table)->count()) > 0) {
+                        $this->components->error(number_format($children)." {$other->pluralLabel} belong to the {$resource->pluralLabel} that --fresh would delete. Remove them first, or seed without --fresh.");
+
+                        return self::FAILURE;
+                    }
+                }
+            }
+        }
+
         $started = microtime(true);
+        try {
+            $pools = $this->pools($resource);
+        } catch (InvalidArgumentException $e) {
+            $this->components->error($e->getMessage());
+
+            return self::FAILURE;
+        }
         $removed = 0;
         $bar = $this->output->createProgressBar($count);
         try {
@@ -74,7 +97,7 @@ final class SeedCommand extends Command
                 $offset = $fresh && $attempt === 1 ? 0 : mt_rand(0, self::BLOCKS - 1) * self::MAX_COUNT;
                 $bar->start();
                 try {
-                    $removed = DB::transaction(fn () => $this->fill($resource, $count, $chunk, $offset, $fresh, $bar));
+                    $removed = DB::transaction(fn () => $this->fill($resource, $count, $chunk, $offset, $fresh, $bar, $pools));
                     break;
                 } catch (UniqueConstraintViolationException $e) {
                     if ($attempt === self::ATTEMPTS) {
@@ -103,8 +126,47 @@ final class SeedCommand extends Command
         return self::SUCCESS;
     }
 
-    /** Runs inside the transaction: the optional delete and every insert succeed or fail together. */
-    private function fill(Descriptor $resource, int $count, int $chunk, int $offset, bool $fresh, ProgressBar $bar): int
+    /**
+     * What a relation or an image field can be filled with: the records that exist to point
+     * at, and a handful of pictures made for the purpose.
+     *
+     * @return array<string, list<string>>
+     *
+     * @throws InvalidArgumentException when a required field has nothing to draw from
+     */
+    private function pools(Descriptor $resource): array
+    {
+        $pools = [];
+        foreach ($resource->fields as $field) {
+            if ($field->kind === 'belongsTo') {
+                $target = $field->target === $resource->name ? $resource : Nevela::resource((string) $field->target);
+                $ids = DB::table($target->table)->inRandomOrder()->limit(1000)->pluck('id')->map(fn ($id) => (string) $id)->all();
+                if ($field->unique) {
+                    throw new InvalidArgumentException("\"{$field->name}\" is unique, so each {$target->label} can be used once. The seeder doesn't fill one-to-one relations; add those records yourself.");
+                }
+                if ($ids === [] && $field->required && $target->name !== $resource->name) {
+                    throw new InvalidArgumentException("Every {$resource->label} needs a {$target->label}, and there are none yet. Seed them first: php artisan nevela:seed {$target->name}");
+                }
+                $pools[$field->name] = $ids;
+            } elseif ($field->kind === 'file') {
+                $pools[$field->name] = $field->isImage() ? Uploads::placeholders($resource, $field) : [];
+                if ($pools[$field->name] === [] && $field->required) {
+                    throw new InvalidArgumentException($field->isImage()
+                        ? "\"{$field->name}\" is a required image, and PHP's GD extension isn't installed to make placeholder pictures with."
+                        : "\"{$field->name}\" is a required file, which the seeder can't make up. Make it optional ({$field->name}:file(…)?) or add records yourself.");
+                }
+            }
+        }
+
+        return $pools;
+    }
+
+    /**
+     * Runs inside the transaction: the optional delete and every insert succeed or fail together.
+     *
+     * @param  array<string, list<string>>  $pools
+     */
+    private function fill(Descriptor $resource, int $count, int $chunk, int $offset, bool $fresh, ProgressBar $bar, array $pools = []): int
     {
         $removed = $fresh ? DB::table($resource->table)->delete() : 0;
         $now = time();
@@ -113,7 +175,7 @@ final class SeedCommand extends Command
             for ($i = $done; $i < min($count, $done + $chunk); $i++) {
                 // Spread over the last 60 days, so the dashboard's "this week" and trend have something to show.
                 $created = date('Y-m-d H:i:s', $now - mt_rand(0, 60 * 86400));
-                $rows[] = ['id' => (string) Str::uuid7()] + Fake::row($resource, $offset + $i + 1) + ['created_at' => $created, 'updated_at' => $created];
+                $rows[] = ['id' => (string) Str::uuid7()] + Fake::row($resource, $offset + $i + 1, $pools) + ['created_at' => $created, 'updated_at' => $created];
             }
             DB::table($resource->table)->insert($rows);
             $bar->advance(count($rows));

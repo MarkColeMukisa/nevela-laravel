@@ -27,7 +27,7 @@ final class TemplateSource
     private const GITHUB = 'https://codeload.github.com/MarkColeMukisa/nevela/tar.gz/refs/tags/v%s';
 
     /** Never part of an app's dashboard: build output, installs and local settings. */
-    private const NEVER = ['node_modules', '.next', '.env.local', 'tsconfig.tsbuildinfo', 'next-env.d.ts'];
+    private const NEVER = ['node_modules', '.next', '.env.local', 'tsconfig.tsbuildinfo', 'next-env.d.ts', 'AGENTS.md', 'CLAUDE.md'];
 
     /**
      * @return array{files: array<string, string>, from: string} path => contents, and where it came from

@@ -114,7 +114,7 @@ final class GeneratorTest extends TestCase
         (new Writer($roots))->write($generator->forResource($this->product(), '2026_10_02_000000'));
 
         $model = "{$dir}/api/app/Models/Product.php";
-        file_put_contents($model, str_replace('// Relationships', "public function label(): string { return \$this->name; }\n    // Relationships", file_get_contents($model)));
+        file_put_contents($model, str_replace('// Your own relationships', "public function label(): string { return \$this->name; }\n    // Your own relationships", file_get_contents($model)));
 
         $more = Descriptor::fromSpec('Product', 'name:string, sku:string!, description:text?, price:money, stock:int?, active:boolean, kind:enum(stock|digital), launchOn:date?, website:url?, featured:boolean', 'package', 'Catalogue');
         $report = (new Writer($roots))->write($generator->forResource($more, '2026_10_03_000000'));

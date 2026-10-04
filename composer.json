@@ -36,7 +36,9 @@
         "phpunit/phpunit": "^11.0"
     },
     "suggest": {
-        "laravel/sanctum": "Required for the token sign-in endpoints and the default auth:sanctum middleware (php artisan install:api)."
+        "laravel/sanctum": "Required for the token sign-in endpoints and the default auth:sanctum middleware (php artisan install:api).",
+        "ext-gd": "Optimises uploaded images: resizing, WebP and renditions. Without it images are stored as uploaded.",
+        "ext-exif": "Turns phone photos the right way up before their metadata is removed."
     },
     "autoload": {
         "psr-4": {

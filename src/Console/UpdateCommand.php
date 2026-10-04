@@ -45,7 +45,31 @@ final class UpdateCommand extends Command
             $this->modernizeDevScript();
         }
 
-        return $this->updateDashboard($check);
+        $status = $this->updateDashboard($check);
+
+        // A new version may bring a table of its own (uploads did). Say so, don't run it:
+        // changing a database is the developer's call.
+        if (! $check && ($pending = $this->pendingMigrations()) > 0) {
+            $this->newLine();
+            $this->components->warn("{$pending} migration(s) have not been run. Run them before using the app: php nevela migrate");
+        }
+
+        return $status;
+    }
+
+    private function pendingMigrations(): int
+    {
+        try {
+            $migrator = app('migrator');
+            if (! $migrator->repositoryExists()) {
+                return 0;
+            }
+            $files = $migrator->getMigrationFiles([...$migrator->paths(), database_path('migrations')]);
+
+            return count(array_diff(array_keys($files), $migrator->getRepository()->getRan()));
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     /**

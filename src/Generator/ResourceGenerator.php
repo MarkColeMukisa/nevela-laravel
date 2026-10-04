@@ -19,22 +19,75 @@ final class ResourceGenerator
 
     private const E = '// '.Writer::END;
 
-    /** @return list<GeneratedFile> */
-    public function forResource(Descriptor $d, ?string $timestamp = null): array
+    /**
+     * @param  list<Descriptor>  $all  Every resource in the app: a relation is written on both ends
+     * @return list<GeneratedFile>
+     */
+    public function forResource(Descriptor $d, ?string $timestamp = null, array $all = []): array
     {
         $timestamp ??= date('Y_m_d_His');
         $api = GeneratedFile::TARGET_API;
 
         return [
-            new GeneratedFile($api, "app/Models/{$d->name}.php", $this->model($d)),
-            new GeneratedFile($api, "database/migrations/{$timestamp}_create_{$d->table}_table.php", $this->migration($d), GeneratedFile::MODE_ONCE, "database/migrations/*_create_{$d->table}_table.php"),
-            new GeneratedFile($api, "app/Http/Requests/Nevela/{$d->name}Request.php", $this->request($d)),
+            new GeneratedFile($api, "app/Models/{$d->name}.php", $this->model($d, $all)),
+            new GeneratedFile($api, "database/migrations/{$timestamp}_create_{$d->table}_table.php", $this->migration($d, $all), GeneratedFile::MODE_ONCE, "database/migrations/*_create_{$d->table}_table.php"),
+            new GeneratedFile($api, "app/Http/Requests/Nevela/{$d->name}Request.php", $this->request($d, $all)),
             new GeneratedFile($api, "app/Http/Resources/Nevela/{$d->name}Resource.php", $this->resource($d)),
-            new GeneratedFile($api, "app/Http/Controllers/Api/{$d->name}Controller.php", $this->controller($d)),
+            new GeneratedFile($api, "app/Http/Controllers/Api/{$d->name}Controller.php", $this->controller($d, $all)),
             new GeneratedFile($api, "app/Policies/{$d->name}Policy.php", $this->policy($d), GeneratedFile::MODE_ONCE),
-            new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/'.Naming::kebab($d->name).'.resource.ts', $this->typescript($d)),
+            new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/'.Naming::kebab($d->name).'.resource.ts', $this->typescript($d, $all)),
             ...$this->pages($d),
         ];
+    }
+
+    /**
+     * The resources that point at this one, each with the field that does it and the name
+     * the relation gets here: a Category's Products are `products`. A second field from
+     * the same resource is named after itself (`productsAsFeaturedCategory`), and a name
+     * already taken by one of this resource's own fields is left out.
+     *
+     * @param  list<Descriptor>  $all
+     * @return list<array{resource: Descriptor, field: Field, name: string}>
+     */
+    public function children(Descriptor $d, array $all): array
+    {
+        $taken = [];
+        foreach ($d->fields as $field) {
+            $taken[$field->name] = true;
+            if ($field->kind === 'belongsTo') {
+                $taken[$field->relation()] = true;
+            }
+        }
+        $children = [];
+        usort($all, fn (Descriptor $a, Descriptor $b) => strcmp($a->name, $b->name));
+        foreach ($all as $other) {
+            $plural = Naming::camel(Naming::plural($other->name));
+            foreach ($other->fields as $field) {
+                if ($field->kind !== 'belongsTo' || $field->target !== $d->name) {
+                    continue;
+                }
+                $name = isset($taken[$plural]) ? $plural.'As'.ucfirst($field->relation()) : $plural;
+                if (isset($taken[$name])) {
+                    continue;
+                }
+                $taken[$name] = true;
+                $children[] = ['resource' => $other, 'field' => $field, 'name' => $name];
+            }
+        }
+
+        return $children;
+    }
+
+    /** @param list<Descriptor> $all */
+    private function tableOf(string $name, Descriptor $d, array $all): string
+    {
+        foreach ([$d, ...$all] as $candidate) {
+            if ($candidate->name === $name) {
+                return $candidate->table;
+            }
+        }
+
+        return Naming::snake(Naming::plural($name));
     }
 
     /**
@@ -288,8 +341,31 @@ final class ResourceGenerator
         PHP);
     }
 
-    public function model(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function model(Descriptor $d, array $all = []): string
     {
+        $relations = [];
+        foreach ($d->fields as $f) {
+            if ($f->kind === 'belongsTo') {
+                $relations[] = <<<PHP
+
+            public function {$f->relation()}(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+            {
+                return \$this->belongsTo({$f->target}::class, '{$f->column()}');
+            }
+        PHP;
+            }
+        }
+        foreach ($this->children($d, $all) as $child) {
+            $relations[] = <<<PHP
+
+            public function {$child['name']}(): \Illuminate\Database\Eloquent\Relations\HasMany
+            {
+                return \$this->hasMany({$child['resource']->name}::class, '{$child['field']->column()}');
+            }
+        PHP;
+        }
+        $relationBlock = $relations ? "\n".implode("\n", array_map(fn (string $r) => rtrim($r), $relations)) : '';
         $fillable = implode(', ', array_map(fn (Field $f) => "'{$f->column()}'", $d->fields));
         $casts = [];
         foreach ($d->fields as $f) {
@@ -331,21 +407,33 @@ final class ResourceGenerator
                 return [
         {$castBlock}
                 ];
-            }
+            }{$relationBlock}
             {$e}
 
-            // Relationships, scopes and accessors go here — outside the generated block.
+            // Your own relationships, scopes and accessors go here — outside the generated block.
         }
 
         PHP;
     }
 
-    public function migration(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function migration(Descriptor $d, array $all = []): string
     {
         $columns = [];
         foreach ($d->fields as $f) {
             $c = $f->column();
+            if ($f->kind === 'belongsTo') {
+                // A required parent can't be deleted while it has children; an optional one lets go of them.
+                $columns[] = "            \$table->foreignUuid('{$c}')"
+                    .($f->required ? '' : '->nullable()')
+                    .($f->unique ? '->unique()' : '->index()')
+                    ."->constrained('{$this->tableOf((string) $f->target, $d, $all)}')"
+                    .($f->required ? '' : '->nullOnDelete()').';';
+
+                continue;
+            }
             $line = match (true) {
+                $f->kind === 'file' => "\$table->string('{$c}', 512)",
                 $f->kind === 'text' => "\$table->text('{$c}')",
                 $f->kind === 'int' => "\$table->integer('{$c}')",
                 $f->kind === 'float' && $f->format === 'money' => "\$table->decimal('{$c}', 12, 2)",
@@ -396,14 +484,15 @@ final class ResourceGenerator
         PHP;
     }
 
-    public function request(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function request(Descriptor $d, array $all = []): string
     {
         $var = $d->variable();
         $param = $d->routeParameter();
         $rules = [];
         $columns = [];
         foreach ($d->fields as $f) {
-            $rules[] = "            '{$f->name}' => [".implode(', ', $this->rules($d, $f)).'],';
+            $rules[] = "            '{$f->name}' => [".implode(', ', $this->rules($d, $f, $all)).'],';
             $columns[] = "'{$f->name}' => '{$f->column()}'";
         }
         $ruleLines = implode("\n", $rules);
@@ -456,11 +545,16 @@ final class ResourceGenerator
         PHP;
     }
 
-    /** @return list<string> PHP expressions */
-    private function rules(Descriptor $d, Field $f): array
+    /**
+     * @param  list<Descriptor>  $all
+     * @return list<string> PHP expressions
+     */
+    private function rules(Descriptor $d, Field $f, array $all = []): array
     {
         $rules = [$f->required ? "'required'" : "'nullable'"];
         $type = match (true) {
+            $f->kind === 'belongsTo' => ["'uuid'", "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
+            $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", "'max:255'"],
             $f->format === 'url' => ["'url'", "'max:2048'"],
             $f->format === 'tel' => ["'string'", "'max:32'"],
@@ -495,6 +589,10 @@ final class ResourceGenerator
                 default => "\$this->{$f->column()}",
             };
             $lines[] = "            '{$f->name}' => {$value},";
+            if ($f->kind === 'file') {
+                // The key is what a record stores; this is what a page needs to show it.
+                $lines[] = "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::file(\$this->{$f->column()}),";
+            }
         }
         $body = implode("\n", $lines);
         $m = self::M;
@@ -529,9 +627,24 @@ final class ResourceGenerator
         PHP;
     }
 
-    public function controller(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function controller(Descriptor $d, array $all = []): string
     {
         $var = $d->variable();
+        $guards = [];
+        foreach ($this->children($d, $all) as $child) {
+            if (! $child['field']->required) {
+                continue; // the database clears an optional link itself
+            }
+            $label = strtolower($child['resource']->pluralLabel);
+            $guards[] = <<<PHP
+                if ((\$count = \\App\\Models\\{$child['resource']->name}::query()->where('{$child['field']->column()}', \${$var}->getKey())->count()) > 0) {
+                    return response()->json(['error' => "{\$count} {$label} belong to this {$this->lower($d->label)}. Move or delete them first."], 409);
+                }
+        PHP;
+        }
+        $guardBlock = $guards ? "\n".implode("\n", array_map(fn (string $g) => rtrim($g), $guards)) : '';
+        $destroyReturn = $guards ? 'Response|JsonResponse' : 'Response';
         $m = self::M;
         $e = self::E;
 
@@ -595,9 +708,9 @@ final class ResourceGenerator
                 return new {$d->name}Resource(\${$var}->refresh());
             }
 
-            public function destroy({$d->name} \${$var}): Response
+            public function destroy({$d->name} \${$var}): {$destroyReturn}
             {
-                Gate::authorize('delete', \${$var});
+                Gate::authorize('delete', \${$var});{$guardBlock}
                 \${$var}->delete();
 
                 return response()->noContent();
@@ -606,6 +719,11 @@ final class ResourceGenerator
         }
 
         PHP;
+    }
+
+    private function lower(string $label): string
+    {
+        return strtolower($label);
     }
 
     public function policy(Descriptor $d): string
@@ -657,7 +775,8 @@ final class ResourceGenerator
         PHP;
     }
 
-    public function typescript(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function typescript(Descriptor $d, array $all = []): string
     {
         $j = fn (mixed $v) => json_encode($v, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         $config = [
@@ -683,14 +802,23 @@ final class ResourceGenerator
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
+                // What the migration does when the parent goes: an optional link is cleared.
+                'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
+                // A picture is worth a column in the table; other files are not.
+                'list' => $f->isImage() ? 'true' : null,
             ]);
             $opts = $options ? '{ '.implode(', ', array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options)).' }' : '';
             $call = match (true) {
+                $f->kind === 'belongsTo' => "field.belongsTo({$j($f->target)}".($opts ? ", {$opts}" : '').')',
+                $f->kind === 'file' => "field.file({$j($f->accept)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'enum' => "field.enum({$j($f->options)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'string' && $f->format !== null => "field.{$f->format}({$opts})",
                 default => "field.{$f->kind}({$opts})",
             };
             $fields[] = "    {$f->name}: {$call},";
+        }
+        foreach ($this->children($d, $all) as $child) {
+            $fields[] = "    {$child['name']}: field.hasMany({$j($child['resource']->name)}, { foreignKey: {$j($child['field']->name)} }),";
         }
         $configLines = implode("\n", $config);
         $fieldLines = implode("\n", $fields);

@@ -20,6 +20,9 @@ final class Fake
 
     private const NOUNS = ['Lamp', 'Chair', 'Kettle', 'Backpack', 'Notebook', 'Speaker', 'Bottle', 'Desk', 'Jacket', 'Camera', 'Grinder', 'Planter', 'Monitor', 'Keyboard', 'Blanket', 'Mug'];
 
+    /** What a shop files things under: names for a Category, Collection, Department or Tag. */
+    private const GROUPS = ['Kitchen', 'Outdoor', 'Office', 'Lighting', 'Audio', 'Travel', 'Home', 'Garden', 'Fitness', 'Accessories', 'Stationery', 'Bedroom', 'Toys', 'Tools', 'Beauty', 'Pets'];
+
     private const COMPANIES = ['Acme', 'Globex', 'Initech', 'Northwind', 'Brightline', 'Vandelay', 'Umbrella', 'Hooli', 'Stark', 'Wayne'];
 
     private const CITIES = ['Kampala', 'Nairobi', 'Lagos', 'Accra', 'London', 'Berlin', 'Toronto', 'Tokyo', 'Lisbon', 'Austin', 'Mumbai', 'Sydney'];
@@ -64,13 +67,15 @@ final class Fake
      * One row, keyed by column name (without id or timestamps).
      *
      * @param  int  $number  A number no other seeded row of this table shares: what keeps unique fields unique.
+     * @param  array<string, list<string>>  $pools  Values to draw from, by field name: the ids a belongsTo may point at, the keys of files that exist.
      * @return array<string, string|int|float|bool|null>
      */
-    public static function row(Descriptor $resource, int $number): array
+    public static function row(Descriptor $resource, int $number, array $pools = []): array
     {
         $first = self::pick(self::FIRST);
         $last = self::pick(self::LAST);
         $isPerson = isset($resource->fields['email']) || isset($resource->fields['firstName']);
+        $isGroup = (bool) preg_match('/(Category|Collection|Department|Tag|Genre|Brand)$/', $resource->name);
 
         $row = [];
         foreach ($resource->fields as $field) {
@@ -80,7 +85,25 @@ final class Fake
 
                 continue;
             }
+            // A relation or a file can't be invented: it has to be one that exists.
+            if (in_array($field->kind, ['belongsTo', 'file'], true)) {
+                $pool = $pools[$field->name] ?? [];
+                $row[$field->column()] = $pool === [] ? null : self::pick($pool);
+
+                continue;
+            }
             $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson);
+        }
+
+        // A category is called Kitchen, not Compact Lamp, and its slug follows its name.
+        $name = $resource->fields['name'] ?? null;
+        if ($isGroup && $name !== null && $name->kind === 'string' && $name->format === null) {
+            $group = self::GROUPS[($number - 1) % count(self::GROUPS)];
+            $row['name'] = $name->unique ? "{$group} {$number}" : $group;
+            $slug = $resource->fields['slug'] ?? null;
+            if ($slug !== null && $slug->format === 'slug' && isset($row['slug'])) {
+                $row['slug'] = strtolower($group).($slug->unique ? "-{$number}" : '');
+            }
         }
 
         return $row;

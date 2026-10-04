@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
+use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\ListQuery;
 use Nevela\Laravel\Support\Naming;
@@ -101,6 +102,13 @@ final class Nevela
 
         $page = $query->paginate($list->perPage, ['*'], 'page', $list->page);
 
+        // One query for every file on the page, instead of one per record.
+        foreach ($resource->fields as $field) {
+            if ($field->kind === 'file') {
+                Uploads::preload($page->getCollection()->pluck($field->column()));
+            }
+        }
+
         return response()->json([
             'data' => $resourceClass::collection($page->getCollection())->resolve($request),
             'meta' => [
@@ -149,6 +157,17 @@ final class Nevela
             'previous' => $base()->where('created_at', '>=', $before)->where('created_at', '<', $since)->count(),
             'values' => (object) $values,
         ]);
+    }
+
+    /**
+     * What a client needs to show a stored file: its address, size and dimensions, and
+     * each rendition's. Generated API resources send it beside the key, as `<field>File`.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function file(?string $key): ?array
+    {
+        return Uploads::ref($key);
     }
 
     /** Whether a request is one Nevela answers (so errors use Flare's shape). */

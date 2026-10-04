@@ -61,9 +61,32 @@ final class GenerateCommand extends Command
     public static function generate(Command $command, array $targets, array $all, bool $force): int
     {
         $generator = new ResourceGenerator;
-        $files = [];
+        $byName = [];
+        foreach ($all as $descriptor) {
+            $byName[$descriptor->name] = $descriptor;
+        }
+
+        // A relation is written on both ends, so the resource a new one points at is
+        // regenerated with it: Category gains its products when Product arrives.
+        $queue = [];
         foreach ($targets as $descriptor) {
-            array_push($files, ...$generator->forResource($descriptor));
+            $queue[$descriptor->name] = $descriptor;
+            foreach ($descriptor->fields as $field) {
+                if ($field->kind !== 'belongsTo') {
+                    continue;
+                }
+                if (! isset($byName[$field->target])) {
+                    $command->components->error("{$descriptor->name}.{$field->name} belongs to {$field->target}, which doesn't exist yet. Create it first: php artisan nevela:resource {$field->target} --fields=\"name:string\"");
+
+                    return self::FAILURE;
+                }
+                $queue[$field->target] ??= $byName[$field->target];
+            }
+        }
+
+        $files = [];
+        foreach ($queue as $descriptor) {
+            array_push($files, ...$generator->forResource($descriptor, null, $all));
         }
         $files[] = $generator->routes($all);
         $files[] = $generator->registry($all);

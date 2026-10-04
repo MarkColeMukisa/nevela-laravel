@@ -41,8 +41,11 @@ abstract class ResourceRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $known = array_keys($this->columns());
+            // A file field is sent back with its details beside it (imageFile for image);
+            // a client that echoes a record shouldn't be refused for it.
+            $computed = array_map(fn (string $field) => $field.'File', $known);
             foreach (array_keys($this->json()->all() ?: $this->request->all()) as $key) {
-                if (! in_array($key, $known, true) && ! in_array($key, self::READ_ONLY, true)) {
+                if (! in_array($key, $known, true) && ! in_array($key, self::READ_ONLY, true) && ! in_array($key, $computed, true)) {
                     $validator->errors()->add((string) $key, 'Unknown field.');
                 }
             }

@@ -10,13 +10,16 @@ use InvalidArgumentException;
  */
 final class Field
 {
-    public const KINDS = ['string', 'text', 'int', 'float', 'boolean', 'date', 'datetime', 'enum'];
+    public const KINDS = ['string', 'text', 'int', 'float', 'boolean', 'date', 'datetime', 'enum', 'belongsTo', 'file'];
 
     public const FORMATS = [
         'string' => ['email', 'url', 'tel', 'slug', 'color'],
         'float' => ['money', 'percent', 'rating'],
         'int' => ['percent', 'rating'],
     ];
+
+    /** What a file field may accept, in Flare's categories. The MIME types are in Media\FileTypes. */
+    public const ACCEPTS = ['any', 'image', 'pdf', 'video', 'audio', 'text', 'csv', 'document', 'spreadsheet', 'archive'];
 
     /** Shorthand types accepted by --fields, mapped to kind + format. */
     private const ALIASES = [
@@ -34,6 +37,9 @@ final class Field
 
     /**
      * @param  list<string>  $options  enum values
+     * @param  string|null  $target  belongsTo: the resource this points at, e.g. "Category"
+     * @param  list<string>  $accept  file: the categories it takes, e.g. ["image"]
+     * @param  string|null  $profile  file: the image profile uploads are optimised with (config nevela.uploads.profiles)
      */
     public function __construct(
         public readonly string $name,
@@ -43,6 +49,9 @@ final class Field
         public readonly bool $unique = false,
         public readonly array $options = [],
         public readonly ?string $label = null,
+        public readonly ?string $target = null,
+        public readonly array $accept = [],
+        public readonly ?string $profile = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -64,32 +73,73 @@ final class Field
                 throw new InvalidArgumentException("Enum value \"{$option}\" on \"{$name}\" may only use letters, digits, _ and -.");
             }
         }
+        if ($kind === 'belongsTo') {
+            if ($target === null || ! preg_match('/^[A-Z][A-Za-z0-9]*$/', $target)) {
+                throw new InvalidArgumentException("\"{$name}\" needs the resource it belongs to, e.g. category:belongsTo(Category).");
+            }
+            if (! str_ends_with($name, 'Id') || $name === 'Id') {
+                throw new InvalidArgumentException("A belongsTo field holds an id, so its name ends in \"Id\": {$name}Id.");
+            }
+        }
+        if ($kind === 'file') {
+            if ($accept === []) {
+                throw new InvalidArgumentException("File field \"{$name}\" needs what it accepts, e.g. {$name}:image or {$name}:file(pdf|image).");
+            }
+            foreach ($accept as $category) {
+                if (! in_array($category, self::ACCEPTS, true)) {
+                    throw new InvalidArgumentException("\"{$category}\" is not something \"{$name}\" can accept. Use: ".implode(', ', self::ACCEPTS).'.');
+                }
+            }
+            if ($unique) {
+                throw new InvalidArgumentException("File field \"{$name}\" can't be unique.");
+            }
+            if ($profile !== null && ! preg_match('/^[a-z][a-z0-9-]*$/', $profile)) {
+                throw new InvalidArgumentException("Image profile \"{$profile}\" on \"{$name}\" may only use lower-case letters, digits and -.");
+            }
+        }
     }
 
     /**
      * Parse one `name:type` token. Suffix `?` = optional (nullable), `!` = unique; both may be combined.
-     * Enums: `status:enum(draft|published)`.
+     *
+     *   status:enum(draft|published)
+     *   category:belongsTo(Category)      stored as categoryId
+     *   image:image                       an optimised image; image:image(product) names a profile
+     *   manual:file(pdf|document)         any other upload
      */
     public static function parse(string $token): self
     {
         $token = trim($token);
-        if (! preg_match('/^([A-Za-z][A-Za-z0-9_]*):([a-z]+)(?:\(([^)]*)\))?([?!]{0,2})$/', $token, $m)) {
+        if (! preg_match('/^([A-Za-z][A-Za-z0-9_]*):([A-Za-z_]+)(?:\(([^)]*)\))?([?!]{0,2})$/', $token, $m)) {
             throw new InvalidArgumentException("Invalid field \"{$token}\". Expected name:type, e.g. price:money or status:enum(draft|live)?");
         }
         [, $name, $type, $args, $suffix] = $m + [3 => '', 4 => ''];
         $name = Naming::camel($name);
+        $required = ! str_contains($suffix, '?');
+        $unique = str_contains($suffix, '!');
+        $list = array_values(array_filter(array_map('trim', explode('|', $args)), fn ($v) => $v !== ''));
 
         if ($type === 'enum') {
-            $options = array_values(array_filter(array_map('trim', explode('|', $args)), fn ($v) => $v !== ''));
+            return new self($name, 'enum', null, $required, $unique, $list);
+        }
+        if (in_array($type, ['belongsTo', 'belongs_to', 'belongsto'], true)) {
+            // "category" and "categoryId" both mean the column category_id.
+            $name = str_ends_with($name, 'Id') ? $name : $name.'Id';
 
-            return new self($name, 'enum', null, ! str_contains($suffix, '?'), str_contains($suffix, '!'), $options);
+            return new self($name, 'belongsTo', null, $required, $unique, target: $list[0] ?? Naming::pascal(substr($name, 0, -2)));
+        }
+        if ($type === 'image') {
+            return new self($name, 'file', null, $required, $unique, accept: ['image'], profile: $list[0] ?? null);
+        }
+        if ($type === 'file') {
+            return new self($name, 'file', null, $required, $unique, accept: $list ?: ['any']);
         }
         if (! isset(self::ALIASES[$type])) {
-            throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b).');
+            throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
         }
         [$kind, $format] = self::ALIASES[$type];
 
-        return new self($name, $kind, $format, ! str_contains($suffix, '?'), str_contains($suffix, '!'));
+        return new self($name, $kind, $format, $required, $unique);
     }
 
     /** @param array<string, mixed> $data */
@@ -103,6 +153,9 @@ final class Field
             (bool) ($data['unique'] ?? false),
             array_values($data['options'] ?? []),
             $data['label'] ?? null,
+            $data['target'] ?? null,
+            array_values($data['accept'] ?? []),
+            $data['profile'] ?? null,
         );
     }
 
@@ -113,6 +166,9 @@ final class Field
             'kind' => $this->kind,
             'format' => $this->format,
             'options' => $this->options ?: null,
+            'target' => $this->target,
+            'accept' => $this->accept ?: null,
+            'profile' => $this->profile,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,
@@ -126,17 +182,30 @@ final class Field
 
     public function label(): string
     {
-        return $this->label ?? Naming::humanize($this->name);
+        // "categoryId" reads as "Category", which is what the picker shows.
+        return $this->label ?? Naming::humanize($this->kind === 'belongsTo' ? substr($this->name, 0, -2) : $this->name);
+    }
+
+    /** belongsTo: the name of the relation on the model, e.g. "category" for categoryId. */
+    public function relation(): string
+    {
+        return substr($this->name, 0, -2);
+    }
+
+    /** Whether this is a file field that takes images only, and so is optimised and shown as a picture. */
+    public function isImage(): bool
+    {
+        return $this->kind === 'file' && $this->accept === ['image'];
     }
 
     public function sortable(): bool
     {
-        return $this->kind !== 'text';
+        return ! in_array($this->kind, ['text', 'file'], true);
     }
 
     public function filterable(): bool
     {
-        return $this->kind !== 'text';
+        return ! in_array($this->kind, ['text', 'file'], true);
     }
 
     public function searchable(): bool
