@@ -5,11 +5,14 @@ namespace Nevela\Laravel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\SeedCommand;
+use Nevela\Laravel\Console\StatusCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
+use Nevela\Laravel\Console\VersionCommand;
 use Nevela\Laravel\Http\FlareErrors;
 use Nevela\Laravel\Http\TokenController;
 
@@ -24,7 +27,10 @@ final class NevelaServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/nevela.php' => config_path('nevela.php')], 'nevela-config');
-            $this->commands([MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class, UpdateCommand::class]);
+            $this->commands([
+                MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
+                UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class,
+            ]);
         }
 
         $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
@@ -51,6 +57,13 @@ final class NevelaServiceProvider extends ServiceProvider
                 });
             });
         }
+
+        // Open to anyone, and says only that this is a Nevela app and which one. It is how the
+        // dashboard and `nevela:status` tell this app from another program on the same port.
+        Route::prefix($prefix)->middleware(['api', 'throttle:60,1'])->get('_nevela/ping', fn () => response()->json([
+            'nevela' => Nevela::VERSION,
+            'app' => Nevela::fingerprint(),
+        ]))->name('nevela.ping');
 
         Route::prefix($prefix)->middleware(config('nevela.middleware', ['api', 'auth:sanctum']))->name('nevela.')->group(function () {
             // The descriptors, so the web app (and tooling) can check it matches the API.

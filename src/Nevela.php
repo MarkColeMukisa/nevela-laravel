@@ -22,6 +22,16 @@ final class Nevela
     /** @var array<string, Descriptor> */
     private static array $descriptors = [];
 
+    /**
+     * A short id for this installation, from where it is on disk. It gives nothing away,
+     * and it differs between two apps on one machine, which is what it is for: telling
+     * which app is answering on a port.
+     */
+    public static function fingerprint(): string
+    {
+        return substr(sha1(base_path()), 0, 12);
+    }
+
     /** A resource's descriptor, from config('nevela.descriptors_path')/<kebab-name>.json. */
     public static function resource(string $name): Descriptor
     {

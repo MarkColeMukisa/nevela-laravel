@@ -16,7 +16,8 @@ final class MakeResourceCommand extends Command
         {--icon= : Lucide icon name for the dashboard, e.g. package}
         {--group= : Sidebar group in the dashboard}
         {--force : Overwrite an existing descriptor}
-        {--migrate : Run the new migration straight away}';
+        {--migrate : Run the new migration straight away}
+        {--seed= : Fill the new resource with records too (25, or the number you give). Runs the migration first}';
 
     protected $description = 'Describe a resource once, then generate its Laravel API and Flare dashboard descriptor';
 
@@ -51,12 +52,19 @@ final class MakeResourceCommand extends Command
         Nevela::forget();
         $status = GenerateCommand::generate($this, [$descriptor], Nevela::all(), false);
 
-        if ($status === self::SUCCESS && $this->option('migrate')) {
+        // "--seed" on its own and "--seed=100" both count; without a number it is 25.
+        $seed = $this->input->hasParameterOption('--seed') || $this->option('seed') !== null;
+        $migrate = $this->option('migrate') || $seed;
+
+        if ($status === self::SUCCESS && $migrate) {
             $status = $this->call('migrate');
+        }
+        if ($status === self::SUCCESS && $seed) {
+            $status = $this->call('nevela:seed', ['name' => $descriptor->name, '--count' => $this->option('seed') ?: 25]);
         }
 
         $this->newLine();
-        $this->line($this->option('migrate')
+        $this->line($migrate
             ? '  Next: tighten <fg=cyan>app/Policies/'.$descriptor->name.'Policy.php</>.'
             : '  Next: <fg=cyan>php artisan migrate</>, then tighten <fg=cyan>app/Policies/'.$descriptor->name.'Policy.php</>.');
         $this->line("  API:  GET|POST /{$this->prefix()}{$descriptor->slug} · GET|PUT|PATCH|DELETE /{$this->prefix()}{$descriptor->slug}/{id} · GET /{$this->prefix()}{$descriptor->slug}/_stats");

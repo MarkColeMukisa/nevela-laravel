@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardUpdate;
+use Nevela\Laravel\Support\Releases;
 use PharData;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -37,9 +38,30 @@ final class UpdateCommand extends Command
 
         if (! $check) {
             $this->components->task('Regenerating from the descriptors', fn () => $this->callSilently('nevela:generate') === self::SUCCESS);
+            $this->modernizeDevScript();
         }
 
         return $this->updateDashboard($check);
+    }
+
+    /**
+     * Apps created before 0.1.3 run both servers with scripts/dev.mjs, which always uses
+     * port 8000 and so can end up talking to another program that already has it. Point
+     * their `dev` script at `php nevela dev`, which picks a free port, unless they changed it.
+     */
+    private function modernizeDevScript(): void
+    {
+        $root = GenerateCommand::projectRoot();
+        $file = $root ? $root.DIRECTORY_SEPARATOR.'package.json' : null;
+        if (! $file || ! is_file($file)) {
+            return;
+        }
+        $source = (string) file_get_contents($file);
+        $updated = preg_replace('/("dev"\s*:\s*)"node scripts\/dev\.mjs"/', '$1"php nevela dev"', $source, 1, $count);
+        if ($count === 1) {
+            file_put_contents($file, $updated);
+            $this->components->twoColumnDetail('package.json: dev', '<fg=blue>node scripts/dev.mjs → php nevela dev</>');
+        }
     }
 
     /**
@@ -49,7 +71,7 @@ final class UpdateCommand extends Command
     private function updatePackage(bool $check): ?int
     {
         $installed = Nevela::VERSION;
-        $latest = $this->latestOnPackagist();
+        $latest = Releases::latest();
 
         if ($folder = $this->installedByPath()) {
             $this->components->warn("nevela/laravel is installed from a folder ({$folder}), so Composer can't update it. The dashboard is checked against the version you have, {$installed}.");
@@ -115,7 +137,7 @@ final class UpdateCommand extends Command
         $marker = "{$web}/.nevela.json";
         $from = is_file($marker) ? (json_decode((string) file_get_contents($marker), true)['template'] ?? self::FIRST_TRACKED) : self::FIRST_TRACKED;
         // In --check the package hasn't been updated, so look at the newest dashboard there is.
-        $to = $check ? ($this->latestOnPackagist() ?? Nevela::VERSION) : Nevela::VERSION;
+        $to = $check ? (Releases::latest() ?? Nevela::VERSION) : Nevela::VERSION;
 
         if (version_compare($from, $to, '>=')) {
             $this->components->info("The dashboard is on the latest template ({$from}).");
@@ -244,29 +266,6 @@ final class UpdateCommand extends Command
         } finally {
             $this->removeDirectory($dir);
         }
-    }
-
-    /** The newest stable release on Packagist, or null when it can't be reached. */
-    private function latestOnPackagist(): ?string
-    {
-        static $latest = false;
-        if ($latest !== false) {
-            return $latest;
-        }
-        try {
-            $releases = Http::timeout(10)->get('https://repo.packagist.org/p2/nevela/laravel.json')->json('packages.nevela/laravel') ?? [];
-        } catch (Throwable) {
-            return $latest = null;
-        }
-        $versions = [];
-        foreach ($releases as $release) {
-            if (preg_match('/^v?(\d+\.\d+\.\d+)$/', (string) ($release['version'] ?? ''), $m)) {
-                $versions[] = $m[1];
-            }
-        }
-        usort($versions, 'version_compare');
-
-        return $latest = ($versions === [] ? null : end($versions));
     }
 
     /** The folder Composer installs the package from, when it isn't coming from Packagist. */

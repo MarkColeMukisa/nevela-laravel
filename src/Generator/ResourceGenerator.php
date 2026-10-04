@@ -172,13 +172,10 @@ final class ResourceGenerator
         \$name = array_shift(\$args) ?? 'help';
 
         // What you type => the artisan command it runs.
-        \$nevela = ['resource', 'generate', 'seed', 'user', 'update'];
+        \$nevela = ['resource', 'generate', 'seed', 'user', 'update', 'dev', 'status', 'version'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
-
-        if (\$name === 'dev') {
-            // The API and the dashboard together.
-            passthru('node '.escapeshellarg(__DIR__.'/scripts/dev.mjs'), \$status);
-            exit(\$status);
+        if (in_array(\$name, ['--version', '-v', '-V'], true)) {
+            \$name = 'version';
         }
 
         if (in_array(\$name, \$nevela, true)) {
@@ -197,12 +194,15 @@ final class ResourceGenerator
 
               Nevela, from the top of your project.
 
-              php nevela resource Product --fields="name:string, price:money"   add a resource and migrate
+              php nevela dev                   run the API and the dashboard
+              php nevela status                check versions, migrations, users and the dashboard
+              php nevela resource Product --fields="name:string, price:money" --seed
+                                               add a resource, create its table, fill it
               php nevela generate              regenerate after editing a descriptor
               php nevela seed Product          fill a resource with records
               php nevela user                  create someone who can sign in
               php nevela update                update Nevela and the dashboard
-              php nevela dev                   run the API and the dashboard
+              php nevela version               which Nevela this is
 
               php nevela migrate               php artisan migrate
               php nevela artisan <command>     any other artisan command
