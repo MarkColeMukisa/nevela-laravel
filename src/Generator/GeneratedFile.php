@@ -20,12 +20,18 @@ final class GeneratedFile
 
     public const TARGET_WEB = 'web';
 
+    public readonly string $contents;
+
     public function __construct(
         public readonly string $target,
         public readonly string $path,
-        public readonly string $contents,
+        string $contents,
         public readonly string $mode = self::MODE_BLOCK,
         /** For MODE_ONCE: a glob (relative to the target root) that, when it matches, means the file already exists under another name. */
         public readonly ?string $existsGlob = null,
-    ) {}
+    ) {
+        // The templates take their line endings from this package's own source files, which
+        // git may have checked out with CRLF on Windows. Generated code is always LF.
+        $this->contents = str_replace("\r\n", "\n", $contents);
+    }
 }

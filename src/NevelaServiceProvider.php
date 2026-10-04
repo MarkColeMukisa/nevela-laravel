@@ -8,6 +8,7 @@ use Illuminate\Support\ServiceProvider;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\SeedCommand;
+use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Http\FlareErrors;
 use Nevela\Laravel\Http\TokenController;
@@ -23,7 +24,7 @@ final class NevelaServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([__DIR__.'/../config/nevela.php' => config_path('nevela.php')], 'nevela-config');
-            $this->commands([MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class]);
+            $this->commands([MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class, UpdateCommand::class]);
         }
 
         $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
