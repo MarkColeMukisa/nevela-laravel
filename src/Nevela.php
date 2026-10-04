@@ -17,7 +17,7 @@ use Nevela\Laravel\Support\Naming;
 final class Nevela
 {
     /** Written by `pnpm release`; the same number as the repository's git tag. */
-    public const VERSION = '0.1.1';
+    public const VERSION = '0.1.2';
 
     /** @var array<string, Descriptor> */
     private static array $descriptors = [];
