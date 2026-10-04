@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Tests\Unit;
 
 use Nevela\Laravel\Console\DevCommand;
+use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Support\Releases;
 use PHPUnit\Framework\TestCase;
 
@@ -40,5 +41,21 @@ final class ReleasesTest extends TestCase
         $this->assertSame('yarn', DevCommand::packageManager($dir));
         touch("{$dir}/pnpm-lock.yaml");
         $this->assertSame('pnpm', DevCommand::packageManager($dir));
+    }
+
+    public function test_only_a_plain_caret_range_is_moved_by_an_update(): void
+    {
+        $constraint = fn (string $value) => UpdateCommand::rootConstraint(json_encode(['require' => ['nevela/laravel' => $value]]));
+
+        foreach (['^0.1', '^0.1.3', '^1.4'] as $moved) {
+            $this->assertTrue(UpdateCommand::isPlainCaret($constraint($moved)), $moved);
+        }
+        // Somebody chose these: a pin, a branch, a range written by hand.
+        foreach (['0.1.5', '~0.1', 'dev-main', '@dev', '>=0.1 <0.2', '^0.1 || ^0.2', '*'] as $kept) {
+            $this->assertFalse(UpdateCommand::isPlainCaret($constraint($kept)), $kept);
+        }
+        $this->assertSame('', UpdateCommand::rootConstraint('not json'));
+        $this->assertSame('', UpdateCommand::rootConstraint('{"require": {}}'));
+        $this->assertFalse(UpdateCommand::isPlainCaret(''));
     }
 }
