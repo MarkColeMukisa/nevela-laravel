@@ -3,11 +3,11 @@
 namespace Nevela\Laravel\Console;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\DashboardUpdate;
 use Nevela\Laravel\Support\Releases;
-use PharData;
+use Nevela\Laravel\Support\TemplateSource;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use Symfony\Component\Process\PhpExecutableFinder;
@@ -18,7 +18,8 @@ final class UpdateCommand extends Command
 {
     protected $signature = 'nevela:update
         {--check : Show what would change, and change nothing}
-        {--skip-package : Leave the nevela/laravel package as it is; update only the dashboard}';
+        {--skip-package : Leave the nevela/laravel package as it is; update only the dashboard}
+        {--undo : Put the dashboard back as it was before the last update}';
 
     protected $description = 'Update Nevela: the package, the generated code and the dashboard';
 
@@ -27,6 +28,9 @@ final class UpdateCommand extends Command
 
     public function handle(): int
     {
+        if ($this->option('undo')) {
+            return $this->undo();
+        }
         $check = (bool) $this->option('check');
 
         if (! $this->option('skip-package')) {
@@ -127,58 +131,76 @@ final class UpdateCommand extends Command
 
     private function updateDashboard(bool $check): int
     {
-        $web = config('nevela.web_path');
-        if (! $web || ! is_dir($web)) {
+        $web = $this->webPath();
+        if ($web === null) {
             $this->components->info('No dashboard at nevela.web_path, so there is nothing more to update.');
 
             return self::SUCCESS;
         }
-        $web = rtrim(str_replace('\\', '/', realpath($web) ?: $web), '/');
-        $marker = "{$web}/.nevela.json";
-        $from = is_file($marker) ? (json_decode((string) file_get_contents($marker), true)['template'] ?? self::FIRST_TRACKED) : self::FIRST_TRACKED;
+        $state = DashboardState::read($web);
+        $from = $state->template ?? self::FIRST_TRACKED;
         // In --check the package hasn't been updated, so look at the newest dashboard there is.
         $to = $check ? (Releases::latest() ?? Nevela::VERSION) : Nevela::VERSION;
 
         if (version_compare($from, $to, '>=')) {
             $this->components->info("The dashboard is on the latest template ({$from}).");
+            // An app from before fingerprints were kept: record them now, so the next update
+            // knows what was changed without having to work it out from a download.
+            if (! $check && $state->files === null) {
+                try {
+                    $state->adopt($from, TemplateSource::fetch($from)['files']);
+                    $state->write($web);
+                } catch (Throwable) {
+                    // Not worth failing an up-to-date app over; the next update can still download it.
+                }
+            }
 
             return self::SUCCESS;
         }
 
         try {
-            $base = $this->template($from);
-            $next = $this->template($to);
+            $next = TemplateSource::fetch($to)['files'];
+            // What the app is on: its recorded fingerprints, or for an older app the old template itself.
+            if ($state->files === null) {
+                $state->adopt($from, TemplateSource::fetch($from)['files']);
+            }
         } catch (Throwable $e) {
-            $this->components->error("Couldn't download the dashboard template ({$e->getMessage()}). The dashboard was left as it is; run this again later.");
+            $this->components->error("Couldn't get the dashboard template: {$e->getMessage()}. The dashboard was left as it is; run this again later.");
 
             return self::FAILURE;
         }
 
-        $paths = array_unique([...array_keys($base), ...array_keys($next)]);
-        $yours = [];
-        foreach ($paths as $path) {
-            $yours[$path] = is_file("{$web}/{$path}") ? (string) file_get_contents("{$web}/{$path}") : null;
-        }
+        $base = $state->files;
+        $nextHashes = DashboardUpdate::hashes($next);
+        $yours = DashboardState::fingerprints($web, array_unique([...array_keys($base), ...array_keys($next)]));
 
         // package.json is merged, not replaced: it has your app's name and your own dependencies.
         $packages = null;
-        if (isset($base['package.json'], $next['package.json'], $yours['package.json'])) {
-            $packages = DashboardUpdate::mergePackageJson($yours['package.json'], $base['package.json'], $next['package.json']);
+        if (isset($next['package.json']) && is_file("{$web}/package.json")) {
+            $packages = DashboardUpdate::mergePackageJson((string) file_get_contents("{$web}/package.json"), $state->packageJson(), $next['package.json']);
         }
-        unset($base['package.json'], $next['package.json']);
+        unset($base['package.json'], $nextHashes['package.json'], $yours['package.json']);
 
-        $plan = DashboardUpdate::plan($base, $next, $yours);
+        $plan = DashboardUpdate::plan($base, $nextHashes, $yours);
         $this->components->info(($check ? 'Dashboard: what would change, ' : 'Dashboard: ')."template {$from} → {$to}");
 
-        $counts = [DashboardUpdate::UPDATE => 0, DashboardUpdate::ADD => 0, DashboardUpdate::CONFLICT => 0, DashboardUpdate::REMOVED => 0];
+        $done = [DashboardUpdate::UPDATE => [], DashboardUpdate::ADD => [], DashboardUpdate::CONFLICT => [], DashboardUpdate::REMOVED => []];
+        $backup = '.nevela/backups/'.gmdate('Ymd-His')."-{$from}-to-{$to}";
+        $incoming = ".nevela/incoming/{$to}";
+
         foreach ($plan as $path => $action) {
-            $counts[$action]++;
-            if (! $check && ($action === DashboardUpdate::UPDATE || $action === DashboardUpdate::ADD)) {
-                $target = "{$web}/{$path}";
-                if (! is_dir(dirname($target))) {
-                    mkdir(dirname($target), 0775, true);
+            $done[$action][] = $path;
+            if (! $check) {
+                if ($action === DashboardUpdate::UPDATE) {
+                    // Untouched by you, so identical to the old template. Kept anyway: a copy costs nothing.
+                    $this->put("{$web}/{$backup}/{$path}", (string) file_get_contents("{$web}/{$path}"));
+                    $this->put("{$web}/{$path}", $next[$path]);
+                } elseif ($action === DashboardUpdate::ADD) {
+                    $this->put("{$web}/{$path}", $next[$path]);
+                } elseif ($action === DashboardUpdate::CONFLICT) {
+                    // Yours stays. The new version is put where you can compare the two.
+                    $this->put("{$web}/{$incoming}/{$path}", $next[$path]);
                 }
-                file_put_contents($target, $next[$path]);
             }
             $this->components->twoColumnDetail($path, match ($action) {
                 DashboardUpdate::UPDATE => $check ? '<fg=blue>would update</>' : '<fg=blue>updated</>',
@@ -188,84 +210,137 @@ final class UpdateCommand extends Command
             });
         }
 
-        if ($packages && $packages['changed']) {
-            foreach ($packages['changed'] as $name => $change) {
-                $this->components->twoColumnDetail("package.json: {$name}", '<fg=blue>'.$change.'</>');
-            }
-            if (! $check) {
-                file_put_contents("{$web}/package.json", $packages['json']);
-            }
+        foreach ($packages['changed'] ?? [] as $name => $change) {
+            $this->components->twoColumnDetail("package.json: {$name}", '<fg=blue>'.$change.'</>');
         }
         foreach ($packages['kept'] ?? [] as $name => $versions) {
             $this->components->twoColumnDetail("package.json: {$name}", "<fg=yellow>kept yours, {$versions}</>");
         }
-
         if ($plan === [] && ! ($packages['changed'] ?? [])) {
             $this->line('  Nothing in the dashboard needed changing.');
         }
         $this->newLine();
 
         if (! $check) {
-            file_put_contents($marker, json_encode(['template' => $to], JSON_PRETTY_PRINT)."\n");
+            $touched = $done[DashboardUpdate::UPDATE] !== [] || $done[DashboardUpdate::ADD] !== [] || ($packages['changed'] ?? []) !== [];
+            if ($packages && $packages['changed']) {
+                $this->put("{$web}/{$backup}/package.json", (string) file_get_contents("{$web}/package.json"));
+                file_put_contents("{$web}/package.json", $packages['json']);
+            }
+            if ($touched) {
+                // The record as it was, so `--undo` can put that back too.
+                $this->put("{$web}/{$backup}/.nevela.json", (string) @file_get_contents(DashboardState::path($web)) ?: '{}');
+            }
+            // .nevela/ holds copies, not source: it keeps itself out of git.
+            if (is_dir("{$web}/.nevela") && ! is_file("{$web}/.nevela/.gitignore")) {
+                file_put_contents("{$web}/.nevela/.gitignore", "*\n");
+            }
+
+            $state->adopt($to, $next);
+            $state->history[] = array_filter([
+                'at' => gmdate('c'),
+                'from' => $from,
+                'to' => $to,
+                'updated' => $done[DashboardUpdate::UPDATE],
+                'added' => $done[DashboardUpdate::ADD],
+                'kept' => $done[DashboardUpdate::CONFLICT],
+                'removed' => $done[DashboardUpdate::REMOVED],
+                'dependencies' => $packages['changed'] ?? [],
+                'backup' => $touched ? $backup : null,
+            ]);
+            $state->write($web);
+
+            if ($touched) {
+                $this->line("  Every file this replaced was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela update --undo</>");
+            }
         }
-        if ($counts[DashboardUpdate::CONFLICT] > 0) {
-            $this->components->warn("{$counts[DashboardUpdate::CONFLICT]} file(s) changed in the template and in your app. Yours were kept. To see the template's version of one: https://github.com/MarkColeMukisa/nevela/tree/v{$to}/apps/web");
+        if ($done[DashboardUpdate::CONFLICT] !== []) {
+            $count = count($done[DashboardUpdate::CONFLICT]);
+            $this->components->warn("{$count} file(s) changed in the template and in your app. Yours were kept.".($check ? '' : " The template's new versions are in {$this->relative($web)}/{$incoming} for you to compare."));
         }
-        if ($counts[DashboardUpdate::REMOVED] > 0) {
-            $this->line("  {$counts[DashboardUpdate::REMOVED]} file(s) are no longer part of the template. They were left in place; delete them if you don't use them.");
+        if ($done[DashboardUpdate::REMOVED] !== []) {
+            $this->line('  '.count($done[DashboardUpdate::REMOVED])." file(s) are no longer part of the template. They were left in place; delete them if you don't use them.");
         }
         if (! $check && ($packages['changed'] ?? [])) {
-            $this->line('  The dashboard\'s dependencies changed. Install them: <fg=cyan>cd '.$this->relative($web).' && pnpm install</> (or npm install).');
+            $this->line('  The dashboard\'s dependencies changed. Install them: <fg=cyan>cd '.$this->relative($web).' && '.DevCommand::packageManager($web).' install</>');
         }
 
         return self::SUCCESS;
     }
 
-    /**
-     * The dashboard as it shipped in a version: path => contents.
-     *
-     * It comes from the create-nevela package on npm, which carries the dashboard and is
-     * released with the same version number as this package.
-     *
-     * @return array<string, string>
-     */
-    private function template(string $version): array
+    /** Put the dashboard back as it was before the last update that changed it. */
+    private function undo(): int
     {
-        $dir = rtrim(sys_get_temp_dir(), '/\\').DIRECTORY_SEPARATOR.'nevela-template-'.$version.'-'.bin2hex(random_bytes(4));
-        mkdir($dir, 0775, true);
-        $archive = $dir.DIRECTORY_SEPARATOR.'template.tgz';
+        $web = $this->webPath();
+        if ($web === null) {
+            $this->components->error('No dashboard at nevela.web_path.');
 
-        try {
-            // NEVELA_TEMPLATE_DIR: a folder of create-nevela-<version>.tgz files to use instead
-            // of npm. For working on Nevela itself, and for updating without a connection.
-            $local = rtrim((string) env('NEVELA_TEMPLATE_DIR', ''), '/\\');
-            if ($local !== '' && is_file("{$local}/create-nevela-{$version}.tgz")) {
-                copy("{$local}/create-nevela-{$version}.tgz", $archive);
-            } else {
-                $response = Http::timeout(60)->get("https://registry.npmjs.org/create-nevela/-/create-nevela-{$version}.tgz");
-                if (! $response->successful()) {
-                    throw new \RuntimeException("create-nevela {$version} is not on npm (HTTP {$response->status()})");
-                }
-                file_put_contents($archive, $response->body());
-            }
-            (new PharData($archive))->extractTo($dir, null, true);
-
-            $root = $dir.DIRECTORY_SEPARATOR.'package'.DIRECTORY_SEPARATOR.'template'.DIRECTORY_SEPARATOR.'web';
-            if (! is_dir($root)) {
-                throw new \RuntimeException("create-nevela {$version} has no dashboard template in it");
-            }
-            $files = [];
-            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
-                $path = str_replace('\\', '/', substr($file->getPathname(), strlen($root) + 1));
-                // npm can't carry .gitignore files, so the template holds them as _gitignore.
-                $path = preg_replace('#(^|/)_gitignore$#', '$1.gitignore', $path);
-                $files[$path] = (string) file_get_contents($file->getPathname());
-            }
-
-            return $files;
-        } finally {
-            $this->removeDirectory($dir);
+            return self::FAILURE;
         }
+        $state = DashboardState::read($web);
+        $last = null;
+        foreach (array_reverse($state->history) as $entry) {
+            if (isset($entry['backup']) && is_dir("{$web}/{$entry['backup']}")) {
+                $last = $entry;
+                break;
+            }
+        }
+        if ($last === null) {
+            $this->components->info('There is no update to undo: no backup was found.');
+
+            return self::SUCCESS;
+        }
+
+        $dir = "{$web}/{$last['backup']}";
+        $restored = 0;
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
+            $path = str_replace('\\', '/', substr($file->getPathname(), strlen($dir) + 1));
+            if ($path === '.nevela.json') {
+                continue;
+            }
+            $this->put("{$web}/{$path}", (string) file_get_contents($file->getPathname()));
+            $this->components->twoColumnDetail($path, '<fg=blue>restored</>');
+            $restored++;
+        }
+        // Files the update added are taken out again, unless you have changed them since.
+        foreach ($last['added'] ?? [] as $path) {
+            $recorded = $state->files[$path] ?? null;
+            if (is_file("{$web}/{$path}") && $recorded !== null && DashboardUpdate::hash((string) file_get_contents("{$web}/{$path}")) === $recorded) {
+                unlink("{$web}/{$path}");
+                $this->components->twoColumnDetail($path, '<fg=gray>removed (the update had added it)</>');
+            } elseif (is_file("{$web}/{$path}")) {
+                $this->components->twoColumnDetail($path, '<fg=yellow>kept: you changed it after the update</>');
+            }
+        }
+        // The record goes back too, so the same update can be run again later.
+        if (is_file("{$dir}/.nevela.json")) {
+            copy("{$dir}/.nevela.json", DashboardState::path($web));
+        }
+
+        $this->newLine();
+        $this->components->info("Put back {$restored} file(s). The dashboard is as it was before the update from {$last['from']} to {$last['to']}.");
+        $this->line('  The nevela/laravel package was not changed by this. To go back a version there too: <fg=cyan>composer require nevela/laravel:'.$last['from'].'</>');
+
+        return self::SUCCESS;
+    }
+
+    /** The dashboard's folder, with forward slashes, or null when there isn't one. */
+    private function webPath(): ?string
+    {
+        $web = config('nevela.web_path');
+        if (! $web || ! is_dir($web)) {
+            return null;
+        }
+
+        return rtrim(str_replace('\\', '/', realpath($web) ?: $web), '/');
+    }
+
+    private function put(string $file, string $contents): void
+    {
+        if (! is_dir(dirname($file))) {
+            mkdir(dirname($file), 0775, true);
+        }
+        file_put_contents($file, $contents);
     }
 
     /** The folder Composer installs the package from, when it isn't coming from Packagist. */
@@ -281,23 +356,16 @@ final class UpdateCommand extends Command
         return null;
     }
 
+    /** A path as someone at the top of the project would type it: apps/web/… */
     private function relative(string $path): string
     {
-        $base = rtrim(str_replace('\\', '/', base_path()), '/');
-        $parent = dirname($base);
+        $root = GenerateCommand::projectRoot();
+        $root = $root === null ? null : rtrim(str_replace('\\', '/', $root), '/');
+        if ($root !== null && str_starts_with($path, $root.'/')) {
+            return substr($path, strlen($root) + 1);
+        }
+        $parent = dirname(rtrim(str_replace('\\', '/', base_path()), '/'));
 
         return str_starts_with($path, $parent.'/') ? '../'.substr($path, strlen($parent) + 1) : $path;
-    }
-
-    private function removeDirectory(string $dir): void
-    {
-        if (! is_dir($dir)) {
-            return;
-        }
-        $items = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-        foreach ($items as $item) {
-            $item->isDir() ? @rmdir($item->getPathname()) : @unlink($item->getPathname());
-        }
-        @rmdir($dir);
     }
 }

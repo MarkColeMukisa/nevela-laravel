@@ -9,6 +9,7 @@ use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\SeedCommand;
+use Nevela\Laravel\Console\SetupCommand;
 use Nevela\Laravel\Console\StatusCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
@@ -29,7 +30,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->publishes([__DIR__.'/../config/nevela.php' => config_path('nevela.php')], 'nevela-config');
             $this->commands([
                 MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
-                UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class,
+                UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
             ]);
         }
 

@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\Releases;
 use Throwable;
 
@@ -92,8 +93,30 @@ final class StatusCommand extends Command
         if (! $web || ! is_dir($web)) {
             $row('Dashboard', '<fg=gray>not found at nevela.web_path</>');
         } else {
-            $marker = json_decode((string) @file_get_contents(rtrim($web, '/\\').'/.nevela.json'), true);
-            $row('Dashboard', is_array($marker) && isset($marker['template']) ? "template {$marker['template']}" : '<fg=gray>template version not recorded</>');
+            $state = DashboardState::read($web);
+            $row('Dashboard', $state->template !== null ? "template {$state->template}" : '<fg=gray>template version not recorded</>');
+
+            // What this app has made its own. An update leaves every one of these alone.
+            $changes = $state->yourChanges($web);
+            if ($changes === null) {
+                $row('Your dashboard changes', '<fg=gray>not tracked yet: php nevela update records them</>');
+            } else {
+                $count = count($changes['changed']) + count($changes['deleted']);
+                $row('Your dashboard changes', $count === 0 ? 'none' : "{$count} file(s), kept on every update");
+                if ($this->output->isVerbose()) {
+                    foreach ($changes['changed'] as $path) {
+                        $this->line("    <fg=gray>changed</> {$path}");
+                    }
+                    foreach ($changes['deleted'] as $path) {
+                        $this->line("    <fg=gray>deleted</> {$path}");
+                    }
+                } elseif ($count > 0) {
+                    $this->line('    <fg=gray>php nevela status -v lists them</>');
+                }
+            }
+            if ($last = end($state->history)) {
+                $row('Last dashboard update', "{$last['from']} → {$last['to']} on ".substr((string) ($last['at'] ?? ''), 0, 10));
+            }
 
             // `php nevela dev` may have put the API on another port and told the dashboard so,
             // which is fine. Look for this app wherever it is running before judging.
