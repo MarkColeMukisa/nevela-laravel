@@ -106,12 +106,15 @@ final class Field
      *   category:belongsTo(Category)      stored as categoryId
      *   image:image                       an optimised image; image:image(product) names a profile
      *   manual:file(pdf|document)         any other upload
+     *
+     * Grit's and Flare's spellings are understood too: see normalise().
      */
     public static function parse(string $token): self
     {
-        $token = trim($token);
+        $written = trim($token);
+        $token = self::normalise($written);
         if (! preg_match('/^([A-Za-z][A-Za-z0-9_]*):([A-Za-z_]+)(?:\(([^)]*)\))?([?!]{0,2})$/', $token, $m)) {
-            throw new InvalidArgumentException("Invalid field \"{$token}\". Expected name:type, e.g. price:money or status:enum(draft|live)?");
+            throw new InvalidArgumentException("Invalid field \"{$written}\". Expected name:type, e.g. price:money, status:enum(draft|live)?, image:image or category:belongsTo(Category).");
         }
         [, $name, $type, $args, $suffix] = $m + [3 => '', 4 => ''];
         $name = Naming::camel($name);
@@ -140,6 +143,30 @@ final class Field
         [$kind, $format] = self::ALIASES[$type];
 
         return new self($name, $kind, $format, $required, $unique);
+    }
+
+    /**
+     * The other ways people write a field, turned into Nevela's own.
+     *
+     * Grit puts what a type takes after a second colon, and Flare in square brackets, so
+     * someone coming from either types what they know:
+     *
+     *   image:file:image          image:file[image]        image:file:[image]     → image:file(image)
+     *   category:belongs_to:Category                                              → category:belongs_to(Category)
+     *   status:enum:draft|live    docs:file:[pdf, image]                          → …(draft|live), …(pdf|image)
+     */
+    private static function normalise(string $token): string
+    {
+        // Spaces around the punctuation don't mean anything: "file: [ image ]".
+        $token = (string) preg_replace('/\s*([:\[\]])\s*/', '$1', $token);
+        if (preg_match('/^([^:()\[\]]+):([A-Za-z_]+):?\[([^\[\]()]*)\]([?!]{0,2})$/', $token, $m)
+            || preg_match('/^([^:()\[\]]+):([A-Za-z_]+):([^:()\[\]?!]+)([?!]{0,2})$/', $token, $m)) {
+            $list = implode('|', array_filter(array_map('trim', preg_split('/[,|]/', $m[3])), fn ($value) => $value !== ''));
+
+            return "{$m[1]}:{$m[2]}({$list}){$m[4]}";
+        }
+
+        return $token;
     }
 
     /** @param array<string, mixed> $data */

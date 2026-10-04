@@ -148,16 +148,16 @@ final class Descriptor
         return str_replace('-', '_', Naming::snake($this->name));
     }
 
-    /** Split on commas that are not inside enum parentheses. @return list<string> */
+    /** Split on commas that are not inside parentheses or square brackets. @return list<string> */
     private static function splitSpec(string $spec): array
     {
         $parts = [];
         $depth = 0;
         $current = '';
         foreach (str_split($spec) as $char) {
-            if ($char === '(') {
+            if ($char === '(' || $char === '[') {
                 $depth++;
-            } elseif ($char === ')') {
+            } elseif ($char === ')' || $char === ']') {
                 $depth--;
             }
             if ($char === ',' && $depth === 0) {

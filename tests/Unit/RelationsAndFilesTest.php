@@ -48,6 +48,31 @@ final class RelationsAndFilesTest extends TestCase
         $this->assertEquals($image, Field::fromArray('image', $image->toArray()));
     }
 
+    public function test_grits_and_flares_ways_of_writing_a_field_mean_the_same_thing(): void
+    {
+        $image = Field::parse('image:image?');
+        foreach (['image:file:image?', 'image:file:[image]?', 'image:file[image]?', 'image:file(image)?', 'image:file: [ image ]?'] as $spelling) {
+            $this->assertEquals($image, Field::parse($spelling), $spelling);
+        }
+        $this->assertTrue(Field::parse('image:file:image')->isImage());
+        $this->assertSame(['pdf', 'image'], Field::parse('docs:file:[pdf, image]')->accept);
+        $this->assertSame(['pdf', 'image'], Field::parse('docs:file:pdf|image')->accept);
+        $this->assertSame('product', Field::parse('image:image:product')->profile);
+
+        $category = Field::parse('category:belongsTo(Category)');
+        foreach (['category:belongs_to:Category', 'category:belongsTo:Category', 'category_id:belongs_to:Category', 'categoryId:belongsTo[Category]'] as $spelling) {
+            $this->assertEquals($category, Field::parse($spelling), $spelling);
+        }
+        $this->assertFalse(Field::parse('category:belongs_to:Category?')->required);
+        $this->assertSame(['draft', 'live'], Field::parse('status:enum:draft|live')->options);
+        $this->assertSame(['draft', 'live'], Field::parse('status:enum:[draft, live]!')->options);
+
+        // In a whole list of fields, a comma inside brackets doesn't end the field.
+        $resource = Descriptor::fromSpec('Product', 'name:string, image:file:image?, docs:file:[pdf, image]?, category:belongs_to:Category');
+        $this->assertSame(['name', 'image', 'docs', 'categoryId'], array_keys($resource->fields));
+        $this->assertSame(['pdf', 'image'], $resource->fields['docs']->accept);
+    }
+
     public function test_fields_that_make_no_sense_are_refused_with_what_to_write_instead(): void
     {
         foreach ([
