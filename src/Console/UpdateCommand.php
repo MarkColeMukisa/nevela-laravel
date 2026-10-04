@@ -16,12 +16,18 @@ use Throwable;
 
 final class UpdateCommand extends Command
 {
-    protected $signature = 'nevela:update
+    protected $signature = 'nevela:upgrade
         {--check : Show what would change, and change nothing}
-        {--skip-package : Leave the nevela/laravel package as it is; update only the dashboard}
-        {--undo : Put the dashboard back as it was before the last update}';
+        {--skip-package : Leave the nevela/laravel package as it is; upgrade only the dashboard}
+        {--undo : Put the dashboard back as it was before the last upgrade}';
 
-    protected $description = 'Update Nevela: the package, the generated code and the dashboard';
+    /**
+     * The name this command had before 0.3.0, and still answers to. As in Grit, "update"
+     * is now what the nevela command does to itself, and "upgrade" is what it does to an app.
+     */
+    protected $aliases = ['nevela:update'];
+
+    protected $description = 'Bring this app to the latest Nevela: the package, the generated code and the dashboard';
 
     /** Apps created before the dashboard recorded its version all came from this template. */
     private const FIRST_TRACKED = '0.1.1';
@@ -184,7 +190,7 @@ final class UpdateCommand extends Command
         // The package's own files have just been replaced. Finish in a new process, so the
         // rest runs on the new code instead of a mix of old and new.
         $php = (new PhpExecutableFinder)->find(false) ?: 'php';
-        $rest = new Process([$php, 'artisan', 'nevela:update', '--skip-package'], base_path(), null, null, null);
+        $rest = new Process([$php, 'artisan', 'nevela:upgrade', '--skip-package'], base_path(), null, null, null);
         $rest->run(fn ($type, $buffer) => $this->output->write($buffer));
 
         return $rest->getExitCode() ?? self::FAILURE;
@@ -312,7 +318,7 @@ final class UpdateCommand extends Command
             $state->write($web);
 
             if ($touched) {
-                $this->line("  Every file this replaced was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela update --undo</>");
+                $this->line("  Every file this replaced was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela upgrade --undo</>");
             }
         }
         if ($done[DashboardUpdate::CONFLICT] !== []) {

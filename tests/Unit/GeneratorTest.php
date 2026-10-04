@@ -101,7 +101,7 @@ final class GeneratorTest extends TestCase
         // With nothing to forward to, it prints help and says so with its exit code.
         exec('php '.escapeshellarg("{$dir}/nevela").' help 2>&1', $help, $helpCode);
         $this->assertSame(0, $helpCode);
-        $this->assertStringContainsString('php nevela update', implode("\n", $help));
+        $this->assertStringContainsString('php nevela upgrade', implode("\n", $help));
         exec('php '.escapeshellarg("{$dir}/nevela").' nonsense 2>&1', $ignored, $unknownCode);
         $this->assertSame(1, $unknownCode);
     }

@@ -30,7 +30,7 @@ final class StatusCommand extends Command
         $latest = Releases::latest();
         $row('Nevela', Nevela::VERSION.match (true) {
             $latest === null => ' <fg=gray>(couldn\'t check for a newer one)</>',
-            version_compare($latest, Nevela::VERSION, '>') => " <fg=yellow>({$latest} is out: php nevela update)</>",
+            version_compare($latest, Nevela::VERSION, '>') => " <fg=yellow>({$latest} is out: php nevela upgrade)</>",
             default => ' <fg=green>(latest)</>',
         });
         $row('Laravel / PHP', app()->version().' / '.PHP_VERSION);
@@ -99,7 +99,7 @@ final class StatusCommand extends Command
             // What this app has made its own. An update leaves every one of these alone.
             $changes = $state->yourChanges($web);
             if ($changes === null) {
-                $row('Your dashboard changes', '<fg=gray>not tracked yet: php nevela update records them</>');
+                $row('Your dashboard changes', '<fg=gray>not tracked yet: php nevela upgrade records them</>');
             } else {
                 $count = count($changes['changed']) + count($changes['deleted']);
                 $row('Your dashboard changes', $count === 0 ? 'none' : "{$count} file(s), kept on every update");

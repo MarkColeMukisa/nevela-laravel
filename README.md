@@ -43,7 +43,7 @@ Needs PHP 8.2 or newer and Laravel 11, 12 or 13.
 | `nevela:generate` | Regenerate after changing a descriptor. Your own code is kept. |
 | `nevela:seed` | Fill a resource with plausible records, and print how long it took. |
 | `nevela:user` | Create someone who can sign in. |
-| `nevela:update` | Update the package, the generated code and the dashboard. |
+| `nevela:upgrade` | Bring the app to the latest Nevela: the package, the generated code and the dashboard. `nevela:update` is its older name and still works. |
 
 Full documentation: https://nevela-docs.vercel.app
 

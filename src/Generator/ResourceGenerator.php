@@ -225,7 +225,8 @@ final class ResourceGenerator
         \$name = array_shift(\$args) ?? 'help';
 
         // What you type => the artisan command it runs.
-        \$nevela = ['resource', 'generate', 'seed', 'user', 'update', 'dev', 'status', 'version'];
+        // "update" is what upgrade was called before 0.3.0; it still works.
+        \$nevela = ['resource', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -254,7 +255,7 @@ final class ResourceGenerator
               php nevela generate              regenerate after editing a descriptor
               php nevela seed Product          fill a resource with records
               php nevela user                  create someone who can sign in
-              php nevela update                update Nevela and the dashboard
+              php nevela upgrade               bring this app to the latest Nevela
               php nevela version               which Nevela this is
 
               php nevela migrate               php artisan migrate
