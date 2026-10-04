@@ -10,6 +10,7 @@ use InvalidArgumentException;
 use Nevela\Laravel\Media\FileTypes;
 use Nevela\Laravel\Media\UploadRejected;
 use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Nevela;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -36,7 +37,9 @@ final class UploadController
             return $this->refuse(404, "{$resource} has no file field called {$field}.");
         }
         $model = 'App\\Models\\'.$descriptor->name;
-        if (class_exists($model) && Gate::getPolicyFor($model) !== null && ! Gate::any(['create', 'viewAny'], $model)) {
+        // Storing a file is a write, so it takes the permission to create a record. Being
+        // allowed to look at the resource is not enough.
+        if (class_exists($model) && Gate::getPolicyFor($model) !== null && ! Gate::allows('create', $model)) {
             return $this->refuse(403, "You can't upload files to {$descriptor->pluralLabel}.");
         }
 
@@ -94,31 +97,41 @@ final class UploadController
      */
     public function show(string $path): Response
     {
-        if ($path === '' || str_contains($path, '..') || str_starts_with($path, '/') || str_starts_with($path, 'nevela/originals/')) {
+        // A key is letters, digits, dashes, dots and slashes. Anything else was never one.
+        if ($path === '' || str_contains($path, '..') || ! preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]*$#', $path)) {
             abort(404);
         }
-        $disk = Storage::disk(Uploads::disk());
-        $cache = 'public, max-age=31536000, immutable';
+        $cache ='public, max-age=31536000, immutable';
 
+        // Only what was uploaded through Nevela is served, found by its record. The disk may
+        // hold other things, and being on the disk is not a reason to hand a file out.
+        $upload = Upload::query()->where('key', $path)->first();
+        if ($upload === null) {
+            // Not a stored image: a rendition, then. "kettle.thumb.webp" belongs to the upload
+            // whose key is "kettle" and one extension.
+            $base = preg_replace('/\.[a-z][a-z0-9-]*\.[A-Za-z0-9]+$/', '', $path);
+            if ($base === null || $base === $path) {
+                abort(404);
+            }
+            // LIKE narrows it down; the exact comparison after it is what decides. ("_" in a
+            // key is a wildcard to LIKE, and how to escape it differs between databases.)
+            $upload = Upload::query()->where('key', 'like', $base.'.%')->limit(20)->get()
+                ->first(fn (Upload $candidate) => str_starts_with($candidate->key, $base.'.')
+                    && preg_match('/^\.[A-Za-z0-9]+$/', substr($candidate->key, strlen($base))) === 1);
+            if ($upload === null) {
+                abort(404);
+            }
+            if (! in_array($path, array_column($upload->renditions ?? [], 'key'), true)) {
+                // A rendition that was never made: the image itself, so a client can always
+                // ask for a thumbnail. Cached briefly, in case one is made later.
+                $path = $upload->key;
+                $cache = 'public, max-age=300';
+            }
+        }
+
+        $disk = Storage::disk($upload->disk);
         if (! $disk->exists($path)) {
-            $fallback = preg_replace('/\.[a-z][a-z0-9-]*(\.[A-Za-z0-9]+)$/', '$1', $path);
-            if ($fallback === $path || $fallback === null) {
-                abort(404);
-            }
-            $base = substr($fallback, 0, (int) strrpos($fallback, '.'));
-            $match = null;
-            foreach ($disk->files(dirname($fallback)) as $candidate) {
-                // The stored file may have a different extension from the one asked for.
-                if (str_starts_with($candidate, $base.'.') && substr_count(basename($candidate), '.') === 1) {
-                    $match = $candidate;
-                    break;
-                }
-            }
-            if ($match === null) {
-                abort(404);
-            }
-            $path = $match;
-            $cache = 'public, max-age=300';
+            abort(404);
         }
 
         return $disk->response($path, null, [

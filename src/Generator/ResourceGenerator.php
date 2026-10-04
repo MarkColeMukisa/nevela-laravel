@@ -636,10 +636,14 @@ final class ResourceGenerator
             if (! $child['field']->required) {
                 continue; // the database clears an optional link itself
             }
-            $label = strtolower($child['resource']->pluralLabel);
+            $one = strtolower($child['resource']->label);
+            $many = strtolower($child['resource']->pluralLabel);
+            $parent = $this->lower($d->label);
             $guards[] = <<<PHP
                 if ((\$count = \\App\\Models\\{$child['resource']->name}::query()->where('{$child['field']->column()}', \${$var}->getKey())->count()) > 0) {
-                    return response()->json(['error' => "{\$count} {$label} belong to this {$this->lower($d->label)}. Move or delete them first."], 409);
+                    return response()->json(['error' => \$count === 1
+                        ? '1 {$one} belongs to this {$parent}. Move or delete it first.'
+                        : "{\$count} {$many} belong to this {$parent}. Move or delete them first."], 409);
                 }
         PHP;
         }

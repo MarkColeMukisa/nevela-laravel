@@ -85,15 +85,17 @@ final class ImageOptimizer
 
         $primary = self::render($source, $profile->max, $format, $profile->quality, $transparent);
 
-        // A flat graphic saved as PNG can already be smaller than any re-encoding of it.
-        // When it needed no resizing either, the upload is the best version there is, so it
-        // is kept, and its renditions are made in the same format so they sit beside it.
-        // Not for a JPEG: re-encoding is what removes its location data.
-        $mime = (string) ($info['mime'] ?? '');
-        $own = ['image/png' => 'png', 'image/webp' => 'webp'][$mime] ?? null;
-        if ($own !== null && $profile->format === 'auto' && $primary['width'] === $width && $primary['height'] === $height && strlen($primary['bytes']) >= strlen($bytes)) {
-            $format = $own;
-            $primary = ['bytes' => $bytes, 'width' => $width, 'height' => $height, 'mime' => $mime, 'ext' => $own];
+        // A flat graphic (a diagram, a screenshot) is what PNG is good at: as a PNG it can be
+        // smaller than any lossy version of itself. So a PNG is also written as one, and the
+        // smaller result is kept, with its renditions in the same format so they sit beside
+        // it. It is written again, never copied: a PNG can carry text and location data in
+        // its metadata, and writing it from the pixels is what leaves that behind.
+        if (($info['mime'] ?? '') === 'image/png' && $profile->format === 'auto' && $format !== 'png' && self::writes('png')) {
+            $png = self::render($source, $profile->max, 'png', $profile->quality, $transparent);
+            if (strlen($png['bytes']) < strlen($primary['bytes'])) {
+                $format = 'png';
+                $primary = $png;
+            }
         }
 
         $result = [

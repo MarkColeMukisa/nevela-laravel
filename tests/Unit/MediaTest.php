@@ -123,19 +123,25 @@ final class MediaTest extends TestCase
         $this->assertLessThan(strlen($png) / 2, strlen($result['primary']['bytes']));
     }
 
-    public function test_a_flat_graphic_already_smaller_than_any_re_encoding_is_kept_as_it_is(): void
+    public function test_a_flat_graphic_stays_a_png_when_that_is_smaller_and_loses_its_metadata(): void
     {
-        $png = $this->photo(800, 500, 'png');
+        // A PNG with a note in its metadata, as an editor or a phone might leave.
+        $note = 'Comment'."\0".'taken at 0.3476 N, 32.5825 E';
+        $chunk = pack('N', strlen($note)).'tEXt'.$note.pack('N', crc32('tEXt'.$note));
+        $plain = $this->photo(800, 500, 'png');
+        $png = substr($plain, 0, 33).$chunk.substr($plain, 33);
+        $this->assertStringContainsString('32.5825', $png);
+        $this->assertNotFalse(getimagesizefromstring($png));
+
         $result = ImageOptimizer::transform($png, Profile::fromArray('default', []));
 
-        if ($result['primary']['mime'] === 'image/png') {
-            // Kept byte for byte, with its thumbnail beside it in the same format.
-            $this->assertSame($png, $result['primary']['bytes']);
-            $this->assertSame('png', $result['renditions']['thumb']['ext']);
-        } else {
-            $this->assertLessThan(strlen($png), strlen($result['primary']['bytes']));
-        }
-        $this->assertSame($result['primary']['ext'], $result['renditions']['thumb']['ext']);
+        // Flat shapes are what PNG is good at, so it stays one, with its thumbnail beside it in the same format.
+        $this->assertSame('image/png', $result['primary']['mime']);
+        $this->assertSame([800, 500], [$result['primary']['width'], $result['primary']['height']]);
+        $this->assertSame('png', $result['renditions']['thumb']['ext']);
+        // Written again from the pixels, not copied: the note is gone.
+        $this->assertStringNotContainsString('32.5825', $result['primary']['bytes']);
+        $this->assertStringNotContainsString('tEXt', $result['primary']['bytes']);
     }
 
     public function test_an_image_with_too_many_pixels_is_refused_before_it_is_decoded(): void

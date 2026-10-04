@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Media;
 
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Models\Upload;
@@ -73,24 +74,26 @@ final class Uploads
         $profile = self::profile($field->profile);
 
         if ($field->isImage() && in_array($mime, ImageOptimizer::OPTIMISABLE, true)) {
+            $written = [];
+            $originals = Storage::disk((string) config('nevela.uploads.originals_disk', 'local'));
+            $originalKey = null;
             try {
                 self::makeRoom();
                 $result = ImageOptimizer::transform($bytes, $profile);
                 $primary = $result['primary'];
                 $key = "{$base}.{$primary['ext']}";
-                $disk->put($key, $primary['bytes'], 'public');
+                self::write($disk, $written[] = $key, $primary['bytes'], 'public');
 
                 $renditions = [];
                 foreach ($result['renditions'] as $rendition => $image) {
                     $renditionKey = "{$base}.{$rendition}.{$image['ext']}";
-                    $disk->put($renditionKey, $image['bytes'], 'public');
+                    self::write($disk, $written[] = $renditionKey, $image['bytes'], 'public');
                     $renditions[$rendition] = ['key' => $renditionKey, 'width' => $image['width'], 'height' => $image['height'], 'size' => strlen($image['bytes'])];
                 }
 
-                $originalKey = null;
                 if ($profile->keepOriginal) {
                     $originalKey = "nevela/originals/{$base}.{$extension}";
-                    Storage::disk((string) config('nevela.uploads.originals_disk', 'local'))->put($originalKey, $bytes);
+                    self::write($originals, $originalKey, $bytes);
                 }
 
                 return self::remember(Upload::create($row + [
@@ -106,6 +109,11 @@ final class Uploads
                     'original_size' => strlen($bytes),
                 ]));
             } catch (Throwable $e) {
+                // Whatever was written before it failed is taken away again: no half-made sets.
+                $disk->delete($written);
+                if ($originalKey !== null) {
+                    $originals->delete($originalKey);
+                }
                 if ($profile->reject) {
                     throw new UploadRejected($e->getMessage(), previous: $e);
                 }
@@ -116,7 +124,7 @@ final class Uploads
         }
 
         $key = "{$base}.{$extension}";
-        $disk->put($key, $bytes, 'public');
+        self::write($disk, $key, $bytes, 'public');
         $size = str_starts_with($mime, 'image/') ? @getimagesizefromstring($bytes) : false;
 
         return self::remember(Upload::create($row + [
@@ -267,6 +275,20 @@ final class Uploads
         }
 
         return $dir.DIRECTORY_SEPARATOR.Str::uuid().'.tmp';
+    }
+
+    /**
+     * Write a file, and fail loudly if it wasn't written. Laravel's disks answer false by
+     * default instead of throwing, and a record must never point at a file that isn't there.
+     *
+     * @throws RuntimeException
+     */
+    private static function write(Filesystem $disk, string $key, string $bytes, ?string $visibility = null): void
+    {
+        $stored = $visibility === null ? $disk->put($key, $bytes) : $disk->put($key, $bytes, $visibility);
+        if ($stored === false) {
+            throw new RuntimeException("The file could not be written to storage ({$key}). Check the disk in config/nevela.php and that it is writable.");
+        }
     }
 
     private static function remember(Upload $upload): Upload

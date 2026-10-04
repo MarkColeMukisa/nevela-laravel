@@ -117,6 +117,7 @@ final class RelationsAndFilesTest extends TestCase
 
         $this->assertStringContainsString('public function destroy(Category $category): Response|JsonResponse', $controller);
         $this->assertStringContainsString("\\App\\Models\\Product::query()->where('category_id', \$category->getKey())->count()", $controller);
+        $this->assertStringContainsString("'1 product belongs to this category. Move or delete it first.'", $controller);
         $this->assertStringContainsString('products belong to this category. Move or delete them first."], 409);', $controller);
 
         $optional = Descriptor::fromSpec('Product', 'name:string, category:belongsTo(Category)?');
