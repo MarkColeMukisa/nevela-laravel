@@ -87,22 +87,31 @@ final class UpdateCommand extends Command
      * An upgrade to 0.4.0 left the old sign-in form in place, importing an action that no
      * longer exists, which stops `next build`. The record has already moved on, so the
      * ordinary plan can't see it. It is removed here, but only when it is byte for byte
-     * the template's file: one you have edited is yours and is left alone.
+     * the template's file: one you have edited is yours and is left alone. A copy is kept
+     * beside the backups, and an undo that goes back to a version which had the file puts
+     * it back.
      */
     private const LEFTOVERS = [
         'components/auth/sign-in-form.tsx' => 'aed2e3389ec0b85df2bbe02f9e91579982d0e5ab',
     ];
 
-    private function clearLeftovers(string $web): void
+    /** @param bool $check Say what would be removed, and remove nothing */
+    private function clearLeftovers(string $web, bool $check = false): void
     {
         $state = DashboardState::read($web);
         foreach (self::LEFTOVERS as $path => $fingerprint) {
             $file = "{$web}/{$path}";
-            if (is_file($file) && ! isset($state->files[$path]) && DashboardUpdate::hash((string) file_get_contents($file)) === $fingerprint) {
-                $this->put("{$web}/.nevela/backups/leftovers/{$path}", (string) file_get_contents($file));
-                unlink($file);
-                $this->components->twoColumnDetail($path, '<fg=gray>removed: an earlier upgrade should have (copy in .nevela/backups/leftovers)</>');
+            if (! is_file($file) || isset($state->files[$path]) || DashboardUpdate::hash((string) file_get_contents($file)) !== $fingerprint) {
+                continue;
             }
+            if ($check) {
+                $this->components->twoColumnDetail($path, '<fg=gray>would remove: an earlier upgrade should have</>');
+
+                continue;
+            }
+            $this->put("{$web}/.nevela/backups/leftovers/{$path}", (string) file_get_contents($file));
+            unlink($file);
+            $this->components->twoColumnDetail($path, '<fg=gray>removed: an earlier upgrade should have (copy in .nevela/backups/leftovers)</>');
         }
     }
 
@@ -230,9 +239,7 @@ final class UpdateCommand extends Command
 
             return self::SUCCESS;
         }
-        if (! $check) {
-            $this->clearLeftovers($web);
-        }
+        $this->clearLeftovers($web, $check);
         $state = DashboardState::read($web);
         $from = $state->template ?? self::FIRST_TRACKED;
         // In --check the package hasn't been updated, so look at the newest dashboard there is.
@@ -417,6 +424,16 @@ final class UpdateCommand extends Command
         // The record goes back too, so the same update can be run again later.
         if (is_file("{$dir}/.nevela.json")) {
             copy("{$dir}/.nevela.json", DashboardState::path($web));
+        }
+        // A leftover cleared since belongs to the version this goes back to, so it returns.
+        $before = DashboardState::read($web);
+        foreach (array_keys(self::LEFTOVERS) as $path) {
+            $copy = "{$web}/.nevela/backups/leftovers/{$path}";
+            if (isset($before->files[$path]) && ! is_file("{$web}/{$path}") && is_file($copy)) {
+                $this->put("{$web}/{$path}", (string) file_get_contents($copy));
+                $this->components->twoColumnDetail($path, '<fg=blue>restored</>');
+                $restored++;
+            }
         }
 
         $this->newLine();
