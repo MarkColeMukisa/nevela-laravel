@@ -37,18 +37,30 @@ final class Totp
      */
     public static function verify(string $secret, string $code, ?int $at = null): bool
     {
+        return self::step($secret, $code, $at) !== null;
+    }
+
+    /**
+     * Which 30-second step a right code belongs to, or null when the code is wrong.
+     *
+     * A caller that signs someone in keeps the step, and refuses a code from that step or
+     * an earlier one next time: a code is a one-time password, and without this the same
+     * six digits would work again for up to ninety seconds for anyone who saw them typed.
+     */
+    public static function step(string $secret, string $code, ?int $at = null): ?int
+    {
         $code = preg_replace('/\s+/', '', $code) ?? '';
         if (! preg_match('/^\d{6}$/', $code)) {
-            return false;
+            return null;
         }
         $at ??= time();
-        foreach ([0, -1, 1] as $step) {
-            if (hash_equals(self::code($secret, $at + $step * self::PERIOD), $code)) {
-                return true;
+        foreach ([0, -1, 1] as $offset) {
+            if (hash_equals(self::code($secret, $at + $offset * self::PERIOD), $code)) {
+                return intdiv($at, self::PERIOD) + $offset;
             }
         }
 
-        return false;
+        return null;
     }
 
     /** What an authenticator app scans: the secret, and the names it files it under. */

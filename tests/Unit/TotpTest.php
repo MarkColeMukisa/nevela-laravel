@@ -41,6 +41,17 @@ final class TotpTest extends TestCase
         $this->assertFalse(Totp::verify(self::secret(), Totp::code(self::secret(), $now + 90), $now));
     }
 
+    public function test_a_right_code_says_which_step_it_was_for_so_it_can_be_refused_next_time(): void
+    {
+        $now = 1700000010;
+        $step = intdiv($now, 30);
+
+        $this->assertSame($step, Totp::step(self::secret(), Totp::code(self::secret(), $now), $now));
+        $this->assertSame($step - 1, Totp::step(self::secret(), Totp::code(self::secret(), $now - 30), $now));
+        $this->assertSame($step + 1, Totp::step(self::secret(), Totp::code(self::secret(), $now + 30), $now));
+        $this->assertNull(Totp::step(self::secret(), '000000', $now));
+    }
+
     public function test_only_six_digits_are_a_code_however_they_are_spaced(): void
     {
         $now = 1700000010;

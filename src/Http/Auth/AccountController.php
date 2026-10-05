@@ -109,7 +109,7 @@ final class AccountController
         // already signed in just gets their account back, verified.
         return $request->user('sanctum')
             ? response()->json(['user' => Account::describe($user)])
-            : response()->json(Account::signIn($user, $request), 201);
+            : SignInController::finish($user, $request, byEmail: true);
     }
 
     /** PATCH auth/me: the name, and the picture (the key of an image uploaded with PUT auth/avatar). */

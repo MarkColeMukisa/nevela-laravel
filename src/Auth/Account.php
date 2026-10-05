@@ -81,11 +81,31 @@ final class Account
         if (! Schema::hasColumn('personal_access_tokens', 'user_agent')) {
             return; // the migration hasn't been run yet; signing in still works
         }
-        $ip = (string) $request->header('X-Nevela-Ip', '');
+        $dashboard = self::fromDashboard($request);
+        $ip = $dashboard ? (string) $request->header('X-Nevela-Ip', '') : '';
+        $agent = $dashboard ? (string) $request->header('X-Nevela-User-Agent', '') : '';
         DB::table('personal_access_tokens')->where('id', $tokenId)->update([
             'ip_address' => filter_var($ip, FILTER_VALIDATE_IP) ? $ip : $request->ip(),
-            'user_agent' => mb_substr((string) ($request->header('X-Nevela-User-Agent') ?: $request->userAgent()), 0, 512) ?: null,
+            'user_agent' => mb_substr($agent !== '' ? $agent : (string) $request->userAgent(), 0, 512) ?: null,
         ]);
+    }
+
+    /**
+     * Whether a request comes from the dashboard's server, and so may speak for a browser.
+     *
+     * Anyone can call the API directly and send the same headers, so they are believed only
+     * with the secret the dashboard and Laravel share (NEVELA_PROXY_SECRET in both). Without
+     * one configured they are believed from this machine while the app is in development,
+     * and otherwise not at all: a device then shows the address the request really came from.
+     */
+    public static function fromDashboard(Request $request): bool
+    {
+        $secret = config('nevela.auth.proxy_secret');
+        if (is_string($secret) && $secret !== '') {
+            return hash_equals($secret, (string) $request->header('X-Nevela-Proxy-Secret', ''));
+        }
+
+        return app()->environment('local') && in_array($request->ip(), ['127.0.0.1', '::1'], true);
     }
 
     /**

@@ -58,7 +58,9 @@ final class Web
     /** Only a path on the dashboard, never another site: for "where to go after signing in". */
     public static function path(mixed $value, string $fallback = '/dashboard'): string
     {
-        return is_string($value) && str_starts_with($value, '/') && ! str_starts_with($value, '//') && ! str_starts_with($value, '/\\') ? $value : $fallback;
+        // One leading slash, and no backslash or control character anywhere: browsers drop
+        // tabs and newlines from an address, which turns "/<tab>/evil.example" into "//evil.example".
+        return is_string($value) && preg_match('#^/(?!/)[^\\\\\x00-\x1F\x7F]*$#', $value) === 1 ? $value : $fallback;
     }
 
     private static function originOf(string $url): ?string

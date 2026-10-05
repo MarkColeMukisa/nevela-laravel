@@ -84,6 +84,13 @@ return [
         */
         'web_url' => env('NEVELA_WEB_URL', 'http://localhost:3000'),
 
+        /*
+        | A secret the dashboard's server and Laravel share, so Laravel can believe what the
+        | dashboard says about a person's browser and address (for the list of devices).
+        | Put the same value in the dashboard's .env.local. New apps get one when created.
+        */
+        'proxy_secret' => env('NEVELA_PROXY_SECRET'),
+
         /* The name an authenticator app and a passkey prompt show. Null: the app's name. */
         'issuer' => null,
     ],

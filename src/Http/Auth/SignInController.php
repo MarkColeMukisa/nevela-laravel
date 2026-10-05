@@ -4,13 +4,14 @@ namespace Nevela\Laravel\Http\Auth;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Passkeys;
-use Nevela\Laravel\Auth\Totp;
 use Nevela\Laravel\Auth\Web;
+use Nevela\Laravel\Models\TwoFactor;
 use RuntimeException;
 
 /**
@@ -74,22 +75,37 @@ final class SignInController
             return $this->refuse('EMAIL_NOT_VERIFIED', "Verify your email first: we've sent you a new link.", 403);
         }
 
-        $second = Account::twoFactor($user);
-        if ($second?->enabled_at !== null) {
-            $methods = array_values(array_filter([
-                $second->usesAuthenticator() && config('nevela.auth.two_factor.authenticator', true) ? 'totp' : null,
-                config('nevela.auth.two_factor.email', true) ? 'email' : null,
-                ($second->backup_codes ?? []) !== [] ? 'backup' : null,
-            ]));
+        return self::finish($user, $request);
+    }
 
-            return response()->json([
-                'twoFactor' => true,
-                'challenge' => Challenges::start('two-factor', ['user' => (string) $user->getAuthIdentifier(), 'device' => $input['deviceName'] ?? null], self::SECOND_STEP),
-                'methods' => $methods,
-            ]);
+    /**
+     * The first step is done: sign the person in, or ask for the second step.
+     *
+     * When the first step was an email (a sign-in link, a sign-in code, a verification
+     * code), an emailed code is not offered as the second: it would be the same thing
+     * twice, and someone who had only got into the mailbox would be let in. So an account
+     * with an authenticator app is asked for the app or a backup code, and an account
+     * whose only second step is email is signed in, which is all its owner asked for.
+     */
+    public static function finish(mixed $user, Request $request, bool $byEmail = false): JsonResponse
+    {
+        $second = Account::twoFactor($user);
+        $app = $second?->usesAuthenticator() && config('nevela.auth.two_factor.authenticator', true);
+        if ($second?->enabled_at === null || ($byEmail && ! $app)) {
+            return response()->json(Account::signIn($user, $request), 201);
         }
 
-        return response()->json(Account::signIn($user, $request), 201);
+        $methods = array_values(array_filter([
+            $app ? 'totp' : null,
+            ! $byEmail && config('nevela.auth.two_factor.email', true) ? 'email' : null,
+            ($second->backup_codes ?? []) !== [] ? 'backup' : null,
+        ]));
+
+        return response()->json([
+            'twoFactor' => true,
+            'challenge' => Challenges::start('two-factor', ['user' => (string) $user->getAuthIdentifier(), 'device' => $request->input('deviceName'), 'methods' => $methods], self::SECOND_STEP),
+            'methods' => $methods,
+        ]);
     }
 
     /** A password hash that matches nothing, made once per process with the app's own hashing settings. */
@@ -109,6 +125,9 @@ final class SignInController
         $user = $pending ? Account::model()::query()->find($pending['user']) : null;
         if (! $user) {
             return $this->refuse('SESSION_EXPIRED', 'That sign-in has expired. Start again.', 401);
+        }
+        if (! in_array('email', $pending['methods'] ?? [], true)) {
+            return $this->refuse('METHOD_NOT_ALLOWED', "An emailed code can't be the second step for this sign-in. Use your authenticator app or a backup code.", 422);
         }
 
         if (! Challenges::mayIssue('two-factor', (string) $pending['user'])) {
@@ -136,8 +155,11 @@ final class SignInController
             return $this->refuse('SESSION_EXPIRED', 'That sign-in has expired. Start again.', 401);
         }
 
+        if (! in_array($input['method'], $pending['methods'] ?? [], true)) {
+            return $this->refuse('METHOD_NOT_ALLOWED', "That isn't a way to finish this sign-in. Use your authenticator app or a backup code.", 422);
+        }
         $right = match ($input['method']) {
-            'totp' => $second->usesAuthenticator() && Totp::verify((string) $second->secret, $input['code']),
+            'totp' => $second->usesAuthenticator() && $second->spendCode($input['code']),
             'email' => isset($pending['code']) && hash_equals($pending['code'], Challenges::hash($input['code'])),
             'backup' => self::spendBackupCode($second, $input['code']),
         };
@@ -153,21 +175,28 @@ final class SignInController
         return response()->json(Account::signIn($user, $request), 201);
     }
 
-    /** A backup code works once. */
-    private static function spendBackupCode(mixed $second, string $code): bool
+    /**
+     * A backup code works once. The row is locked while it is read and written, so two
+     * requests arriving together with the same code can't both be let in.
+     */
+    private static function spendBackupCode(TwoFactor $second, string $code): bool
     {
         $hash = Challenges::hash(strtolower($code));
-        $codes = $second->backup_codes ?? [];
-        foreach ($codes as $index => $stored) {
-            if (hash_equals($stored, $hash)) {
-                unset($codes[$index]);
-                $second->forceFill(['backup_codes' => array_values($codes)])->save();
 
-                return true;
+        return DB::transaction(function () use ($second, $hash) {
+            $row = TwoFactor::query()->whereKey($second->getKey())->lockForUpdate()->first();
+            $codes = $row?->backup_codes ?? [];
+            foreach ($codes as $index => $stored) {
+                if (hash_equals($stored, $hash)) {
+                    unset($codes[$index]);
+                    $row->forceFill(['backup_codes' => array_values($codes)])->save();
+
+                    return true;
+                }
             }
-        }
 
-        return false;
+            return false;
+        });
     }
 
     /** POST auth/magic-link: email a link that signs the person in. */
@@ -200,7 +229,7 @@ final class SignInController
             $user->forceFill(['email_verified_at' => now()])->save();
         }
 
-        return response()->json(Account::signIn($user, $request), 201);
+        return self::finish($user, $request, byEmail: true);
     }
 
     /** POST auth/email-code: email a six-digit sign-in code. */
@@ -242,7 +271,7 @@ final class SignInController
             $user->forceFill(['email_verified_at' => now()])->save();
         }
 
-        return response()->json(Account::signIn($user, $request), 201);
+        return self::finish($user, $request, byEmail: true);
     }
 
     /** POST auth/passkey/options: what the browser needs to ask the device for a passkey. */

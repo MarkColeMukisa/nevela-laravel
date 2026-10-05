@@ -72,7 +72,8 @@ final class SecurityController
         if ($second?->secret === null) {
             return $this->refuse('TWO_FACTOR_NOT_STARTED', 'Start setting up two-factor first.', 409);
         }
-        if (! Totp::verify((string) $second->secret, $input['code'])) {
+        // Spent like any other code, so the one that confirmed the app can't then sign in with it.
+        if (! $second->spendCode($input['code'])) {
             return $this->refuse('INVALID_TWO_FACTOR_CODE', "That code isn't right. Check it and try again.", 422);
         }
         $second->fill(['totp_confirmed_at' => now(), 'enabled_at' => $second->enabled_at ?? now()])->save();

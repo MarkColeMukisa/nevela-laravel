@@ -38,6 +38,24 @@ class TwoFactor extends Model
         ];
     }
 
+    /**
+     * Accept a code from the authenticator app, once. False when the code is wrong, or
+     * when it is one that was already used (or older than one that was).
+     */
+    public function spendCode(string $code): bool
+    {
+        $step = $this->secret === null ? null : \Nevela\Laravel\Auth\Totp::step((string) $this->secret, $code);
+        if ($step === null) {
+            return false;
+        }
+        // One statement decides it, so two requests with the same code can't both win.
+        $taken = static::query()->whereKey($this->getKey())
+            ->where(fn ($query) => $query->whereNull('totp_last_step')->orWhere('totp_last_step', '<', $step))
+            ->update(['totp_last_step' => $step]);
+
+        return $taken === 1;
+    }
+
     /** Whether codes from an authenticator app are set up and confirmed. */
     public function usesAuthenticator(): bool
     {

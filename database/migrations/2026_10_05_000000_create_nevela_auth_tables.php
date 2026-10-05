@@ -36,6 +36,8 @@ return new class extends Migration
             // The authenticator app's secret, encrypted. Null when only email codes are used.
             $table->text('secret')->nullable();
             $table->timestamp('totp_confirmed_at')->nullable();
+            // The 30-second step of the last code accepted, so the same code isn't taken twice.
+            $table->unsignedBigInteger('totp_last_step')->nullable();
             // Hashes of the backup codes not used yet, encrypted.
             $table->text('backup_codes')->nullable();
             $table->timestamp('enabled_at')->nullable();
