@@ -24,10 +24,68 @@ return [
     'prefix' => 'api',
     'middleware' => ['api', 'auth:sanctum'],
 
-    /* Token auth endpoints for the Next.js app: POST/DELETE {prefix}/auth/token, GET {prefix}/auth/me. */
+    /*
+    | Signing in. Every endpoint is under {prefix}/auth. Email and password is always
+    | available; the rest can be switched off here. A method that is off is refused by the
+    | API, not just hidden, and `php artisan nevela:generate` writes these choices to the
+    | dashboard (apps/web/lib/auth-config.ts) so its screens agree.
+    */
     'auth' => [
         'enabled' => true,
         'token_name' => 'nevela-web',
+
+        /*
+        | Let anyone create their own account at /sign-up. Off by default, and accounts come
+        | from `php nevela user`: a generated policy lets every signed-in user do everything
+        | until you tighten it, so open sign-up on an untouched app would hand the dashboard
+        | to whoever finds it. Tighten app/Policies first, then set NEVELA_REGISTRATION=true.
+        */
+        'registration' => (bool) env('NEVELA_REGISTRATION', false),
+
+        /* A sign-in link by email. */
+        'magic_link' => true,
+
+        /* A 6-digit sign-in code by email. */
+        'email_code' => true,
+
+        /* Face ID, Touch ID, Windows Hello or a security key. */
+        'passkeys' => true,
+
+        'two_factor' => [
+            /* Codes from an authenticator app (TOTP), with backup codes. */
+            'authenticator' => true,
+            /* Codes by email as the second step. */
+            'email' => true,
+        ],
+
+        /* Refuse password sign-in until the email address is verified. */
+        'require_email_verification' => false,
+
+        /*
+        | Check new passwords against Have I Been Pwned's breach list. Only the first five
+        | characters of the password's hash are sent, and an outage lets the password through.
+        */
+        'check_breached_passwords' => true,
+
+        /*
+        | Sign-in attempts are limited to ten a minute per account. This is the limit per
+        | address on top of that. It is high because the dashboard's server makes the calls:
+        | to Laravel, everyone using the dashboard comes from that one address.
+        */
+        'attempts_per_address' => 300,
+
+        /* The role a self-registered account starts with. Null leaves the column alone. */
+        'default_role' => null,
+
+        /*
+        | Where the dashboard is, for the links in emails and for passkeys, which are tied
+        | to its address. In development any localhost port is accepted as well, because
+        | the dashboard moves to another port when 3000 is taken.
+        */
+        'web_url' => env('NEVELA_WEB_URL', 'http://localhost:3000'),
+
+        /* The name an authenticator app and a passkey prompt show. Null: the app's name. */
+        'issuer' => null,
     ],
 
     /* List defaults, matching Flare's client. */

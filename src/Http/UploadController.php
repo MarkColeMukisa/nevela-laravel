@@ -12,6 +12,8 @@ use Nevela\Laravel\Media\UploadRejected;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Field;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -30,24 +32,36 @@ final class UploadController
         try {
             $descriptor = Nevela::resource($resource);
         } catch (InvalidArgumentException) {
-            return $this->refuse(404, "There is no resource called {$resource}.");
+            return self::refuse(404, "There is no resource called {$resource}.");
         }
         $definition = $descriptor->fields[$field] ?? null;
         if ($definition === null || $definition->kind !== 'file') {
-            return $this->refuse(404, "{$resource} has no file field called {$field}.");
+            return self::refuse(404, "{$resource} has no file field called {$field}.");
         }
         $model = 'App\\Models\\'.$descriptor->name;
         // Storing a file is a write, so it takes the permission to create a record. Being
         // allowed to look at the resource is not enough.
         if (class_exists($model) && Gate::getPolicyFor($model) !== null && ! Gate::allows('create', $model)) {
-            return $this->refuse(403, "You can't upload files to {$descriptor->pluralLabel}.");
+            return self::refuse(403, "You can't upload files to {$descriptor->pluralLabel}.");
         }
 
+        $upload = self::receive($request, $descriptor, $definition);
+
+        return $upload instanceof JsonResponse ? $upload : response()->json(Uploads::ref($upload->key), 201);
+    }
+
+    /**
+     * Take the file in a request's body, check it against a field and store it. Returns
+     * the upload, or the response that says why it was refused. Shared with the profile
+     * picture, which is an image field on the user without being a generated resource.
+     */
+    public static function receive(Request $request, Descriptor $descriptor, Field $definition): Upload|JsonResponse
+    {
         $name = basename(str_replace('\\', '/', (string) $request->query('name', 'file')));
         $limit = Uploads::maxBytes();
         $megabytes = round($limit / 1024 / 1024, 1);
         if ((int) $request->header('Content-Length', '0') > $limit) {
-            return $this->refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
+            return self::refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
         }
 
         // Copied to a temporary file with the limit enforced while it arrives: the length
@@ -62,10 +76,10 @@ final class UploadController
                 fclose($out);
             }
             if ($written === false || $written === 0) {
-                return $this->refuse(422, 'The upload arrived empty. Try again.');
+                return self::refuse(422, 'The upload arrived empty. Try again.');
             }
             if ($written > $limit) {
-                return $this->refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
+                return self::refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
             }
 
             $mime = FileTypes::sniff($path);
@@ -75,16 +89,14 @@ final class UploadController
             if (FileTypes::forbidden($mime) || ! FileTypes::accepts($definition->accept, $effective) || ! FileTypes::consistent($declared, $mime)) {
                 $wanted = in_array('any', $definition->accept, true) ? 'a file this field can store' : implode(' or ', $definition->accept).' data';
 
-                return $this->refuse(422, "{$name} doesn't contain {$wanted}. It may have been renamed; choose the original file.");
+                return self::refuse(422, "{$name} doesn't contain {$wanted}. It may have been renamed; choose the original file.");
             }
 
             try {
-                $upload = Uploads::store($descriptor, $definition, $name, $path, strtolower(trim(explode(';', $effective)[0])), (string) ($request->user()?->getAuthIdentifier() ?? '') ?: null);
+                return Uploads::store($descriptor, $definition, $name, $path, strtolower(trim(explode(';', $effective)[0])), (string) ($request->user()?->getAuthIdentifier() ?? '') ?: null);
             } catch (UploadRejected $e) {
-                return $this->refuse(422, $e->getMessage());
+                return self::refuse(422, $e->getMessage());
             }
-
-            return response()->json(Uploads::ref($upload->key), 201);
         } finally {
             @unlink($path);
         }
@@ -140,7 +152,7 @@ final class UploadController
         ]);
     }
 
-    private function refuse(int $status, string $message): JsonResponse
+    private static function refuse(int $status, string $message): JsonResponse
     {
         return response()->json(['error' => $message], $status);
     }

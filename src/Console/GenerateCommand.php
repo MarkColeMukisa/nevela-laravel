@@ -90,6 +90,7 @@ final class GenerateCommand extends Command
         }
         $files[] = $generator->routes($all);
         $files[] = $generator->registry($all);
+        $files[] = $generator->authConfig((array) config('nevela.auth', []));
 
         $roots = ['api' => base_path()];
         if (($web = config('nevela.web_path')) && is_dir($web)) {

@@ -3,7 +3,10 @@
 namespace Nevela\Laravel;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Console\ServeCommand;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Nevela\Laravel\Console\DevCommand;
@@ -16,6 +19,9 @@ use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Console\VersionCommand;
 use Nevela\Laravel\Http\FlareErrors;
+use Nevela\Laravel\Http\Auth\AccountController;
+use Nevela\Laravel\Http\Auth\SecurityController;
+use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Media\Uploads;
@@ -58,16 +64,78 @@ final class NevelaServiceProvider extends ServiceProvider
         }
     }
 
+    /**
+     * Ten tries a minute at one account is plenty for a person and useless for guessing.
+     *
+     * The count is kept per account (or per sign-in that is under way), not per address
+     * alone: the dashboard's server makes these calls, so to Laravel every person arrives
+     * from the same address, and one limit for all of them would lock everyone out
+     * together. A second, much higher limit per address caps what any one caller can do.
+     */
+    private function limitAttempts(): void
+    {
+        RateLimiter::for('nevela-auth', function (Request $request) {
+            $who = $request->input('email') ?: $request->input('challenge') ?: $request->input('token') ?: $request->user('sanctum')?->getAuthIdentifier();
+            $limits = [Limit::perMinute((int) config('nevela.auth.attempts_per_address', 300))->by('nevela-auth-address:'.$request->ip())];
+            if (is_scalar($who) && (string) $who !== '') {
+                $limits[] = Limit::perMinute(10)->by('nevela-auth:'.sha1(mb_strtolower((string) $who)));
+            }
+
+            return $limits;
+        });
+    }
+
     private function registerRoutes(): void
     {
+        $this->limitAttempts();
+
         $prefix = config('nevela.prefix', 'api');
 
         if (config('nevela.auth.enabled', true)) {
-            Route::prefix($prefix)->middleware('api')->name('nevela.auth.')->group(function () {
-                Route::post('auth/token', [TokenController::class, 'store'])->middleware('throttle:6,1')->name('store');
+            Route::prefix($prefix.'/auth')->middleware('api')->name('nevela.auth.')->group(function () {
+                Route::get('config', [SignInController::class, 'config'])->name('config');
+
+                // Anything that takes a secret, or sends an email, is slowed down (see limitAttempts()).
+                Route::middleware('throttle:nevela-auth')->group(function () {
+                    Route::post('token', [SignInController::class, 'password'])->name('store');
+                    Route::post('two-factor/send', [SignInController::class, 'sendSecondStep'])->name('two-factor.send');
+                    Route::post('two-factor/verify', [SignInController::class, 'secondStep'])->name('two-factor.verify');
+                    Route::post('magic-link', [SignInController::class, 'sendLink'])->name('magic-link.send');
+                    Route::post('magic-link/verify', [SignInController::class, 'link'])->name('magic-link.verify');
+                    Route::post('email-code', [SignInController::class, 'sendCode'])->name('email-code.send');
+                    Route::post('email-code/verify', [SignInController::class, 'code'])->name('email-code.verify');
+                    Route::post('passkey/options', [SignInController::class, 'passkeyOptions'])->name('passkey.options');
+                    Route::post('passkey', [SignInController::class, 'passkey'])->name('passkey.verify');
+                    Route::post('register', [AccountController::class, 'register'])->name('register');
+                    Route::post('email/send', [AccountController::class, 'resendVerification'])->name('email.send');
+                    Route::post('email/verify', [AccountController::class, 'verifyEmail'])->name('email.verify');
+                    Route::post('password/forgot', [AccountController::class, 'forgotPassword'])->name('password.forgot');
+                    Route::post('password/reset', [AccountController::class, 'resetPassword'])->name('password.reset');
+                });
+
                 Route::middleware('auth:sanctum')->group(function () {
-                    Route::get('auth/me', [TokenController::class, 'show'])->name('show');
-                    Route::delete('auth/token', [TokenController::class, 'destroy'])->name('destroy');
+                    Route::get('me', [TokenController::class, 'show'])->name('show');
+                    Route::patch('me', [AccountController::class, 'update'])->name('update');
+                    Route::put('avatar', [AccountController::class, 'avatar'])->name('avatar');
+                    Route::delete('token', [TokenController::class, 'destroy'])->name('destroy');
+                    Route::post('password', [AccountController::class, 'changePassword'])->middleware('throttle:nevela-auth')->name('password.change');
+
+                    Route::get('sessions', [AccountController::class, 'sessions'])->name('sessions');
+                    Route::delete('sessions', [AccountController::class, 'revokeOtherSessions'])->name('sessions.revoke-others');
+                    Route::delete('sessions/{id}', [AccountController::class, 'revokeSession'])->name('sessions.revoke');
+
+                    Route::middleware('throttle:nevela-auth')->group(function () {
+                        Route::post('two-factor/enable', [SecurityController::class, 'enable'])->name('two-factor.enable');
+                        Route::post('two-factor/confirm', [SecurityController::class, 'confirm'])->name('two-factor.confirm');
+                        Route::post('two-factor/disable', [SecurityController::class, 'disable'])->name('two-factor.disable');
+                        Route::post('two-factor/backup-codes', [SecurityController::class, 'regenerateBackupCodes'])->name('two-factor.backup-codes');
+                    });
+
+                    Route::get('passkeys', [SecurityController::class, 'passkeys'])->name('passkeys');
+                    Route::post('passkeys/options', [SecurityController::class, 'passkeyOptions'])->name('passkeys.options');
+                    Route::post('passkeys', [SecurityController::class, 'addPasskey'])->name('passkeys.add');
+                    Route::patch('passkeys/{id}', [SecurityController::class, 'renamePasskey'])->name('passkeys.rename');
+                    Route::delete('passkeys/{id}', [SecurityController::class, 'removePasskey'])->name('passkeys.remove');
                 });
             });
         }

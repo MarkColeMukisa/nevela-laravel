@@ -314,6 +314,66 @@ final class ResourceGenerator
         TS);
     }
 
+    /**
+     * How people sign in, for the dashboard's screens: which buttons to draw. The choices
+     * are made in the Laravel app's config/nevela.php, which is also what enforces them.
+     *
+     * @param  array<string, mixed>  $auth  The "auth" section of config/nevela.php
+     */
+    public function authConfig(array $auth): GeneratedFile
+    {
+        $flag = fn (string $key, bool $default = true) => (bool) data_get($auth, $key, $default) ? 'true' : 'false';
+        $m = self::M;
+        $e = self::E;
+
+        return new GeneratedFile(GeneratedFile::TARGET_WEB, 'lib/auth-config.ts', <<<TS
+        /**
+         * How people sign in to this app.
+         *
+         * Written by `php nevela generate` from the "auth" section of config/nevela.php in the
+         * Laravel app. Change a setting there, then generate again: Laravel refuses a method
+         * that is switched off, and this file keeps the screens from offering it.
+         *
+         * Email and password sign-in is always available.
+         */
+        export type SocialProvider = "google" | "github" | "apple" | "microsoft";
+
+        {$m}
+        export const authConfig = {
+          /** People can create their own account at /sign-up. */
+          registration: {$flag('registration', false)},
+          /** A sign-in link by email. */
+          magicLink: {$flag('magic_link')},
+          /** A 6-digit sign-in code by email. */
+          emailOtp: {$flag('email_code')},
+          /** Face ID, Touch ID, Windows Hello or a security key. */
+          passkeys: {$flag('passkeys')},
+          twoFactor: {
+            /** Codes from an authenticator app (TOTP), with backup codes. */
+            authenticator: {$flag('two_factor.authenticator')},
+            /** Codes by email as the second step. */
+            email: {$flag('two_factor.email')},
+          },
+          /** Refuse password sign-in until the email address is verified. */
+          requireEmailVerification: {$flag('require_email_verification', false)},
+          /** Check new passwords against Have I Been Pwned's breach list. */
+          checkBreachedPasswords: {$flag('check_breached_passwords')},
+          /** Signing in with Google, GitHub and the like isn't part of Nevela yet. */
+          social: [] as SocialProvider[],
+        };
+        {$e}
+
+        /** Whether any second factor can be set up. */
+        export const twoFactorAvailable = authConfig.twoFactor.authenticator || authConfig.twoFactor.email;
+
+        /** The social providers that are switched on and configured. None yet. */
+        export function enabledSocialProviders(): SocialProvider[] {
+          return authConfig.social;
+        }
+
+        TS);
+    }
+
     /** @param list<Descriptor> $all */
     public function routes(array $all): GeneratedFile
     {

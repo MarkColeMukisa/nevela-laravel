@@ -5,49 +5,36 @@ namespace Nevela\Laravel\Http;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
-use RuntimeException;
+use Nevela\Laravel\Auth\Account;
 
 /**
- * Sanctum personal access tokens for the Next.js app.
+ * The Sanctum token a client is signed in with: who it belongs to, and giving it up.
  *
- * The Next.js server exchanges credentials for a token, keeps it in an httpOnly cookie,
- * and sends it as `Authorization: Bearer …` on every call to Laravel. The browser never
- * sees the token.
+ * The Next.js server keeps the token in an httpOnly cookie and sends it as
+ * `Authorization: Bearer …` on every call to Laravel. The browser never sees it.
+ * Getting a token is Auth\SignInController's job.
  */
 final class TokenController
 {
-    public function store(Request $request): JsonResponse
-    {
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-            'deviceName' => ['nullable', 'string', 'max:255'],
-        ]);
-
-        $model = config('auth.providers.users.model');
-        $user = $model::query()->where('email', $credentials['email'])->first();
-        if (! $user || ! Hash::check($credentials['password'], $user->getAuthPassword())) {
-            throw ValidationException::withMessages(['email' => 'These credentials do not match our records.']);
-        }
-        if (! method_exists($user, 'createToken')) {
-            throw new RuntimeException('Add Laravel\Sanctum\HasApiTokens to '.$model.' to issue Nevela tokens.');
-        }
-
-        $token = $user->createToken($credentials['deviceName'] ?? config('nevela.auth.token_name', 'nevela-web'));
-
-        return response()->json(['token' => $token->plainTextToken, 'user' => self::user($user)], 201);
-    }
-
+    /** GET auth/me */
     public function show(Request $request): JsonResponse
     {
-        return response()->json(['user' => self::user($request->user())]);
+        $token = $request->user()->currentAccessToken();
+
+        return response()->json([
+            'user' => self::user($request->user()),
+            // Which of the account's devices is asking: its id in GET auth/sessions.
+            'session' => ['id' => $token && method_exists($token, 'getKey') ? (string) $token->getKey() : null],
+        ]);
     }
 
+    /** DELETE auth/token: sign this device out. */
     public function destroy(Request $request): Response
     {
-        $request->user()?->currentAccessToken()?->delete();
+        $token = $request->user()?->currentAccessToken();
+        if ($token && method_exists($token, 'delete')) {
+            $token->delete();
+        }
 
         return response()->noContent();
     }
@@ -55,11 +42,6 @@ final class TokenController
     /** What the dashboard needs to know about the signed-in user. */
     public static function user(mixed $user): array
     {
-        return [
-            'id' => (string) $user->getAuthIdentifier(),
-            'name' => $user->name ?? null,
-            'email' => $user->email ?? null,
-            'role' => $user->role ?? null,
-        ];
+        return Account::describe($user);
     }
 }
