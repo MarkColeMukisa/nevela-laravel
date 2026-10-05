@@ -80,6 +80,32 @@ final class UpdateCommand extends Command
         return preg_match('/^\^\d+\.\d+(\.\d+)?$/', $constraint) === 1;
     }
 
+    /**
+     * Files an earlier upgrade should have removed and didn't: path => the fingerprint of
+     * the template's own version of it.
+     *
+     * An upgrade to 0.4.0 left the old sign-in form in place, importing an action that no
+     * longer exists, which stops `next build`. The record has already moved on, so the
+     * ordinary plan can't see it. It is removed here, but only when it is byte for byte
+     * the template's file: one you have edited is yours and is left alone.
+     */
+    private const LEFTOVERS = [
+        'components/auth/sign-in-form.tsx' => 'aed2e3389ec0b85df2bbe02f9e91579982d0e5ab',
+    ];
+
+    private function clearLeftovers(string $web): void
+    {
+        $state = DashboardState::read($web);
+        foreach (self::LEFTOVERS as $path => $fingerprint) {
+            $file = "{$web}/{$path}";
+            if (is_file($file) && ! isset($state->files[$path]) && DashboardUpdate::hash((string) file_get_contents($file)) === $fingerprint) {
+                $this->put("{$web}/.nevela/backups/leftovers/{$path}", (string) file_get_contents($file));
+                unlink($file);
+                $this->components->twoColumnDetail($path, '<fg=gray>removed: an earlier upgrade should have (copy in .nevela/backups/leftovers)</>');
+            }
+        }
+    }
+
     private function pendingMigrations(): int
     {
         try {
@@ -204,6 +230,9 @@ final class UpdateCommand extends Command
 
             return self::SUCCESS;
         }
+        if (! $check) {
+            $this->clearLeftovers($web);
+        }
         $state = DashboardState::read($web);
         $from = $state->template ?? self::FIRST_TRACKED;
         // In --check the package hasn't been updated, so look at the newest dashboard there is.
@@ -267,13 +296,19 @@ final class UpdateCommand extends Command
                 } elseif ($action === DashboardUpdate::CONFLICT) {
                     // Yours stays. The new version is put where you can compare the two.
                     $this->put("{$web}/{$incoming}/{$path}", $next[$path]);
+                } elseif ($action === DashboardUpdate::REMOVED && is_file("{$web}/{$path}")) {
+                    // The template dropped it and you never changed it, so it is the template's
+                    // file, not yours. Left behind, it would go on being compiled against code
+                    // that has moved on, and break the build. It is in the backup.
+                    $this->put("{$web}/{$backup}/{$path}", (string) file_get_contents("{$web}/{$path}"));
+                    unlink("{$web}/{$path}");
                 }
             }
             $this->components->twoColumnDetail($path, match ($action) {
                 DashboardUpdate::UPDATE => $check ? '<fg=blue>would update</>' : '<fg=blue>updated</>',
                 DashboardUpdate::ADD => $check ? '<fg=green>would add</>' : '<fg=green>added</>',
                 DashboardUpdate::CONFLICT => '<fg=yellow>kept yours — changed in the template too</>',
-                DashboardUpdate::REMOVED => '<fg=gray>no longer in the template</>',
+                DashboardUpdate::REMOVED => $check ? '<fg=gray>would remove: no longer in the template</>' : '<fg=gray>removed: no longer in the template</>',
             });
         }
 
@@ -289,7 +324,7 @@ final class UpdateCommand extends Command
         $this->newLine();
 
         if (! $check) {
-            $touched = $done[DashboardUpdate::UPDATE] !== [] || $done[DashboardUpdate::ADD] !== [] || ($packages['changed'] ?? []) !== [];
+            $touched = $done[DashboardUpdate::UPDATE] !== [] || $done[DashboardUpdate::ADD] !== [] || $done[DashboardUpdate::REMOVED] !== [] || ($packages['changed'] ?? []) !== [];
             if ($packages && $packages['changed']) {
                 $this->put("{$web}/{$backup}/package.json", (string) file_get_contents("{$web}/package.json"));
                 file_put_contents("{$web}/package.json", $packages['json']);
@@ -318,7 +353,7 @@ final class UpdateCommand extends Command
             $state->write($web);
 
             if ($touched) {
-                $this->line("  Every file this replaced was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela upgrade --undo</>");
+                $this->line("  Every file this replaced or removed was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela upgrade --undo</>");
             }
         }
         if ($done[DashboardUpdate::CONFLICT] !== []) {
@@ -326,7 +361,7 @@ final class UpdateCommand extends Command
             $this->components->warn("{$count} file(s) changed in the template and in your app. Yours were kept.".($check ? '' : " The template's new versions are in {$this->relative($web)}/{$incoming} for you to compare."));
         }
         if ($done[DashboardUpdate::REMOVED] !== []) {
-            $this->line('  '.count($done[DashboardUpdate::REMOVED])." file(s) are no longer part of the template. They were left in place; delete them if you don't use them.");
+            $this->line('  '.count($done[DashboardUpdate::REMOVED]).' file(s) the template no longer has '.($check ? 'would be' : 'were').' removed. You had not changed them; a file you changed is always kept.');
         }
         if (! $check && ($packages['changed'] ?? [])) {
             $this->line('  The dashboard\'s dependencies changed. Install them: <fg=cyan>cd '.$this->relative($web).' && '.DevCommand::packageManager($web).' install</>');
