@@ -3,17 +3,19 @@
 The Laravel side of [Nevela](https://nevela-docs.vercel.app): describe a resource once and get its model, migration, validation, policy and REST API, plus the Next.js dashboard screens for it.
 
 ```sh
-php artisan nevela:resource Product --fields="name:string, sku:string!, price:money, kind:enum(stock|digital), notes:text?"
-php artisan migrate
+nevela resource Product --fields="name:string, sku:string!, price:money, kind:enum(stock|digital), notes:text?"
 ```
 
 ## Start a new app
 
-The quickest way is the create command, which sets up Laravel, this package and the dashboard together:
+The quickest way is the `nevela` command, which sets up Laravel, this package and the dashboard together:
 
 ```sh
-pnpm create nevela my-app
+npm install -g create-nevela    # once
+nevela new my-app
 ```
+
+Without installing it, `pnpm create nevela my-app` does the same.
 
 ## Add it to an existing Laravel app
 
