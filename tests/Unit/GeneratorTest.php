@@ -41,6 +41,18 @@ final class GeneratorTest extends TestCase
         $this->assertStringContainsString("'launchOn' => 'launch_on'", $php);
     }
 
+    public function test_a_policy_asks_for_the_resources_permissions(): void
+    {
+        $php = (new ResourceGenerator)->policy($this->product());
+
+        // One permission per action, named after the table, and nothing allowed outright.
+        // (viewAny and view share one; "edit" is also in the comment's example.)
+        foreach (["'products.view'" => 2, "'products.create'" => 1, "'products.edit'" => 2, "'products.delete'" => 1] as $permission => $times) {
+            $this->assertSame($times, substr_count($php, "\$user->can({$permission})"), $permission);
+        }
+        $this->assertStringNotContainsString('return true;', $php);
+    }
+
     public function test_emits_a_flare_descriptor(): void
     {
         $ts = (new ResourceGenerator)->typescript($this->product());

@@ -806,34 +806,35 @@ final class ResourceGenerator
         /**
          * Who may do what with {$d->pluralLabel}. Generated once — this file is yours.
          *
-         * Default: any signed-in user (routes already require auth:sanctum). Tighten this
-         * before production, e.g. `return in_array(\$user->role, ['admin', 'staff']);`.
+         * Each action asks for a permission, which a person has through their roles
+         * (the dashboard's Roles screen). Add your own conditions beside them, e.g.
+         * `return \$user->can('{$d->table}.edit') && \${$var}->user_id === \$user->id;`.
          */
         class {$d->name}Policy
         {
             public function viewAny(User \$user): bool
             {
-                return true;
+                return \$user->can('{$d->table}.view');
             }
 
             public function view(User \$user, {$d->name} \${$var}): bool
             {
-                return true;
+                return \$user->can('{$d->table}.view');
             }
 
             public function create(User \$user): bool
             {
-                return true;
+                return \$user->can('{$d->table}.create');
             }
 
             public function update(User \$user, {$d->name} \${$var}): bool
             {
-                return true;
+                return \$user->can('{$d->table}.edit');
             }
 
             public function delete(User \$user, {$d->name} \${$var}): bool
             {
-                return true;
+                return \$user->can('{$d->table}.delete');
             }
         }
 

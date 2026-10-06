@@ -2,10 +2,13 @@
 
 namespace Nevela\Laravel\Auth;
 
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rules\Password;
+use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\TwoFactor;
 use RuntimeException;
@@ -35,12 +38,20 @@ final class Account
     {
         $avatar = $user->avatar ?? null;
         $file = is_string($avatar) && $avatar !== '' ? Uploads::ref($avatar) : null;
+        $roles = Access::ready() ? Access::rolesOf($user)->pluck('name')->all() : [];
+        $grants = Access::grantsFor($user);
 
         return [
             'id' => (string) $user->getAuthIdentifier(),
             'name' => $user->name ?? null,
             'email' => $user->email ?? null,
-            'role' => $user->role ?? null,
+            // The first role, for code written when an account had one; "roles" has them all.
+            'role' => $roles[0] ?? ($user->role ?? null),
+            'roles' => $roles,
+            // Everything they may do, patterns already resolved, so a client only looks a
+            // permission up. Laravel decides each request for itself whatever a client shows.
+            'permissions' => Permissions::expand($grants),
+            'isAdmin' => Permissions::hasAll($grants),
             'emailVerified' => ($user->email_verified_at ?? null) !== null,
             'twoFactorEnabled' => self::twoFactor($user)?->enabled_at !== null,
             // The key is what is stored; "image" is the small rendition, ready for an <img>.
@@ -62,6 +73,11 @@ final class Account
      */
     public static function signIn(mixed $user, Request $request): array
     {
+        // Every way of signing in ends here, so this is the one place a switched-off
+        // account is turned away, whichever way it came.
+        if (! Access::active($user)) {
+            throw new HttpResponseException(response()->json(['error' => 'This account has been switched off. Ask an administrator.', 'code' => 'ACCOUNT_DISABLED'], 403));
+        }
         if (! method_exists($user, 'createToken')) {
             throw new RuntimeException('Add Laravel\Sanctum\HasApiTokens to '.self::model().' to issue Nevela tokens.');
         }

@@ -6,9 +6,12 @@ use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
@@ -18,6 +21,9 @@ use Nevela\Laravel\Console\StatusCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Console\VersionCommand;
+use Nevela\Laravel\Http\Access\RolesAreSetUp;
+use Nevela\Laravel\Http\Access\RolesController;
+use Nevela\Laravel\Http\Access\UsersController;
 use Nevela\Laravel\Http\FlareErrors;
 use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
@@ -58,6 +64,12 @@ final class NevelaServiceProvider extends ServiceProvider
                 $handler->renderable(fn (\Throwable $e, $request) => FlareErrors::render($e, $request));
             }
         });
+
+        // An ability shaped like a permission ("products.view") is answered from the
+        // person's roles. So `$user->can('products.view')`, `Gate::authorize(...)` and
+        // `@can` all work, in a policy or anywhere else. Any other ability is left to
+        // the app's own policies and gates.
+        Gate::before(fn ($user, $ability) => is_string($ability) && Permissions::isPermission($ability) ? Access::allows($user, $ability) : null);
 
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
@@ -158,6 +170,23 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/profiles', fn () => response()->json([
                 'data' => array_map(fn ($name) => (array) Uploads::profile($name), array_keys((array) config('nevela.uploads.profiles', ['default' => []]))),
             ]))->name('profiles');
+
+            // Users and roles, for whoever holds the permissions to manage them.
+            Route::middleware(RolesAreSetUp::class)->group(function () {
+                Route::get('_nevela/users', [UsersController::class, 'index'])->name('users.index');
+                Route::post('_nevela/users', [UsersController::class, 'store'])->name('users.store');
+                Route::get('_nevela/users/{id}', [UsersController::class, 'show'])->name('users.show');
+                Route::patch('_nevela/users/{id}', [UsersController::class, 'update'])->name('users.update');
+                Route::delete('_nevela/users/{id}', [UsersController::class, 'destroy'])->name('users.destroy');
+                Route::delete('_nevela/users/{id}/sessions', [UsersController::class, 'revokeSessions'])->name('users.sessions.revoke');
+
+                Route::get('_nevela/permissions', [RolesController::class, 'catalog'])->name('permissions');
+                Route::get('_nevela/roles', [RolesController::class, 'index'])->name('roles.index');
+                Route::post('_nevela/roles', [RolesController::class, 'store'])->name('roles.store');
+                Route::get('_nevela/roles/{id}', [RolesController::class, 'show'])->name('roles.show');
+                Route::patch('_nevela/roles/{id}', [RolesController::class, 'update'])->name('roles.update');
+                Route::delete('_nevela/roles/{id}', [RolesController::class, 'destroy'])->name('roles.destroy');
+            });
 
             // The descriptors, so the web app (and tooling) can check it matches the API.
             Route::get('_nevela/resources', fn () => response()->json([

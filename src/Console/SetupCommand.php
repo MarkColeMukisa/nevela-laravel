@@ -15,9 +15,10 @@ final class SetupCommand extends Command
     protected $signature = 'nevela:setup
         {--name= : Name for the starter account}
         {--email= : Email for the starter account. Leave out to create no account}
-        {--password= : Password for the starter account}';
+        {--password= : Password for the starter account}
+        {--no-sample-users : Create the starter account only, without the ten sample users}';
 
-    protected $description = 'Finish setting up a new app: key, Sanctum\'s migration, generated files, migrations and a starter account';
+    protected $description = 'Finish setting up a new app: key, Sanctum\'s migration, generated files, migrations, a starter account and sample users';
 
     protected $hidden = true;
 
@@ -39,6 +40,7 @@ final class SetupCommand extends Command
         }
 
         if ($this->option('email')) {
+            // The first account in an app is its administrator.
             $status = $this->call('nevela:user', [
                 '--name' => $this->option('name') ?: 'Admin',
                 '--email' => $this->option('email'),
@@ -47,6 +49,11 @@ final class SetupCommand extends Command
             if ($status !== self::SUCCESS) {
                 // The app itself is fine; the installer says how to add an account by hand.
                 return 2;
+            }
+            // Ten more people, with the same password, so the Users screen and the roles
+            // have something in them. Missing them is no reason to call the setup failed.
+            if (! $this->option('no-sample-users')) {
+                $this->callSilently('nevela:user', ['--sample' => true, '--password' => $this->option('password')]);
             }
         }
 

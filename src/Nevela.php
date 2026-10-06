@@ -63,6 +63,7 @@ final class Nevela
     public static function forget(): void
     {
         self::$descriptors = [];
+        Access\Permissions::forget();
     }
 
     /**

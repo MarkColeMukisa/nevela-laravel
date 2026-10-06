@@ -8,6 +8,7 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
@@ -46,11 +47,14 @@ final class AccountController
 
         $user = new $model;
         $attributes = ['name' => $input['name'], 'email' => mb_strtolower(trim($input['email'])), 'password' => Hash::make($input['password'])];
-        $role = config('nevela.auth.default_role');
+        $role = config('nevela.auth.default_role', 'USER');
         if ($role !== null && Schema::hasColumn($user->getTable(), 'role')) {
             $attributes['role'] = $role;
         }
         $user->forceFill($attributes)->save();
+        if (is_string($role) && $role !== '') {
+            Access::grant($user, $role);
+        }
         self::sendVerification($user, $request);
 
         if (config('nevela.auth.require_email_verification', false)) {

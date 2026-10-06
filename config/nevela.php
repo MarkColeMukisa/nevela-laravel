@@ -25,6 +25,18 @@ return [
     'middleware' => ['api', 'auth:sanctum'],
 
     /*
+    | Permissions of your own, beside the ones every resource gets (products.view,
+    | products.create, products.edit, products.delete) and the built-in users.* and roles.*.
+    | They appear on the dashboard's Roles screen, and you check one anywhere in Laravel
+    | with `$user->can('reports.view')`. Actions are any of: create, view, edit, delete.
+    |
+    |   'permissions' => [
+    |       'reports' => ['name' => 'Reports', 'actions' => ['view']],
+    |   ],
+    */
+    'permissions' => [],
+
+    /*
     | Signing in. Every endpoint is under {prefix}/auth. Email and password is always
     | available; the rest can be switched off here. A method that is off is refused by the
     | API, not just hidden, and `php artisan nevela:generate` writes these choices to the
@@ -74,8 +86,11 @@ return [
         */
         'attempts_per_address' => 300,
 
-        /* The role a self-registered account starts with. Null leaves the column alone. */
-        'default_role' => null,
+        /*
+        | The role a self-registered account starts with. USER allows nothing beyond the
+        | person's own account, which is what makes open sign-up safe. Null gives no role.
+        */
+        'default_role' => 'USER',
 
         /*
         | Where the dashboard is, for the links in emails and for passkeys, which are tied
