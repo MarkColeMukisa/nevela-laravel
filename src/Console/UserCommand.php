@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\SampleUsers;
+use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Models\Role;
 
 final class UserCommand extends Command
@@ -36,14 +37,20 @@ final class UserCommand extends Command
         $asked = $this->option('email') === null;
         $input = [
             'name' => $this->option('name') ?? $this->ask('Name'),
-            'email' => $this->option('email') ?? $this->ask('Email'),
+            // As it will be stored, so that what is checked is what is saved.
+            'email' => mb_strtolower(trim((string) ($this->option('email') ?? $this->ask('Email')))),
             'password' => $this->option('password') ?? $this->secret('Password (at least 8 characters)'),
         ];
 
         $table = (new $model)->getTable();
         $validator = Validator::make($input, [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'email', 'max:255', "unique:{$table},email"],
+            // Compared without regard to capitals, whatever the database does: Ada@ and ada@ are one person.
+            'email' => ['required', 'email', 'max:255', function (string $attribute, mixed $value, \Closure $fail) {
+                if (is_string($value) && Account::findByEmail($value)) {
+                    $fail('Someone already has this email.');
+                }
+            }],
             'password' => ['required', 'string', 'min:8'],
         ]);
         if ($validator->fails()) {
@@ -60,7 +67,7 @@ final class UserCommand extends Command
         }
 
         // forceFill: this is the operator creating an account, not a form to guard.
-        $attributes = ['name' => $input['name'], 'email' => mb_strtolower(trim($input['email'])), 'password' => Hash::make($input['password'])];
+        $attributes = ['name' => $input['name'], 'email' => $input['email'], 'password' => Hash::make($input['password'])];
         if (Schema::hasColumn($table, 'email_verified_at')) {
             $attributes['email_verified_at'] = now();
         }
@@ -115,7 +122,17 @@ final class UserCommand extends Command
 
             return self::FAILURE;
         }
+        if (! SampleUsers::allowed()) {
+            $this->components->error('Sample users are for development: ten accounts sharing one password. This app is in production, so none were made.');
+
+            return self::FAILURE;
+        }
         $password = (string) ($this->option('password') ?? 'password');
+        if (mb_strlen($password) < 8) {
+            $this->components->error('Give the sample users a password of at least 8 characters, or leave --password out for "password".');
+
+            return self::FAILURE;
+        }
         $created = SampleUsers::create($password);
         if ($created === []) {
             $this->components->info('The sample users are already here.');

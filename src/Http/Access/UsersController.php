@@ -27,7 +27,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * managing users is never a way to take more than you were given:
  *
  *   - you hand out only roles whose grants you hold yourself;
- *   - only an administrator changes an administrator's account;
+ *   - you change only accounts that may do no more than you. Otherwise setting someone's
+ *     password, or their email and then asking for a reset, would be a way to sign in as
+ *     them and have what they have;
  *   - the last administrator can't be removed, switched off or demoted, by anyone.
  */
 final class UsersController
@@ -136,8 +138,8 @@ final class UsersController
         ]);
 
         $wasAdmin = $this->holdsEverything($user);
-        if ($wasAdmin && ! Access::isAdmin($caller)) {
-            return $this->refuse('ADMIN_ONLY', "Only an administrator can change an administrator's account.", 403);
+        if (! $self && ($refused = $this->aboveCaller($caller, $user, 'change'))) {
+            return $refused;
         }
         if (isset($input['email'])) {
             $taken = Account::findByEmail($input['email']);
@@ -210,13 +212,11 @@ final class UsersController
         if ((string) $caller->getAuthIdentifier() === (string) $user->getAuthIdentifier()) {
             return $this->refuse('SELF', "You can't delete your own account here.", 409);
         }
-        if ($this->holdsEverything($user)) {
-            if (! Access::isAdmin($caller)) {
-                return $this->refuse('ADMIN_ONLY', "Only an administrator can delete an administrator's account.", 403);
-            }
-            if (Access::active($user) && Access::otherAdmins($user) === 0) {
-                return $this->refuse('LAST_ADMIN', 'This is the only administrator. Make someone else an administrator first.', 409);
-            }
+        if ($refused = $this->aboveCaller($caller, $user, 'delete')) {
+            return $refused;
+        }
+        if ($this->holdsEverything($user) && Access::active($user) && Access::otherAdmins($user) === 0) {
+            return $this->refuse('LAST_ADMIN', 'This is the only administrator. Make someone else an administrator first.', 409);
         }
 
         $key = (string) $user->getAuthIdentifier();
@@ -240,10 +240,10 @@ final class UsersController
     {
         Gate::authorize('users.edit');
         $user = $this->find($id);
-        if ($this->holdsEverything($user) && ! Access::isAdmin($request->user())) {
-            return $this->refuse('ADMIN_ONLY', "Only an administrator can sign an administrator out.", 403);
-        }
         $self = (string) $request->user()->getAuthIdentifier() === (string) $user->getAuthIdentifier();
+        if (! $self && ($refused = $this->aboveCaller($request->user(), $user, 'sign out'))) {
+            return $refused;
+        }
 
         return response()->json(['revoked' => Account::revokeTokens($user, $self ? $request->user()->currentAccessToken()?->getKey() : null)]);
     }
@@ -251,6 +251,40 @@ final class UsersController
     private function find(string $id): mixed
     {
         return Account::model()::query()->find($id) ?? throw new NotFoundHttpException('No such user.');
+    }
+
+    /**
+     * A refusal when the account may do something the caller may not, and null otherwise.
+     *
+     * What the account may do is read from its roles, not from whether it is switched on:
+     * a switched-off administrator is still not for a lesser manager to give a new
+     * password and switch back on.
+     */
+    private function aboveCaller(mixed $caller, mixed $user, string $verb): ?JsonResponse
+    {
+        if (self::within(Access::grantsFor($caller), $user)) {
+            return null;
+        }
+
+        return $this->holdsEverything($user)
+            ? $this->refuse('ADMIN_ONLY', "Only an administrator can {$verb} an administrator's account.", 403)
+            : $this->refuse('ABOVE_YOUR_OWN', "You can't {$verb} this account: it may do things your own roles don't allow.", 403);
+    }
+
+    /**
+     * Whether everything an account's roles allow is covered by `$held`.
+     *
+     * @param  list<string>  $held
+     * @param  iterable<Role>|null  $roles  The account's roles, when they are already at hand
+     */
+    private static function within(array $held, mixed $user, ?iterable $roles = null): bool
+    {
+        $theirs = [];
+        foreach ($roles ?? Access::rolesOf($user) as $role) {
+            array_push($theirs, ...$role->grants);
+        }
+
+        return Permissions::beyond($held, $theirs) === [];
     }
 
     /** Whether this account holds a role that comes to everything. */
@@ -317,7 +351,9 @@ final class UsersController
             ->groupBy('tokenable_id')->selectRaw('tokenable_id, count(*) as devices, max(last_used_at) as last_used_at')
             ->get()->keyBy(fn ($row) => (string) $row->tokenable_id);
 
-        return $users->map(function ($user) use ($held, $secondStep, $devices, $caller) {
+        $callerGrants = Access::grantsFor($caller);
+
+        return $users->map(function ($user) use ($held, $secondStep, $devices, $caller, $callerGrants) {
             $id = (string) $user->getAuthIdentifier();
             $mine = collect($held[$id] ?? [])->sortBy('name')->values();
             $avatar = $user->avatar ?? null;
@@ -335,6 +371,8 @@ final class UsersController
                 'roles' => $mine->map(fn (Role $role) => ['id' => $role->id, 'name' => $role->name])->all(),
                 'isAdmin' => $mine->contains(fn (Role $role) => Permissions::hasAll($role->grants)),
                 'isSelf' => $id === (string) $caller->getAuthIdentifier(),
+                // Whether whoever is asking may change this account: it may do no more than they may.
+                'withinYours' => self::within($callerGrants, $user, $mine),
                 'devices' => (int) ($seen->devices ?? 0),
                 'lastActiveAt' => ! empty($seen?->last_used_at) ? date(DATE_ATOM, strtotime($seen->last_used_at)) : null,
                 'createdAt' => $user->created_at?->toAtomString(),

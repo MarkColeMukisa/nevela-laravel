@@ -51,8 +51,10 @@ final class SetupCommand extends Command
                 return 2;
             }
             // Ten more people, with the same password, so the Users screen and the roles
-            // have something in them. Missing them is no reason to call the setup failed.
-            if (! $this->option('no-sample-users')) {
+            // have something in them. Only with a password that was given here: one typed
+            // at a prompt isn't known to this command. Never in production (the command
+            // refuses), and missing them is no reason to call the setup failed.
+            if (! $this->option('no-sample-users') && $this->option('password')) {
                 $this->callSilently('nevela:user', ['--sample' => true, '--password' => $this->option('password')]);
             }
         }

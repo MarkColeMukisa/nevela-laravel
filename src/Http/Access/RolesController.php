@@ -145,9 +145,10 @@ final class RolesController
             }],
             'description' => ['sometimes', 'nullable', 'string', 'max:500'],
             'grants' => [...$sometimes, 'present', 'array', 'max:2000'],
-            'grants.*' => ['string', 'max:120', function (string $attribute, mixed $value, \Closure $fail) {
+            // bail: what follows reads the value as text, which a list sent in its place is not.
+            'grants.*' => ['bail', 'string', 'max:120', function (string $attribute, mixed $value, \Closure $fail) {
                 if (! is_string($value) || ! Permissions::understood($value)) {
-                    $fail("\"{$value}\" isn't a permission this app has.");
+                    $fail(is_string($value) ? "\"{$value}\" isn't a permission this app has." : 'A grant is a piece of text.');
                 }
             }],
         ], ['name.regex' => 'Use letters, numbers, spaces, dashes and underscores.']);

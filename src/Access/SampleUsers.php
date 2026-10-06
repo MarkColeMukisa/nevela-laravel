@@ -13,7 +13,7 @@ use Nevela\Laravel\Models\Role;
  *
  * Like the starter admin they are made in the app's local database by the installer,
  * never by a migration, so they don't follow the app to a server. They all share one
- * password, which is printed when they are made.
+ * password, which is printed when they are made, so they are never made in production.
  */
 final class SampleUsers
 {
@@ -31,13 +31,22 @@ final class SampleUsers
         ['Noah Williams', Role::USER, false],
     ];
 
+    /** Ten accounts with one password that is written down in the docs have no place on a server. */
+    public static function allowed(): bool
+    {
+        return ! app()->environment('production');
+    }
+
     /**
-     * Create the first `count` of them who don't exist yet.
+     * Create the first `count` of them who don't exist yet. None, in production.
      *
      * @return list<array{name: string, email: string, role: string, active: bool}> Those created
      */
     public static function create(string $password, int $count = 10): array
     {
+        if (! self::allowed() || $password === '') {
+            return [];
+        }
         $model = Account::model();
         $table = (new $model)->getTable();
         $hash = Hash::make($password);
