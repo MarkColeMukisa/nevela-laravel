@@ -115,6 +115,12 @@ return [
     'max_per_page' => 100,
 
     /*
+    | The most rows POST /{slug}/_bulk creates in one request (the dashboard's "Add several"
+    | grid). They are saved in one transaction, so this is also how long one can run.
+    */
+    'bulk_max' => 500,
+
+    /*
     | File and image fields (image:image, manual:file(pdf)).
     |
     | Files go on a disk from config/filesystems.php and are handed out by Nevela's own

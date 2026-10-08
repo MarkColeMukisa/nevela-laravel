@@ -382,6 +382,7 @@ final class ResourceGenerator
         foreach ($all as $d) {
             $controller = "\\App\\Http\\Controllers\\Api\\{$d->name}Controller::class";
             $lines[] = "Route::get('{$d->slug}/_stats', [{$controller}, 'stats'])->name('{$d->slug}.stats');";
+            $lines[] = "Route::post('{$d->slug}/_bulk', [{$controller}, 'bulk'])->name('{$d->slug}.bulk');";
             $lines[] = "Route::apiResource('{$d->slug}', {$controller});";
         }
         $body = implode("\n", $lines);
@@ -757,6 +758,13 @@ final class ResourceGenerator
                     ->response()
                     ->setStatusCode(201)
                     ->header('Location', \$request->url().'/'.\${$var}->getKey());
+            }
+
+            public function bulk(Request \$request): JsonResponse
+            {
+                Gate::authorize('create', {$d->name}::class);
+
+                return Nevela::createMany({$d->name}::class, {$d->name}Request::class, {$d->name}Resource::class, \$request);
             }
 
             public function show({$d->name} \${$var}): {$d->name}Resource

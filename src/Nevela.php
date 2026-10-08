@@ -3,8 +3,10 @@
 namespace Nevela\Laravel;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
@@ -119,6 +121,75 @@ final class Nevela
                 'totalPages' => max(1, $page->lastPage()),
             ],
         ]);
+    }
+
+    /**
+     * POST /{slug}/_bulk { items: [ … ] } → 201 { created, data }, or 422 { error, rows }.
+     *
+     * Several records in one go, for the dashboard's grid. Every row is checked before
+     * anything is written, and they are saved in one transaction: a mistake on row 7
+     * is reported against row 7 and nothing is created, where saving six and stopping
+     * would leave someone working out which six.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $modelClass
+     * @param  class-string<Http\ResourceRequest>  $requestClass
+     * @param  class-string<\Illuminate\Http\Resources\Json\JsonResource>  $resourceClass
+     */
+    public static function createMany(string $modelClass, string $requestClass, string $resourceClass, Request $request): JsonResponse
+    {
+        $most = max(1, (int) config('nevela.bulk_max', 500));
+        $items = $request->input('items');
+        if (! is_array($items) || ! array_is_list($items) || $items === []) {
+            return response()->json(['error' => 'Send the rows to create as "items", a list with at least one row.'], 422);
+        }
+        if (count($items) > $most) {
+            return response()->json(['error' => 'That is '.number_format(count($items))." rows. At most {$most} can be created at once; for more, import a file."], 422);
+        }
+
+        $checked = (new $requestClass)->many($items);
+        if ($checked['problems'] !== []) {
+            return self::rowsRefused($checked['problems'], count($items));
+        }
+
+        try {
+            $created = DB::transaction(function () use ($modelClass, $checked) {
+                $created = [];
+                foreach ($checked['values'] as $index => $values) {
+                    try {
+                        $created[] = $modelClass::create($values);
+                    } catch (UniqueConstraintViolationException $e) {
+                        // Someone else created the same value between the check and the write.
+                        throw new \RuntimeException((string) ($index + 1), 0, $e);
+                    }
+                }
+
+                return $created;
+            });
+        } catch (\RuntimeException $e) {
+            if (! $e->getPrevious() instanceof UniqueConstraintViolationException) {
+                throw $e;
+            }
+
+            return self::rowsRefused([['row' => (int) $e->getMessage(), 'issues' => [['path' => '', 'message' => 'A record with one of these values was created a moment ago.']]]], count($items));
+        }
+
+        return response()->json([
+            'created' => count($created),
+            'data' => array_map(fn ($model) => (new $resourceClass($model->refresh()))->resolve($request), $created),
+        ], 201);
+    }
+
+    /** @param list<array{row: int, issues: list<array{path: string, message: string}>}> $problems */
+    private static function rowsRefused(array $problems, int $sent): JsonResponse
+    {
+        $wrong = count($problems);
+
+        return response()->json([
+            'error' => $wrong === 1
+                ? "Nothing was created: row {$problems[0]['row']} needs fixing."
+                : "Nothing was created: {$wrong} of the {$sent} rows need fixing.",
+            'rows' => $problems,
+        ], 422);
     }
 
     /**
