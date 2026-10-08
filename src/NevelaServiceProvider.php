@@ -4,6 +4,7 @@ namespace Nevela\Laravel;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -18,6 +19,7 @@ use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\SeedCommand;
 use Nevela\Laravel\Console\SetupCommand;
 use Nevela\Laravel\Console\StatusCommand;
+use Nevela\Laravel\Console\TrashCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Console\VersionCommand;
@@ -29,6 +31,7 @@ use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\TokenController;
+use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Media\Uploads;
 
@@ -56,7 +59,15 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
+                TrashCommand::class,
             ]);
+
+            // What has been in the trash too long is removed each night, wherever the app's
+            // scheduler is running (Laravel's one cron line). Where it isn't, the same thing
+            // happens whenever someone opens the trash.
+            $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+                $schedule->command(TrashCommand::class)->dailyAt('03:40')->withoutOverlapping();
+            });
         }
 
         $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
@@ -170,6 +181,13 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/profiles', fn () => response()->json([
                 'data' => array_map(fn ($name) => (array) Uploads::profile($name), array_keys((array) config('nevela.uploads.profiles', ['default' => []]))),
             ]))->name('profiles');
+
+            // The trash: deleted records, to restore or to remove for good.
+            Route::get('_nevela/trash', [TrashController::class, 'index'])->name('trash.index');
+            Route::get('_nevela/trash/{slug}', [TrashController::class, 'show'])->name('trash.show');
+            Route::post('_nevela/trash/{slug}/{id}/restore', [TrashController::class, 'restore'])->name('trash.restore');
+            Route::delete('_nevela/trash/{slug}/{id}', [TrashController::class, 'destroy'])->name('trash.destroy');
+            Route::delete('_nevela/trash/{slug}', [TrashController::class, 'empty'])->name('trash.empty');
 
             // Users and roles, for whoever holds the permissions to manage them.
             Route::middleware(RolesAreSetUp::class)->group(function () {

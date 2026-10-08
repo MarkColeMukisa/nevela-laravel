@@ -3,6 +3,8 @@
 namespace Nevela\Laravel\Http;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator as Validation;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
@@ -51,7 +53,37 @@ abstract class ResourceRequest extends FormRequest
                     $validator->errors()->add((string) $key, 'Unknown field.');
                 }
             }
+            self::explainTrashed($validator, $validator->getData());
         });
+    }
+
+    /**
+     * A unique value can be held by a record nobody can see: one in the trash. "Already
+     * taken" would send someone looking through a list it isn't in, so say where it is.
+     *
+     * @param  array<string, mixed>  $data
+     * @return list<array{path: string, message: string}> The messages that were replaced
+     */
+    private static function explainTrashed(Validator $validator, array $data): array
+    {
+        $replaced = [];
+        foreach ($validator->failed() as $field => $rules) {
+            // What Laravel gives for a failed unique rule: the table and the column it looked in.
+            [$table, $column] = array_pad($rules['Unique'] ?? [], 2, null);
+            $value = $data[$field] ?? null;
+            if (! is_string($table) || ! is_string($column) || ! is_scalar($value) || $column === 'NULL') {
+                continue;
+            }
+            if (! Schema::hasColumn($table, 'deleted_at') || ! DB::table($table)->where($column, $value)->whereNotNull('deleted_at')->exists()) {
+                continue;
+            }
+            $message = 'This belongs to a record in the trash. Restore that record, or delete it for good to use the value again.';
+            $validator->errors()->forget($field);
+            $validator->errors()->add($field, $message);
+            $replaced[] = ['path' => (string) $field, 'message' => $message];
+        }
+
+        return $replaced;
     }
 
     /**
@@ -94,6 +126,7 @@ abstract class ResourceRequest extends FormRequest
             }
             $validator = Validation::make($row, $rules);
             if ($validator->fails()) {
+                self::explainTrashed($validator, $row);
                 array_push($issues, ...FlareErrors::issues($validator->errors()->toArray()));
             }
             foreach ($unique as $field) {

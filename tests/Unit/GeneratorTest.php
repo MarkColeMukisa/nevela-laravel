@@ -18,10 +18,10 @@ final class GeneratorTest extends TestCase
     {
         $dir = sys_get_temp_dir().'/nevela-gen-'.bin2hex(random_bytes(4));
         $generator = new ResourceGenerator;
-        $files = [...$generator->forResource($this->product(), '2026_10_02_000000'), $generator->routes([$this->product()]), $generator->registry([$this->product()])];
+        $files = [...$generator->forResource($this->product(), '2026_10_02_000000'), $generator->routes([$this->product()]), $generator->registry([$this->product()]), $generator->trashMigrationFile($this->product(), '2026_10_03_000000')];
         $report = (new Writer(['api' => "{$dir}/api", 'web' => "{$dir}/web"]))->write($files);
 
-        $this->assertSame(array_fill(0, 17, 'created'), array_column($report, 'status'));
+        $this->assertSame(array_fill(0, 18, 'created'), array_column($report, 'status'));
         foreach (array_column($report, 'path') as $path) {
             if (str_ends_with($path, '.php')) {
                 exec('php -l '.escapeshellarg($path).' 2>&1', $out, $code);
@@ -41,13 +41,33 @@ final class GeneratorTest extends TestCase
         $this->assertStringContainsString("'launchOn' => 'launch_on'", $php);
     }
 
+    public function test_a_resource_has_a_trash(): void
+    {
+        $generator = new ResourceGenerator;
+
+        // The model keeps deleted records, from inside the generated block so an existing model gains it.
+        $model = $generator->model($this->product());
+        $this->assertGreaterThan(strpos($model, 'nevela:generated:start'), strpos($model, 'use \\Nevela\\Laravel\\Concerns\\Trashable;'));
+        // A new table has the column; an older one gets a migration that adds it, once.
+        $this->assertStringContainsString('$table->softDeletes();', $generator->migration($this->product()));
+        $added = $generator->trashMigrationFile($this->product(), '2026_10_03_000000');
+        $this->assertSame('database/migrations/2026_10_03_000000_add_trash_to_products_table.php', $added->path);
+        $this->assertSame('database/migrations/*_add_trash_to_products_table.php', $added->existsGlob);
+        $this->assertStringContainsString("Schema::hasColumn('products', 'deleted_at')", $added->contents);
+        // And the policy says who may restore and who may remove for good.
+        $policy = $generator->policy($this->product());
+        $this->assertStringContainsString('public function restore(User $user, Product $product): bool', $policy);
+        $this->assertStringContainsString('public function forceDelete(User $user, Product $product): bool', $policy);
+    }
+
     public function test_a_policy_asks_for_the_resources_permissions(): void
     {
         $php = (new ResourceGenerator)->policy($this->product());
 
         // One permission per action, named after the table, and nothing allowed outright.
-        // (viewAny and view share one; "edit" is also in the comment's example.)
-        foreach (["'products.view'" => 2, "'products.create'" => 1, "'products.edit'" => 2, "'products.delete'" => 1] as $permission => $times) {
+        // (viewAny and view share one; "edit" is also in the comment's example; whoever may
+        // delete may also restore from the trash and remove from it for good.)
+        foreach (["'products.view'" => 2, "'products.create'" => 1, "'products.edit'" => 2, "'products.delete'" => 3] as $permission => $times) {
             $this->assertSame($times, substr_count($php, "\$user->can({$permission})"), $permission);
         }
         $this->assertStringNotContainsString('return true;', $php);

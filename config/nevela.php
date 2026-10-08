@@ -115,6 +115,16 @@ return [
     'max_per_page' => 100,
 
     /*
+    | The trash. A deleted record is kept, hidden from every list and count, and can be
+    | restored from the dashboard's Trash page for this many days. Then it is removed for
+    | good: each night by `nevela:trash`, which needs Laravel's scheduler running, and
+    | whenever someone opens the trash. Null keeps deleted records until someone removes them.
+    */
+    'trash' => [
+        'days' => 30,
+    ],
+
+    /*
     | The most rows POST /{slug}/_bulk creates in one request (the dashboard's "Add several"
     | grid). They are saved in one transaction, so this is also how long one can run.
     */

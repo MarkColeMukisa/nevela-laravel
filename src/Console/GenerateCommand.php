@@ -87,6 +87,13 @@ final class GenerateCommand extends Command
         $files = [];
         foreach ($queue as $descriptor) {
             array_push($files, ...$generator->forResource($descriptor, null, $all));
+            // A table made before there was a trash gets a migration that gives it one. A new
+            // resource's own migration, written by the line above, already has the column.
+            $made = glob(database_path("migrations/*_create_{$descriptor->table}_table.php")) ?: [];
+            $hasColumn = array_filter($made, fn (string $file) => preg_match('/softDeletes|deleted_at/', (string) file_get_contents($file)) === 1) !== [];
+            if ($made !== [] && ! $hasColumn) {
+                $files[] = $generator->trashMigrationFile($descriptor);
+            }
         }
         $files[] = $generator->routes($all);
         $files[] = $generator->registry($all);
