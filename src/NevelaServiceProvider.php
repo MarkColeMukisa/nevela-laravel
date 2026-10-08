@@ -184,6 +184,7 @@ final class NevelaServiceProvider extends ServiceProvider
 
             // The trash: deleted records, to restore or to remove for good.
             Route::get('_nevela/trash', [TrashController::class, 'index'])->name('trash.index');
+            Route::get('_nevela/trash/_status', [TrashController::class, 'status'])->name('trash.status');
             Route::get('_nevela/trash/{slug}', [TrashController::class, 'show'])->name('trash.show');
             Route::post('_nevela/trash/{slug}/{id}/restore', [TrashController::class, 'restore'])->name('trash.restore');
             Route::delete('_nevela/trash/{slug}/{id}', [TrashController::class, 'destroy'])->name('trash.destroy');

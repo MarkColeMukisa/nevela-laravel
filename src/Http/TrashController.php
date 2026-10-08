@@ -23,6 +23,23 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 final class TrashController
 {
     /**
+     * GET _nevela/trash/_status: which resources have a trash this person may use, and how
+     * long it keeps things. Nothing is counted and nothing is removed: this is asked on
+     * the way to drawing a delete button, to say truthfully what pressing it will do.
+     */
+    public function status(): JsonResponse
+    {
+        $slugs = [];
+        foreach (Trash::resources() as ['descriptor' => $descriptor, 'model' => $model]) {
+            if (Trash::maySee($model)) {
+                $slugs[] = $descriptor->slug;
+            }
+        }
+
+        return response()->json(['days' => Trash::days(), 'resources' => $slugs]);
+    }
+
+    /**
      * GET _nevela/trash: how long things are kept, and how much of each resource is in it.
      * Only the resources this person may deal with. Anything past its time goes first.
      */
