@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Insights;
 use Nevela\Laravel\Support\ListQuery;
 use Nevela\Laravel\Support\Naming;
 
@@ -81,23 +82,7 @@ final class Nevela
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
         }
 
-        if ($list->q !== null) {
-            $columns = array_map(fn ($f) => $f->column(), array_values(array_filter($resource->fields, fn ($f) => $f->searchable())));
-            if ($columns !== []) {
-                $pattern = '%'.addcslashes($list->q, '%_\\').'%';
-                $query->where(function (Builder $where) use ($columns, $pattern) {
-                    foreach ($columns as $column) {
-                        $where->orWhereLike($column, $pattern);
-                    }
-                });
-            }
-        }
-
-        foreach ($list->filters as $filter) {
-            $filter['value'] === null
-                ? $query->whereNull($filter['column'])
-                : $query->where($filter['column'], $filter['value']);
-        }
+        self::narrow($query, $resource, $list);
 
         $query->reorder()
             ->orderBy($list->sort['column'], $list->sort['direction'])
@@ -120,6 +105,97 @@ final class Nevela
                 'total' => $page->total(),
                 'totalPages' => max(1, $page->lastPage()),
             ],
+        ]);
+    }
+
+    /** The search and the filters of a list request, applied. Its insights are narrowed the same way. */
+    private static function narrow(Builder $query, Descriptor $resource, ListQuery $list): void
+    {
+        if ($list->q !== null) {
+            $columns = array_map(fn ($f) => $f->column(), array_values(array_filter($resource->fields, fn ($f) => $f->searchable())));
+            if ($columns !== []) {
+                $pattern = '%'.addcslashes($list->q, '%_\\').'%';
+                $query->where(function (Builder $where) use ($columns, $pattern) {
+                    foreach ($columns as $column) {
+                        $where->orWhereLike($column, $pattern);
+                    }
+                });
+            }
+        }
+
+        foreach ($list->filters as $filter) {
+            $filter['value'] === null
+                ? $query->whereNull($filter['column'])
+                : $query->where($filter['column'], $filter['value']);
+        }
+    }
+
+    /**
+     * GET /{slug}/_insights?unit=day|week|month&q&filter[field] → { total, unit, series, breakdown }.
+     *
+     * What the dashboard's insights panel draws: how many records were created in each
+     * period, and how they split across each field that is a choice (an enum or a yes/no).
+     *
+     * It takes the list's own search and filters, so the charts describe the rows the
+     * table is showing. A whole-table chart above a filtered table would be wrong in a
+     * prominent place.
+     */
+    public static function insights(Builder $query, string $name, Request $request): JsonResponse
+    {
+        $resource = self::resource($name);
+        $unit = $request->query('unit', 'day');
+        if (! is_string($unit) || ! isset(Insights::PERIODS[$unit])) {
+            return response()->json(['error' => 'Invalid query.', 'issues' => [['param' => 'unit', 'message' => 'Must be day, week or month.']]], 400);
+        }
+        // The same parameters as the list. Where in the list someone is makes no difference to a count.
+        $params = array_diff_key($request->query(), array_flip(['unit', 'page', 'perPage', 'sort', 'columns']));
+        $list = ListQuery::parse($resource, $params, (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100));
+        if (! $list->ok()) {
+            return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
+        }
+        self::narrow($query, $resource, $list);
+        $base = fn () => (clone $query)->reorder();
+
+        // Counted per day by the database, one grouped query over the created_at index,
+        // and added up into weeks or months here: see Support\Insights.
+        $now = now();
+        $table = $query->getModel()->getTable();
+        $day = $query->getConnection()->getDriverName() === 'sqlsrv' ? "CAST({$table}.created_at AS date)" : "DATE({$table}.created_at)";
+        $perDay = $base()->toBase()
+            ->where("{$table}.created_at", '>=', Insights::since($unit, $now))
+            ->selectRaw("{$day} as day, count(*) as aggregate")
+            ->groupByRaw($day)
+            ->get()
+            ->map(fn ($row) => [(string) $row->day, (int) $row->aggregate]);
+
+        $breakdown = [];
+        foreach ($resource->fields as $field) {
+            if (! in_array($field->kind, ['enum', 'boolean'], true)) {
+                continue;
+            }
+            if (count($breakdown) === 4) {
+                break; // one grouped query each, and four charts is already a lot to read
+            }
+            $column = $field->column();
+            $counts = [];
+            foreach ($base()->toBase()->select($column.' as value')->selectRaw('count(*) as aggregate')->groupBy($column)->get() as $row) {
+                $value = $row->value === null ? '' : ($field->kind === 'boolean' ? ($row->value ? 'true' : 'false') : (string) $row->value);
+                $counts[$value] = ($counts[$value] ?? 0) + (int) $row->aggregate;
+            }
+            // Every choice the field has, in its own order, so one nobody has picked shows as zero.
+            $values = $field->kind === 'boolean' ? ['true', 'false'] : $field->options;
+            $slices = array_map(fn (string $value) => ['value' => $value, 'count' => $counts[$value] ?? 0], $values);
+            if (($counts[''] ?? 0) > 0) {
+                $slices[] = ['value' => '', 'count' => $counts['']];
+            }
+            $breakdown[] = ['field' => $field->name, 'kind' => $field->kind, 'slices' => $slices];
+        }
+
+        return response()->json([
+            'total' => $base()->count(),
+            'unit' => $unit,
+            'series' => Insights::series($unit, $now, $perDay),
+            'breakdown' => $breakdown,
         ]);
     }
 

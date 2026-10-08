@@ -382,6 +382,7 @@ final class ResourceGenerator
         foreach ($all as $d) {
             $controller = "\\App\\Http\\Controllers\\Api\\{$d->name}Controller::class";
             $lines[] = "Route::get('{$d->slug}/_stats', [{$controller}, 'stats'])->name('{$d->slug}.stats');";
+            $lines[] = "Route::get('{$d->slug}/_insights', [{$controller}, 'insights'])->name('{$d->slug}.insights');";
             $lines[] = "Route::post('{$d->slug}/_bulk', [{$controller}, 'bulk'])->name('{$d->slug}.bulk');";
             $lines[] = "Route::apiResource('{$d->slug}', {$controller});";
         }
@@ -748,6 +749,13 @@ final class ResourceGenerator
                 Gate::authorize('viewAny', {$d->name}::class);
 
                 return Nevela::stats({$d->name}::query(), '{$d->name}', \$request);
+            }
+
+            public function insights(Request \$request): JsonResponse
+            {
+                Gate::authorize('viewAny', {$d->name}::class);
+
+                return Nevela::insights({$d->name}::query(), '{$d->name}', \$request);
             }
 
             public function store({$d->name}Request \$request): JsonResponse
