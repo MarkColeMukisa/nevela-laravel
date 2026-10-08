@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Generator\Writer;
@@ -16,6 +17,41 @@ final class GenerateCommand extends Command
         {--force : Rewrite generated blocks even where you edited inside them}';
 
     protected $description = 'Regenerate Laravel code and Flare descriptors from nevela/resources/*.json';
+
+    /**
+     * Whether a resource's table needs the migration that gives it a trash.
+     *
+     * Not when its own migration already makes the column, and not when the column is
+     * there without one of ours having been written: then it came from a migration of
+     * the app's own, and ours would take that column away again when rolled back.
+     *
+     * @param  list<string>  $createMigrations  The contents of the table's own migration(s); none for a resource that is new
+     * @param  bool  $written  Whether an add_trash_to_… migration exists for the table already
+     * @param  bool  $columnExists  Whether the table has deleted_at in the database now
+     */
+    public static function needsTrashMigration(array $createMigrations, bool $written, bool $columnExists): bool
+    {
+        if ($createMigrations === []) {
+            return false;
+        }
+        foreach ($createMigrations as $contents) {
+            if (preg_match('/softDeletes|deleted_at/', $contents) === 1) {
+                return false;
+            }
+        }
+
+        return $written || ! $columnExists;
+    }
+
+    /** Whether the table has the column now. No, where there is no database to ask. */
+    private static function hasTrashColumn(string $table): bool
+    {
+        try {
+            return Schema::hasColumn($table, 'deleted_at');
+        } catch (\Throwable) {
+            return false;
+        }
+    }
 
     public function handle(): int
     {
@@ -89,9 +125,9 @@ final class GenerateCommand extends Command
             array_push($files, ...$generator->forResource($descriptor, null, $all));
             // A table made before there was a trash gets a migration that gives it one. A new
             // resource's own migration, written by the line above, already has the column.
-            $made = glob(database_path("migrations/*_create_{$descriptor->table}_table.php")) ?: [];
-            $hasColumn = array_filter($made, fn (string $file) => preg_match('/softDeletes|deleted_at/', (string) file_get_contents($file)) === 1) !== [];
-            if ($made !== [] && ! $hasColumn) {
+            $made = array_map(fn (string $file) => (string) file_get_contents($file), glob(database_path("migrations/*_create_{$descriptor->table}_table.php")) ?: []);
+            $written = (glob(database_path("migrations/*_add_trash_to_{$descriptor->table}_table.php")) ?: []) !== [];
+            if (self::needsTrashMigration($made, $written, self::hasTrashColumn($descriptor->table))) {
                 $files[] = $generator->trashMigrationFile($descriptor);
             }
         }

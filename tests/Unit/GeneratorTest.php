@@ -41,6 +41,23 @@ final class GeneratorTest extends TestCase
         $this->assertStringContainsString("'launchOn' => 'launch_on'", $php);
     }
 
+    public function test_a_table_gets_the_trash_migration_only_when_it_needs_one(): void
+    {
+        $plain = "Schema::create('products', function (Blueprint \$table) { \$table->uuid('id'); });";
+        $withTrash = "Schema::create('products', function (Blueprint \$table) { \$table->softDeletes(); });";
+        $needs = \Nevela\Laravel\Console\GenerateCommand::needsTrashMigration(...);
+
+        // A table from before the trash, with no column yet.
+        $this->assertTrue($needs([$plain], false, false));
+        // Written already: it stays in the list, where it is reported as yours and left alone.
+        $this->assertTrue($needs([$plain], true, true));
+        // A new resource: its own migration has the column.
+        $this->assertFalse($needs([$withTrash], false, false));
+        $this->assertFalse($needs([], false, false));
+        // The column is there by a migration of the app's own. One of ours would drop it on rollback.
+        $this->assertFalse($needs([$plain], false, true));
+    }
+
     public function test_a_resource_has_a_trash(): void
     {
         $generator = new ResourceGenerator;

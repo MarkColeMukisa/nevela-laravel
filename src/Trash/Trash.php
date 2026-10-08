@@ -75,10 +75,16 @@ final class Trash
         return Gate::allows($policy !== null && method_exists($policy, $ability) ? $ability : 'delete', $record);
     }
 
-    /** Whether they may see a resource's trash at all: asked of a record that is nobody's in particular. */
+    /**
+     * Whether they may see a resource's trash at all: whoever may delete, restore or remove
+     * for good. Asked of a record that is nobody's in particular. A policy that keeps
+     * restoring for administrators still lets the people who delete see what they deleted.
+     */
     public static function maySee(string $model): bool
     {
-        return self::may('restore', new $model);
+        $blank = new $model;
+
+        return self::may('delete', $blank) || self::may('restore', $blank) || self::may('forceDelete', $blank);
     }
 
     /** When a record deleted at `$deletedAt` is removed for good, or null when it is kept until someone does. */
