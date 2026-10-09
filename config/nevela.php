@@ -87,6 +87,13 @@ return [
         'attempts_per_address' => 300,
 
         /*
+        | Let people close their own account, from the dashboard's Account page. A closed
+        | account is kept under Deleted accounts, for an administrator to restore or remove
+        | for good. Off: only someone who may delete users can close one.
+        */
+        'close_account' => true,
+
+        /*
         | The role a self-registered account starts with. USER allows nothing beyond the
         | person's own account, which is what makes open sign-up safe. Null gives no role.
         */

@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
@@ -49,6 +50,7 @@ final class SignInController
                 'email' => (bool) config('nevela.auth.two_factor.email', true),
             ],
             'requireEmailVerification' => (bool) config('nevela.auth.require_email_verification', false),
+            'closeAccount' => (bool) config('nevela.auth.close_account', true),
         ];
     }
 
@@ -205,8 +207,8 @@ final class SignInController
         $this->enabled('magic_link');
         $input = $request->validate(['email' => ['required', 'email'], 'next' => ['nullable', 'string', 'max:2000']]);
 
-        // The answer is the same whether or not the address has an account.
-        if ($user = Account::findByEmail($input['email'])) {
+        // The answer is the same whether or not the address has an account. A closed one gets no link.
+        if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user)) {
             $token = Challenges::start('magic-link', ['user' => (string) $user->getAuthIdentifier()], self::EMAILED);
             $url = Web::url('/api/auth/magic-link', ['token' => $token, 'next' => Web::path($input['next'] ?? null)], $request);
             AuthMail::send($user->email, 'Sign in to '.AuthMail::app(), ['Use this link to sign in. It works once and expires in 5 minutes.'], ['Sign in', $url], $url);
@@ -238,7 +240,7 @@ final class SignInController
         $this->enabled('email_code');
         $input = $request->validate(['email' => ['required', 'email']]);
 
-        if (($user = Account::findByEmail($input['email'])) && Challenges::mayIssue('email-code', mb_strtolower($user->email))) {
+        if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user) && Challenges::mayIssue('email-code', mb_strtolower($user->email))) {
             [$code, $hash] = Challenges::code();
             Challenges::put('email-code', mb_strtolower($user->email), ['user' => (string) $user->getAuthIdentifier(), 'code' => $hash], self::EMAILED);
             AuthMail::send($user->email, 'Your '.AuthMail::app().' sign-in code', ["Your sign-in code is {$code}.", 'It expires in 5 minutes.'], null, $code);

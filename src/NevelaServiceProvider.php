@@ -23,6 +23,7 @@ use Nevela\Laravel\Console\TrashCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Console\VersionCommand;
+use Nevela\Laravel\Http\Access\DeletedAccountsController;
 use Nevela\Laravel\Http\Access\RolesAreSetUp;
 use Nevela\Laravel\Http\Access\RolesController;
 use Nevela\Laravel\Http\Access\UsersController;
@@ -142,6 +143,7 @@ final class NevelaServiceProvider extends ServiceProvider
                     Route::put('avatar', [AccountController::class, 'avatar'])->name('avatar');
                     Route::delete('token', [TokenController::class, 'destroy'])->name('destroy');
                     Route::post('password', [AccountController::class, 'changePassword'])->middleware('throttle:nevela-auth')->name('password.change');
+                    Route::post('close', [AccountController::class, 'close'])->middleware('throttle:nevela-auth')->name('close');
 
                     Route::get('sessions', [AccountController::class, 'sessions'])->name('sessions');
                     Route::delete('sessions', [AccountController::class, 'revokeOtherSessions'])->name('sessions.revoke-others');
@@ -198,6 +200,13 @@ final class NevelaServiceProvider extends ServiceProvider
                 Route::patch('_nevela/users/{id}', [UsersController::class, 'update'])->name('users.update');
                 Route::delete('_nevela/users/{id}', [UsersController::class, 'destroy'])->name('users.destroy');
                 Route::delete('_nevela/users/{id}/sessions', [UsersController::class, 'revokeSessions'])->name('users.sessions.revoke');
+
+                // Accounts that were closed, and the emails that can't have a new one.
+                Route::get('_nevela/deleted-accounts', [DeletedAccountsController::class, 'index'])->name('deleted-accounts.index');
+                Route::post('_nevela/deleted-accounts/{id}/restore', [DeletedAccountsController::class, 'restore'])->name('deleted-accounts.restore');
+                Route::delete('_nevela/deleted-accounts/{id}', [DeletedAccountsController::class, 'destroy'])->name('deleted-accounts.destroy');
+                Route::get('_nevela/blocked-emails', [DeletedAccountsController::class, 'blocked'])->name('blocked-emails.index');
+                Route::delete('_nevela/blocked-emails/{id}', [DeletedAccountsController::class, 'allow'])->name('blocked-emails.allow');
 
                 Route::get('_nevela/permissions', [RolesController::class, 'catalog'])->name('permissions');
                 Route::get('_nevela/roles', [RolesController::class, 'index'])->name('roles.index');

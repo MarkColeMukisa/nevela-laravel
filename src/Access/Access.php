@@ -50,7 +50,7 @@ final class Access
         if (isset(self::$grants[$user])) {
             return self::$grants[$user];
         }
-        if (! self::active($user)) {
+        if (! self::active($user) || ClosedAccounts::isClosed($user)) {
             return self::$grants[$user] = [];
         }
 
@@ -141,7 +141,7 @@ final class Access
         $key = $instance->getKeyName();
         $hasActive = Schema::hasColumn($table, 'active');
 
-        $all =Role::query()->get()->filter(fn (Role $role) => Permissions::hasAll($role->grants))->pluck('id')->all();
+        $all = Role::query()->get()->filter(fn (Role $role) => Permissions::hasAll($role->grants))->pluck('id')->all();
         $ids = DB::table('nevela_role_user')->whereIn('role_id', $all)->distinct()->pluck('user_id')->all();
         if ($except !== null) {
             $ids = array_values(array_diff($ids, [(string) $except->getAuthIdentifier()]));
@@ -150,7 +150,7 @@ final class Access
             return 0;
         }
 
-        return $model::query()->whereIn($key, $ids)->when($hasActive, fn ($query) => $query->where('active', true))->count();
+        return ClosedAccounts::open()->whereIn($key, $ids)->when($hasActive, fn ($query) => $query->where('active', true))->count();
     }
 
     /** Forget what has been worked out, after roles or who holds them change. */

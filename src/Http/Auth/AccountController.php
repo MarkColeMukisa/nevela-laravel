@@ -9,11 +9,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\ClosedAccounts;
+use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Http\UploadController;
+use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Rules\UploadKey;
 use Nevela\Laravel\Support\Descriptor;
@@ -21,7 +24,8 @@ use Nevela\Laravel\Support\Field;
 
 /**
  * An account and what its owner can do with it: create it, prove the email address,
- * change the name, the picture and the password, and see and sign out its devices.
+ * change the name, the picture and the password, see and sign out its devices, and
+ * close it.
  */
 final class AccountController
 {
@@ -41,7 +45,17 @@ final class AccountController
             'email' => ['required', 'email', 'max:255'],
             'password' => Account::passwordRules(),
         ]);
-        if (Account::findByEmail($input['email'])) {
+        // An email that had an account here doesn't get a second one by signing up again:
+        // not the address itself, and not another spelling of the same mailbox.
+        $holder = Account::findByEmail($input['email']);
+        $standing = $holder && ClosedAccounts::isClosed($holder) ? 'closed' : ClosedAccounts::standing($input['email']);
+        if ($standing === 'closed') {
+            return $this->refuse('ACCOUNT_CLOSED', 'An account with this email was closed. Ask an administrator to restore it.', 422);
+        }
+        if ($standing === 'blocked') {
+            return $this->refuse('EMAIL_BLOCKED', "This email can't be used for a new account. Ask an administrator.", 422);
+        }
+        if ($holder) {
             return $this->refuse('USER_ALREADY_EXISTS', 'An account with this email already exists. Sign in instead.', 422);
         }
 
@@ -185,7 +199,7 @@ final class AccountController
     public function forgotPassword(Request $request): JsonResponse
     {
         $input = $request->validate(['email' => ['required', 'email']]);
-        if ($user = Account::findByEmail($input['email'])) {
+        if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user)) {
             $token = Challenges::start('reset-password', ['user' => (string) $user->getAuthIdentifier()], self::RESET_SECONDS);
             $url = Web::url('/reset-password', ['token' => $token], $request);
             AuthMail::send($user->email, 'Reset your '.AuthMail::app().' password', ['Use this link to choose a new password. It works once and expires in an hour.'], ['Choose a new password', $url], $url);
@@ -209,6 +223,34 @@ final class AccountController
         Account::revokeTokens($user);
 
         return response()->json(['reset' => true]);
+    }
+
+    /**
+     * POST auth/close: close your own account. It takes the password again.
+     *
+     * The account is signed out everywhere and kept: an administrator can restore it, with
+     * everything it had, or remove it for good. Its email can't sign up again meanwhile.
+     */
+    public function close(Request $request): JsonResponse
+    {
+        $this->enabled('close_account');
+        if (! ClosedAccounts::ready()) {
+            return $this->refuse('MIGRATION_NEEDED', 'Closing an account needs a migration that has not been run: php nevela migrate', 409);
+        }
+        $user = $request->user();
+        if (! $this->passwordConfirmed($request)) {
+            return $this->refuse('INVALID_PASSWORD', "That isn't your password.", 422);
+        }
+        // Nobody would be left who could restore it, or run the app.
+        $administrator = Access::ready() && Access::rolesOf($user)->contains(fn (Role $role) => Permissions::hasAll($role->grants));
+        if ($administrator && Access::active($user) && Access::otherAdmins($user) === 0) {
+            return $this->refuse('LAST_ADMIN', 'You are the only administrator. Make someone else an administrator before closing your account.', 409);
+        }
+
+        ClosedAccounts::close($user, $user);
+        AuthMail::send($user->email, 'Your '.AuthMail::app().' account was closed', ['You closed your account, and have been signed out everywhere.', 'To have it back, ask an administrator: it can be restored with everything it had.']);
+
+        return response()->json(['closed' => true]);
     }
 
     /** GET auth/sessions: the devices signed in to this account. */

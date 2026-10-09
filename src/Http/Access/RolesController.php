@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Models\Role;
@@ -41,7 +42,8 @@ final class RolesController
         if (! $user->can('roles.view') && ! $user->can('users.view')) {
             throw new AccessDeniedHttpException("You don't have access to this.");
         }
-        $counts = DB::table('nevela_role_user')->groupBy('role_id')->selectRaw('role_id, count(*) as users')->pluck('users', 'role_id');
+        // Closed accounts keep their roles, for when they are restored, and aren't counted.
+        $counts = DB::table('nevela_role_user')->whereNotIn('user_id', ClosedAccounts::ids())->groupBy('role_id')->selectRaw('role_id, count(*) as users')->pluck('users', 'role_id');
         $held = Access::grantsFor($user);
         $roles = Role::query()->orderByDesc('is_system')->orderBy('name')->get();
 
@@ -128,7 +130,7 @@ final class RolesController
 
     private function users(Role $role): int
     {
-        return DB::table('nevela_role_user')->where('role_id', $role->id)->count();
+        return DB::table('nevela_role_user')->where('role_id', $role->id)->whereNotIn('user_id', ClosedAccounts::ids())->count();
     }
 
     /** @return array{name?: string, description?: string|null, grants?: list<string>} */

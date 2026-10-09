@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rules\Password;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\TwoFactor;
@@ -24,6 +25,7 @@ final class Account
         return (string) config('auth.providers.users.model');
     }
 
+    /** Whoever has this email, a closed account included: an address belongs to one account, open or not. */
     public static function findByEmail(string $email): mixed
     {
         return self::model()::query()->whereRaw('lower(email) = ?', [mb_strtolower(trim($email))])->first();
@@ -73,8 +75,11 @@ final class Account
      */
     public static function signIn(mixed $user, Request $request): array
     {
-        // Every way of signing in ends here, so this is the one place a switched-off
-        // account is turned away, whichever way it came.
+        // Every way of signing in ends here, so this is the one place a closed or
+        // switched-off account is turned away, whichever way it came.
+        if (ClosedAccounts::isClosed($user)) {
+            throw new HttpResponseException(response()->json(['error' => 'This account was closed. Ask an administrator to restore it.', 'code' => 'ACCOUNT_CLOSED'], 403));
+        }
         if (! Access::active($user)) {
             throw new HttpResponseException(response()->json(['error' => 'This account has been switched off. Ask an administrator.', 'code' => 'ACCOUNT_DISABLED'], 403));
         }

@@ -5,6 +5,8 @@ namespace Nevela\Laravel\Console;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
+use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\Releases;
@@ -60,8 +62,10 @@ final class StatusCommand extends Command
             $model = config('auth.providers.users.model');
             if (is_string($model) && class_exists($model)) {
                 try {
-                    $users = $model::query()->count();
-                    $row('Users who can sign in', $users > 0 ? (string) $users : $bad('none: php nevela user'));
+                    // A closed account is kept, and can't sign in.
+                    $users = ClosedAccounts::open()->count();
+                    $closed = ClosedAccounts::closed()->count();
+                    $row('Users who can sign in', ($users > 0 ? (string) $users : $bad('none: php nevela user')).($closed > 0 ? " <fg=gray>and {$closed} deleted, kept to restore</>" : ''));
                 } catch (Throwable) {
                     $row('Users who can sign in', $bad('the users table is missing: php nevela migrate'));
                 }
@@ -82,7 +86,10 @@ final class StatusCommand extends Command
         }
         foreach ($resources as $resource) {
             try {
-                $row("Resource: {$resource->name}", number_format(DB::table($resource->table)->count()).' records');
+                // What is in the trash is still in the table, and isn't one of the records.
+                $trashed = Schema::hasColumn($resource->table, 'deleted_at') ? DB::table($resource->table)->whereNotNull('deleted_at')->count() : 0;
+                $records = DB::table($resource->table)->count() - $trashed;
+                $row("Resource: {$resource->name}", number_format($records).' records'.($trashed > 0 ? ' <fg=gray>and '.number_format($trashed).' in the trash</>' : ''));
             } catch (Throwable) {
                 $row("Resource: {$resource->name}", $bad("the {$resource->table} table is missing: php nevela migrate"));
             }

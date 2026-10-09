@@ -359,6 +359,8 @@ final class ResourceGenerator
           requireEmailVerification: {$flag('require_email_verification', false)},
           /** Check new passwords against Have I Been Pwned's breach list. */
           checkBreachedPasswords: {$flag('check_breached_passwords')},
+          /** People can close their own account, from the Account page. */
+          closeAccount: {$flag('close_account')},
           /** Signing in with Google, GitHub and the like isn't part of Nevela yet. */
           social: [] as SocialProvider[],
         };

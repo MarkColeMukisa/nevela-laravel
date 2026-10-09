@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
@@ -31,10 +32,14 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *     password, or their email and then asking for a reset, would be a way to sign in as
  *     them and have what they have;
  *   - the last administrator can't be removed, switched off or demoted, by anyone.
+ *
+ * A closed account is not among the users here: it is under Deleted accounts until it is
+ * restored. Deleting a user is what puts it there.
  */
 final class UsersController
 {
     use Answers;
+    use Ceiling;
 
     /** GET _nevela/users?q=&role=&status=&page=&perPage= */
     public function index(Request $request): JsonResponse
@@ -49,7 +54,7 @@ final class UsersController
         ]);
         $model = Account::model();
         $instance = new $model;
-        $query = $model::query();
+        $query = ClosedAccounts::open();
 
         if (($search = trim((string) ($input['q'] ?? ''))) !== '') {
             $pattern = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_strtolower($search)).'%';
@@ -70,7 +75,8 @@ final class UsersController
 
         return response()->json([
             'data' => self::present($users, $request->user()),
-            'meta' => ['page' => $page, 'perPage' => $perPage, 'total' => $total, 'totalPages' => max(1, (int) ceil($total / $perPage))],
+            // keepsDeleted: whether deleting a user here closes the account, to be restored, or removes it.
+            'meta' => ['page' => $page, 'perPage' => $perPage, 'total' => $total, 'totalPages' => max(1, (int) ceil($total / $perPage)), 'keepsDeleted' => ClosedAccounts::ready()],
         ]);
     }
 
@@ -96,8 +102,8 @@ final class UsersController
             'roles.*' => ['string', 'max:64'],
             'active' => ['nullable', 'boolean'],
         ]);
-        if (Account::findByEmail($input['email'])) {
-            return response()->json(['error' => 'Validation failed.', 'issues' => [['path' => 'email', 'message' => 'Someone already has this email.']]], 422);
+        if ($taken = $this->emailTaken($input['email'])) {
+            return $taken;
         }
         $roles = $this->roles($input['roles']);
         if ($roles instanceof JsonResponse) {
@@ -141,11 +147,8 @@ final class UsersController
         if (! $self && ($refused = $this->aboveCaller($caller, $user, 'change'))) {
             return $refused;
         }
-        if (isset($input['email'])) {
-            $taken = Account::findByEmail($input['email']);
-            if ($taken && (string) $taken->getAuthIdentifier() !== (string) $user->getAuthIdentifier()) {
-                return response()->json(['error' => 'Validation failed.', 'issues' => [['path' => 'email', 'message' => 'Someone already has this email.']]], 422);
-            }
+        if (isset($input['email']) && ($taken = $this->emailTaken($input['email'], $user))) {
+            return $taken;
         }
 
         $roles = null;
@@ -203,7 +206,11 @@ final class UsersController
         return response()->json(self::present(collect([$user->refresh()]), $caller)[0]);
     }
 
-    /** DELETE _nevela/users/{id} */
+    /**
+     * DELETE _nevela/users/{id}: close the account. It is signed out everywhere and kept
+     * under Deleted accounts, to be restored or removed for good. In an app that hasn't
+     * run the migration for that yet, it is removed, as it always was.
+     */
     public function destroy(Request $request, string $id): JsonResponse|Response
     {
         Gate::authorize('users.delete');
@@ -219,18 +226,11 @@ final class UsersController
             return $this->refuse('LAST_ADMIN', 'This is the only administrator. Make someone else an administrator first.', 409);
         }
 
-        $key = (string) $user->getAuthIdentifier();
-        DB::transaction(function () use ($user, $key) {
-            Account::revokeTokens($user);
-            DB::table('nevela_role_user')->where('user_id', $key)->delete();
-            foreach (['nevela_two_factor', 'nevela_passkeys'] as $table) {
-                if (Schema::hasTable($table)) {
-                    DB::table($table)->where('user_id', $key)->delete();
-                }
-            }
-            $user->delete();
-        });
-        Access::forget();
+        if (ClosedAccounts::ready()) {
+            ClosedAccounts::close($user, $caller);
+        } else {
+            ClosedAccounts::remove($user);
+        }
 
         return response()->noContent();
     }
@@ -250,47 +250,31 @@ final class UsersController
 
     private function find(string $id): mixed
     {
-        return Account::model()::query()->find($id) ?? throw new NotFoundHttpException('No such user.');
+        return ClosedAccounts::open()->find($id) ?? throw new NotFoundHttpException('No such user.');
     }
 
     /**
-     * A refusal when the account may do something the caller may not, and null otherwise.
+     * A 422 when an email can't be given to an account: someone has it, a deleted account
+     * has it, or its account was removed for good and the address is blocked.
      *
-     * What the account may do is read from its roles, not from whether it is switched on:
-     * a switched-off administrator is still not for a lesser manager to give a new
-     * password and switch back on.
+     * @param  mixed  $except  The account being changed, whose own email it may be
      */
-    private function aboveCaller(mixed $caller, mixed $user, string $verb): ?JsonResponse
+    private function emailTaken(string $email, mixed $except = null): ?JsonResponse
     {
-        if (self::within(Access::grantsFor($caller), $user)) {
+        $issue = fn (string $message) => response()->json(['error' => 'Validation failed.', 'issues' => [['path' => 'email', 'message' => $message]]], 422);
+        $holder = Account::findByEmail($email);
+        if ($holder && $except !== null && (string) $holder->getAuthIdentifier() === (string) $except->getAuthIdentifier()) {
             return null;
         }
-
-        return $this->holdsEverything($user)
-            ? $this->refuse('ADMIN_ONLY', "Only an administrator can {$verb} an administrator's account.", 403)
-            : $this->refuse('ABOVE_YOUR_OWN', "You can't {$verb} this account: it may do things your own roles don't allow.", 403);
-    }
-
-    /**
-     * Whether everything an account's roles allow is covered by `$held`.
-     *
-     * @param  list<string>  $held
-     * @param  iterable<Role>|null  $roles  The account's roles, when they are already at hand
-     */
-    private static function within(array $held, mixed $user, ?iterable $roles = null): bool
-    {
-        $theirs = [];
-        foreach ($roles ?? Access::rolesOf($user) as $role) {
-            array_push($theirs, ...$role->grants);
+        if ($holder && ! ClosedAccounts::isClosed($holder)) {
+            return $issue('Someone already has this email.');
         }
 
-        return Permissions::beyond($held, $theirs) === [];
-    }
-
-    /** Whether this account holds a role that comes to everything. */
-    private function holdsEverything(mixed $user): bool
-    {
-        return Access::rolesOf($user)->contains(fn (Role $role) => Permissions::hasAll($role->grants));
+        return match ($holder ? 'closed' : ClosedAccounts::standing($email, $except)) {
+            'closed' => $issue('A deleted account has this email. Restore it from Deleted accounts.'),
+            'blocked' => $issue('This email is blocked: its account was removed for good. Allow it again under Deleted accounts first.'),
+            default => null,
+        };
     }
 
     /**
