@@ -18,6 +18,7 @@ final class UserCommand extends Command
         {--email= : The address they sign in with}
         {--password= : Their password. Leave out to be asked for it without it showing}
         {--role= : Their role: ADMIN, EDITOR, USER or one you have made. The first account is an ADMIN}
+        {--verified : Mark the email as verified. Only for an address you know is theirs}
         {--sample : Create the ten sample users instead: two editors and eight users}';
 
     protected $description = 'Create a user who can sign in to the dashboard';
@@ -68,7 +69,10 @@ final class UserCommand extends Command
 
         // forceFill: this is the operator creating an account, not a form to guard.
         $attributes = ['name' => $input['name'], 'email' => $input['email'], 'password' => Hash::make($input['password'])];
-        if (Schema::hasColumn($table, 'email_verified_at')) {
+        // "Verified" means the owner has proved the address is theirs, by a link or a code
+        // sent to it. Making an account here proves nothing of the kind, so it starts
+        // unverified unless whoever runs this says they know the address is right.
+        if ($this->option('verified') && Schema::hasColumn($table, 'email_verified_at')) {
             $attributes['email_verified_at'] = now();
         }
         $user = (new $model)->forceFill($attributes);

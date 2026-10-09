@@ -117,10 +117,8 @@ final class UsersController
         if (Schema::hasColumn($user->getTable(), 'active')) {
             $attributes['active'] = (bool) ($input['active'] ?? true);
         }
-        if (Schema::hasColumn($user->getTable(), 'email_verified_at')) {
-            // Someone allowed to create users vouches for the address.
-            $attributes['email_verified_at'] = now();
-        }
+        // The address is as typed by whoever is adding them. It becomes "verified" when its
+        // owner proves it: from their Account page, or by signing in with an emailed link or code.
         $user->forceFill($attributes)->save();
         Access::assign($user, $roles->pluck('id')->all());
 

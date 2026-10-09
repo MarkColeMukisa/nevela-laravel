@@ -57,10 +57,8 @@ final class SampleUsers
             if (Account::findByEmail($email)) {
                 continue;
             }
+            // Their addresses are made up, and nobody has proved one: they are not "verified".
             $attributes = ['name' => $name, 'email' => $email, 'password' => $hash];
-            if (Schema::hasColumn($table, 'email_verified_at')) {
-                $attributes['email_verified_at'] = now();
-            }
             if (Schema::hasColumn($table, 'active')) {
                 $attributes['active'] = $active;
             }
