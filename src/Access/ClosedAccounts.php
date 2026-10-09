@@ -108,6 +108,20 @@ final class ClosedAccounts
         return hash_hmac('sha256', self::canonical($email), (string) config('app.key'));
     }
 
+    /**
+     * The fingerprint an email has now, and the ones it had under the app's earlier keys
+     * (APP_PREVIOUS_KEYS). An email blocked before the key was rotated is still blocked.
+     *
+     * @return list<string>
+     */
+    public static function fingerprints(string $email): array
+    {
+        $canonical = self::canonical($email);
+        $keys = [(string) config('app.key'), ...array_filter((array) config('app.previous_keys', []), 'is_string')];
+
+        return array_values(array_unique(array_map(fn (string $key) => hash_hmac('sha256', $canonical, $key), $keys)));
+    }
+
     /** "m•••@gmail.com": enough to recognise an address by, and not the address. */
     public static function hint(string $email): string
     {
@@ -129,7 +143,8 @@ final class ClosedAccounts
         if (! self::ready()) {
             return null;
         }
-        $row = DB::table(self::BLOCKED)->where('fingerprint', self::fingerprint($email))->first();
+        // An entry for a closed account first: that one can be restored.
+        $row = DB::table(self::BLOCKED)->whereIn('fingerprint', self::fingerprints($email))->orderByRaw('case when user_id is null then 1 else 0 end')->first();
         if (! $row || ($except !== null && $row->user_id !== null && $row->user_id === (string) $except->getAuthIdentifier())) {
             return null;
         }
@@ -198,12 +213,16 @@ final class ClosedAccounts
     /** Remember an email by its fingerprint: for a closed account, or with no account left. */
     private static function block(string $email, ?string $userId): void
     {
+        // One entry per mailbox, under today's key: an entry made under an earlier key is brought up to date.
         $fingerprint = self::fingerprint($email);
-        $values = ['hint' => self::hint($email), 'user_id' => $userId, 'blocked_at' => now()];
-        if (DB::table(self::BLOCKED)->where('fingerprint', $fingerprint)->exists()) {
-            DB::table(self::BLOCKED)->where('fingerprint', $fingerprint)->update($values);
-        } else {
-            DB::table(self::BLOCKED)->insert(['id' => (string) Str::uuid(), 'fingerprint' => $fingerprint] + $values);
+        $values = ['fingerprint' => $fingerprint, 'hint' => self::hint($email), 'user_id' => $userId, 'blocked_at' => now()];
+        $existing = DB::table(self::BLOCKED)->whereIn('fingerprint', self::fingerprints($email))->orderBy('blocked_at')->pluck('id')->all();
+        if ($existing === []) {
+            DB::table(self::BLOCKED)->insert(['id' => (string) Str::uuid()] + $values);
+
+            return;
         }
+        DB::table(self::BLOCKED)->whereIn('id', array_slice($existing, 1))->delete();
+        DB::table(self::BLOCKED)->where('id', $existing[0])->update($values);
     }
 }
