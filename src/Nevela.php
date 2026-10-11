@@ -77,7 +77,18 @@ final class Nevela
      */
     public static function list(Builder $query, string $name, Request $request, string $resourceClass): JsonResponse
     {
-        $resource = self::resource($name);
+        return self::listFor($query, self::resource($name), $request, $resourceClass);
+    }
+
+    /**
+     * The same, for a descriptor that was handed over and not looked up: the public list
+     * is the resource with only the fields anyone may see, so nothing else can be sorted,
+     * filtered or searched by.
+     *
+     * @param  class-string<\Illuminate\Http\Resources\Json\JsonResource>  $resourceClass
+     */
+    public static function listFor(Builder $query, Descriptor $resource, Request $request, string $resourceClass): JsonResponse
+    {
         $list = ListQuery::parse($resource, $request->query(), (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100));
         if (! $list->ok()) {
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);

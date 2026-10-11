@@ -22,6 +22,12 @@ use Throwable;
  */
 final class Uploads
 {
+    /** Who uploaded a file that came in through a public form and hasn't been used in a create yet. */
+    public const UNCLAIMED = 'public:unclaimed';
+
+    /** And one that has: it belongs to a record now, like any other. */
+    public const CLAIMED = 'public';
+
     /** What every private file's key starts with. */
     public const PRIVATE_PREFIX = 'private/';
 
@@ -294,6 +300,34 @@ final class Uploads
         Storage::disk($upload?->disk ?? self::privateDisk())->delete(self::privatePath($key));
         $upload?->delete();
         unset(self::$loaded[$key]);
+    }
+
+    /**
+     * Remove what visitors uploaded and never used: a form that was started and left.
+     * Each such file waits an hour for its create (PublicController::CLAIM_SECONDS), and
+     * goes after that, with anything that was made from it.
+     *
+     * @return int How many were removed
+     */
+    public static function purgeUnclaimed(int $olderThanSeconds = 3600): int
+    {
+        $removed = 0;
+        Upload::query()->where('uploaded_by', self::UNCLAIMED)->where('created_at', '<', now()->subSeconds($olderThanSeconds))->orderBy('id')
+            ->chunkById(200, function ($uploads) use (&$removed) {
+                foreach ($uploads as $upload) {
+                    $disk = Storage::disk($upload->disk);
+                    $disk->delete(self::isPrivate($upload->key) ? self::privatePath($upload->key) : $upload->key);
+                    $disk->delete(array_column($upload->renditions ?? [], 'key'));
+                    if ($upload->original_key !== null) {
+                        Storage::disk((string) config('nevela.uploads.originals_disk', 'local'))->delete($upload->original_key);
+                    }
+                    unset(self::$loaded[$upload->key]);
+                    $upload->delete();
+                    $removed++;
+                }
+            });
+
+        return $removed;
     }
 
     public static function forget(): void

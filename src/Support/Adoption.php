@@ -191,8 +191,9 @@ final class Adoption
                 $kind['maxLength'] = max(65_535, $longest[$column]);
                 $notes[] = "{$column} declares no length and holds values longer than 255 characters, so it is adopted with room for ".number_format($kind['maxLength']).'.';
             }
+            $default = isset($unique[$column]) ? null : self::default($kind, $info['default'] ?? null);
             try {
-                $fields[$column] = new Field($field, $kind['kind'], required: $required, unique: isset($unique[$column]), options: $kind['options'] ?? [], maxLength: $kind['maxLength'] ?? null);
+                $fields[$column] = new Field($field, $kind['kind'], required: $required, unique: isset($unique[$column]), options: $kind['options'] ?? [], maxLength: $kind['maxLength'] ?? null, default: $default);
             } catch (InvalidArgumentException $e) {
                 $leave($e->getMessage());
             }
@@ -280,6 +281,44 @@ final class Adoption
     }
 
     /**
+     * A column's default, as the field's: 'pending', 0, false. Each database writes it its
+     * own way ('pending'::character varying), and one that is worked out when a row is
+     * made (CURRENT_TIMESTAMP, nextval(…)) is the column's business and is left there.
+     *
+     * @param  array{kind: string, options?: list<string>}  $kind
+     */
+    private static function default(array $kind, mixed $written): string|int|float|bool|null
+    {
+        if (! is_scalar($written) || (string) $written === '') {
+            return null;
+        }
+        $text = trim((string) $written);
+        // PostgreSQL adds what type it is; SQL Server wraps it in brackets.
+        $text = (string) preg_replace('/::[a-z_ ]+(\([0-9, ]*\))?(\[\])?$/i', '', $text);
+        while (str_starts_with($text, '(') && str_ends_with($text, ')')) {
+            $text = substr($text, 1, -1);
+        }
+        $quoted = strlen($text) >= 2 && $text[0] === "'" && str_ends_with($text, "'");
+        $value = $quoted ? str_replace("''", "'", substr($text, 1, -1)) : $text;
+        if (! $quoted && (strcasecmp($value, 'null') === 0 || preg_match('/[()]|^current_/i', $value))) {
+            return null;
+        }
+
+        return match ($kind['kind']) {
+            'string', 'text' => $value === '' ? null : $value,
+            'enum' => in_array($value, $kind['options'] ?? [], true) ? $value : null,
+            'int' => filter_var($value, FILTER_VALIDATE_INT) === false ? null : (int) $value,
+            'float' => is_numeric($value) ? (float) $value : null,
+            'boolean' => match (strtolower($value)) {
+                '1', 'true', 't' => true,
+                '0', 'false', 'f' => false,
+                default => null,
+            },
+            default => null,
+        };
+    }
+
+    /**
      * A MySQL enum column: its values, where they are ones an enum field can have.
      *
      * @return array{kind: string, options?: list<string>}
@@ -306,7 +345,8 @@ final class Adoption
             $field->maxLength !== null => "{$field->kind}({$field->maxLength})",
             default => $field->kind,
         };
+        $default = $field->default === null ? '' : '='.(is_bool($field->default) ? ($field->default ? 'true' : 'false') : $field->default);
 
-        return $type.($field->required ? '' : '?').($field->unique ? '!' : '');
+        return $type.($field->required ? '' : '?').($field->unique ? '!' : '').$default;
     }
 }

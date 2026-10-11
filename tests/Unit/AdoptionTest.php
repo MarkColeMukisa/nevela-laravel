@@ -100,6 +100,9 @@ final class AdoptionTest extends TestCase
         $this->assertTrue($fields['reference']->unique);
         $this->assertSame('int', $fields['amount']->kind);
         $this->assertSame('string', $fields['status']->kind);
+        // The column's default is the field's: a payment made without saying its status is pending.
+        $this->assertSame('pending', $fields['status']->default);
+        $this->assertNull($fields['reference']->default);
         // There is no field kind for JSON: the column stays in the table, out of the API's way.
         $this->assertArrayNotHasKey('gatewayResponse', $fields);
         $this->assertSame([['column' => 'gateway_response', 'why' => 'json has no field kind']], $adoption->left);
@@ -143,8 +146,9 @@ final class AdoptionTest extends TestCase
             'title' => 'string',
             'excerpt' => 'string(500)',
             'body' => 'text(4294967295)',
-            'featured' => 'boolean',
-            'views' => 'int',
+            // A column's own default comes with it: what the field is when a create leaves it out.
+            'featured' => 'boolean=false',
+            'views' => 'int=0',
             'rating' => 'float?',
             'publishedOn' => 'date?',
             'state' => 'enum(draft|live)',
@@ -170,7 +174,7 @@ final class AdoptionTest extends TestCase
             ['name' => 'updated_at', 'type_name' => 'timestamp', 'type' => 'timestamp(0) without time zone', 'nullable' => true, 'default' => null, 'auto_increment' => false, 'generation' => null],
         ], [['name' => 'posts_pkey', 'columns' => ['id'], 'unique' => true, 'primary' => true]], []);
         $this->assertSame('int', $postgres->descriptor->idType);
-        $this->assertSame(['title' => 'string(500)', 'live' => 'boolean'], array_map(Adoption::spec(...), $postgres->descriptor->fields));
+        $this->assertSame(['title' => 'string(500)', 'live' => 'boolean=false'], array_map(Adoption::spec(...), $postgres->descriptor->fields));
 
         // SQLite, which names no primary index and gives a string no length.
         $sqlite = Adoption::describe('posts', [
@@ -181,7 +185,7 @@ final class AdoptionTest extends TestCase
             self::column('updated_at', 'datetime', nullable: true),
         ], [], []);
         $this->assertSame('int', $sqlite->descriptor->idType);
-        $this->assertSame(['title' => 'string', 'live' => 'boolean'], array_map(Adoption::spec(...), $sqlite->descriptor->fields));
+        $this->assertSame(['title' => 'string', 'live' => 'boolean=false'], array_map(Adoption::spec(...), $sqlite->descriptor->fields));
     }
 
     public function test_a_string_that_declares_no_length_is_as_long_as_what_is_in_it(): void

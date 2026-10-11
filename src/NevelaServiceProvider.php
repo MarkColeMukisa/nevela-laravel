@@ -32,6 +32,7 @@ use Nevela\Laravel\Http\FlareErrors;
 use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
+use Nevela\Laravel\Http\PublicThrottle;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\TrashController;
@@ -173,6 +174,13 @@ final class NevelaServiceProvider extends ServiceProvider
             'nevela' => Nevela::VERSION,
             'app' => Nevela::fingerprint(),
         ]))->name('nevela.ping');
+
+        Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
+
+        // What a resource's "public" section opens: no sign-in, and each route its own throttle.
+        if (is_file($open = base_path('routes/nevela-public.php'))) {
+            Route::prefix(trim($prefix.'/public', '/'))->middleware('api')->name('nevela.public.')->group($open);
+        }
 
         // Stored files. Open, like any image on a website: the key is the secret.
         Route::prefix($prefix)->middleware('api')->get('_nevela/files/{path}', [UploadController::class, 'show'])

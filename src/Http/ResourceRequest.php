@@ -44,6 +44,59 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * What a field is when a create leaves it out. A generated request with any says which.
+     *
+     * @return array<string, mixed> field => value
+     */
+    protected function defaults(): array
+    {
+        return [];
+    }
+
+    /**
+     * A create from some of the fields only: a public form's, where nobody is asked who
+     * they are and so only what the descriptor lists is taken.
+     *
+     * The rules are this request's own. A key that isn't listed is refused the way an
+     * unknown one is, and a field left out takes its default, or is left to the column.
+     *
+     * @param  list<string>  $fields  The fields that may be sent
+     * @param  array<string, mixed>  $input
+     * @return array{values: array<string, mixed>, issues: list<array{path: string, message: string}>}
+     */
+    public function forFields(array $fields, array $input): array
+    {
+        $input = self::cleaned($this->rich(), $input) + $input;
+        $issues = [];
+        foreach (array_keys($input) as $key) {
+            if (! in_array($key, $fields, true)) {
+                $issues[] = ['path' => (string) $key, 'message' => 'Unknown field.'];
+            }
+        }
+        $validator = Validation::make($input, array_intersect_key(self::withoutTrashed($this->rules()), array_flip($fields)));
+        if ($validator->fails()) {
+            self::explainTrashed($validator, $input);
+            array_push($issues, ...FlareErrors::issues($validator->errors()->toArray()));
+        }
+        if ($issues !== []) {
+            return ['values' => [], 'issues' => $issues];
+        }
+
+        $validated = $validator->validated();
+        $defaults = $this->defaults();
+        $values = [];
+        foreach ($this->columns() as $field => $column) {
+            if (array_key_exists($field, $validated)) {
+                $values[$column] = $validated[$field];
+            } elseif (array_key_exists($field, $defaults)) {
+                $values[$column] = $defaults[$field];
+            }
+        }
+
+        return ['values' => $values, 'issues' => []];
+    }
+
+    /**
      * Rich text is cleaned before anything looks at it: what is checked for being there,
      * and for being short enough, is the HTML that would be stored.
      */
@@ -191,6 +244,7 @@ abstract class ResourceRequest extends FormRequest
     {
         $rules = self::withoutTrashed($this->rules());
         $columns = $this->columns();
+        $defaults = $this->defaults();
         $known = array_keys($columns);
         $computed = array_map(fn (string $field) => $field.'File', $known);
         $unique = array_keys(array_filter($rules, fn ($rule) => is_array($rule) && array_filter($rule, fn ($one) => $one instanceof Unique) !== []));
@@ -241,6 +295,8 @@ abstract class ResourceRequest extends FormRequest
             foreach ($columns as $field => $column) {
                 if (array_key_exists($field, $validated)) {
                     $mapped[$column] = $validated[$field];
+                } elseif (array_key_exists($field, $defaults)) {
+                    $mapped[$column] = $defaults[$field];
                 }
             }
             $values[] = $mapped;
@@ -253,10 +309,14 @@ abstract class ResourceRequest extends FormRequest
     public function values(): array
     {
         $validated = $this->validated();
+        $defaults = $this->defaults();
         $values = [];
         foreach ($this->columns() as $field => $column) {
             if (array_key_exists($field, $validated)) {
                 $values[$column] = $validated[$field];
+            } elseif (array_key_exists($field, $defaults) && ! $this->isMethod('PATCH')) {
+                // Left out of a create, or of a replace, it is what it usually is.
+                $values[$column] = $defaults[$field];
             } elseif ($this->isMethod('PUT')) {
                 $values[$column] = null;
             }

@@ -43,6 +43,7 @@ final class Field
      * @param  string|null  $profile  file: the image profile uploads are optimised with (config nevela.uploads.profiles)
      * @param  int|null  $maxLength  string and text: the most characters it holds, where that isn't the usual 255 or 65,535
      * @param  bool  $private  file: kept where the web server doesn't reach, and handed only to someone who may view the record
+     * @param  string|int|float|bool|null  $default  What the field is when a create leaves it out. Also the column's default.
      */
     public function __construct(
         public readonly string $name,
@@ -57,6 +58,7 @@ final class Field
         public readonly ?string $profile = null,
         public readonly ?int $maxLength = null,
         public readonly bool $private = false,
+        public readonly string|int|float|bool|null $default = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -87,6 +89,22 @@ final class Field
             }
             if (! str_ends_with($name, 'Id') || $name === 'Id') {
                 throw new InvalidArgumentException("A belongsTo field holds an id, so its name ends in \"Id\": {$name}Id.");
+            }
+        }
+        if ($default !== null) {
+            $fits = match ($kind) {
+                'string', 'text' => is_string($default) && ! ($kind === 'text' && $format === 'rich'),
+                'int' => is_int($default),
+                'float' => is_int($default) || is_float($default),
+                'boolean' => is_bool($default),
+                'enum' => is_string($default) && in_array($default, $options, true),
+                default => false,
+            };
+            if (! $fits) {
+                throw new InvalidArgumentException("The default of \"{$name}\" has to be a value the field could hold".($kind === 'enum' ? ': one of '.implode(', ', $options).'.' : (in_array($kind, ['string', 'text', 'int', 'float', 'boolean'], true) ? '.' : ", and a {$kind} field can't have one.")));
+            }
+            if ($unique) {
+                throw new InvalidArgumentException("\"{$name}\" is unique, so only one record could ever have its default.");
             }
         }
         if ($private && $kind !== 'file') {
@@ -120,12 +138,34 @@ final class Field
      *   image:image                       an optimised image; image:image(product) names a profile
      *   manual:file(pdf|document)         any other upload
      *   cv:file(pdf|private)              one only those who may view the record can fetch
+     *   status:enum(pending|paid)=pending what it is when a create leaves it out
      *
      * Grit's and Flare's spellings are understood too: see normalise().
      */
     public static function parse(string $token): self
     {
         $written = trim($token);
+        // status:enum(pending|paid)=pending: what the field is when a create leaves it out.
+        $default = null;
+        if (($at = strpos($written, '=')) !== false) {
+            $default = trim(substr($written, $at + 1));
+            $written = rtrim(substr($written, 0, $at));
+        }
+        if ($default !== null) {
+            $field = self::parse($written);
+            $value = match ($field->kind) {
+                'int' => filter_var($default, FILTER_VALIDATE_INT) === false ? $default : (int) $default,
+                'float' => is_numeric($default) ? (float) $default : $default,
+                'boolean' => match (strtolower($default)) {
+                    'true', '1', 'yes' => true,
+                    'false', '0', 'no' => false,
+                    default => $default,
+                },
+                default => $default,
+            };
+
+            return self::fromArray($field->name, ['default' => $value] + $field->toArray());
+        }
         $token = self::normalise($written);
         if (! preg_match('/^([A-Za-z][A-Za-z0-9_]*):([A-Za-z_]+)(?:\(([^)]*)\))?([?!]{0,2})$/', $token, $m)) {
             throw new InvalidArgumentException("Invalid field \"{$written}\". Expected name:type, e.g. price:money, status:enum(draft|live)?, image:image or category:belongsTo(Category).");
@@ -204,6 +244,7 @@ final class Field
             $data['profile'] ?? null,
             isset($data['maxLength']) ? (int) $data['maxLength'] : null,
             (bool) ($data['private'] ?? false),
+            $data['default'] ?? null,
         );
     }
 
@@ -219,6 +260,7 @@ final class Field
             'profile' => $this->profile,
             'maxLength' => $this->maxLength,
             'private' => $this->private ?: null,
+            'default' => $this->default,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,

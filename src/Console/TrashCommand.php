@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Console;
 
 use Illuminate\Console\Command;
+use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Trash\Trash;
 
 final class TrashCommand extends Command
@@ -13,6 +14,13 @@ final class TrashCommand extends Command
 
     public function handle(): int
     {
+        // Files visitors uploaded for a form they never sent. Nothing to do with the trash,
+        // but the same kind of job, on the same night.
+        $unclaimed = Uploads::purgeUnclaimed();
+        if ($unclaimed > 0) {
+            $this->components->info('Removed '.number_format($unclaimed).' file(s) uploaded through a public form and never used.');
+        }
+
         $days = Trash::days();
         if ($days === null) {
             $this->components->info('Deleted records are kept until someone removes them (nevela.trash.days is off), so there is nothing to do.');

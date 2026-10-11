@@ -133,6 +133,7 @@ final class GenerateCommand extends Command
             }
         }
         $files[] = $generator->routes($all);
+        $files[] = $generator->publicRoutes($all);
         $files[] = $generator->registry($all);
         $files[] = $generator->authConfig((array) config('nevela.auth', []));
 
@@ -168,6 +169,14 @@ final class GenerateCommand extends Command
         }
         if ($edited) {
             $command->components->warn("{$edited} file(s) skipped because you edited their generated block. Move your changes outside it, or rerun with --force.");
+        }
+        // A model written before its resource was made public has no scope saying which
+        // records are, and without one none are. Said, so an empty public list isn't a puzzle.
+        foreach ($queue as $descriptor) {
+            $model = base_path("app/Models/{$descriptor->name}.php");
+            if ($descriptor->public?->read !== null && is_file($model) && ! str_contains((string) file_get_contents($model), 'scopePublicQuery')) {
+                $command->components->warn("{$descriptor->name} can be read publicly, but its model doesn't say which records may be, so none are. Add to app/Models/{$descriptor->name}.php: public function scopePublicQuery(\\Illuminate\\Database\\Eloquent\\Builder \$query): void { … }");
+            }
         }
 
         return self::SUCCESS;
