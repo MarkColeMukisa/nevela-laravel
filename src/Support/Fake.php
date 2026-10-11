@@ -133,9 +133,23 @@ final class Fake
             'datetime' => $field->unique
                 ? gmdate('Y-m-d H:i:s', self::EPOCH + $number)
                 : date('Y-m-d H:i:s', time() - mt_rand(0, 365 * 86400)),
-            'text' => self::sentence(mt_rand(8, 24)).($field->unique ? " {$number}" : ''),
+            'text' => $field->isRich()
+                ? self::article($field->unique ? " {$number}" : '')
+                : self::sentence(mt_rand(8, 24)).($field->unique ? " {$number}" : ''),
             default => self::string($field, $number, $first, $last, $isPerson),
         };
+    }
+
+    /** A few paragraphs with a heading and a list, so a seeded record reads like one somebody wrote. */
+    private static function article(string $suffix): string
+    {
+        $items = implode('', array_map(fn () => '<li>'.ucfirst(self::sentence(mt_rand(3, 6))).'</li>', range(1, 3)));
+
+        return '<p>'.self::sentence(mt_rand(14, 24)).'</p>'
+            .'<h2>'.rtrim(self::sentence(mt_rand(3, 5)), '.').$suffix.'</h2>'
+            .'<p>'.self::sentence(mt_rand(12, 20)).' <strong>'.rtrim(self::sentence(mt_rand(2, 4)), '.').'</strong>, '.lcfirst(self::sentence(mt_rand(6, 10))).'</p>'
+            ."<ul>{$items}</ul>"
+            .'<p>'.self::sentence(mt_rand(10, 18)).'</p>';
     }
 
     private static function string(Field $field, int $number, string $first, string $last, bool $isPerson): string

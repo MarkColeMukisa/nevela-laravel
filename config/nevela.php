@@ -132,6 +132,19 @@ return [
     ],
 
     /*
+    | Rich text fields (body:richtext). Whatever is sent is parsed and written out again
+    | with only these tags and attributes: nothing the editor, a script or a visitor sends
+    | is trusted. A tag that isn't listed goes and its words stay. The list matches the
+    | dashboard editor's toolbar; add to it only what you would let a stranger put on a page.
+    | A link may use these schemes, or none (/about).
+    */
+    'rich_text' => [
+        'tags' => ['p', 'br', 'strong', 'em', 's', 'a', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote'],
+        'attributes' => ['a' => ['href']],
+        'schemes' => ['http', 'https', 'mailto'],
+    ],
+
+    /*
     | The most rows POST /{slug}/_bulk creates in one request (the dashboard's "Add several"
     | grid). They are saved in one transaction, so this is also how long one can run.
     */

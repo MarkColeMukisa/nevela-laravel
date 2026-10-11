@@ -14,6 +14,7 @@ final class Field
 
     public const FORMATS = [
         'string' => ['email', 'url', 'tel', 'slug', 'color'],
+        'text' => ['rich'],
         'float' => ['money', 'percent', 'rating'],
         'int' => ['percent', 'rating'],
     ];
@@ -23,7 +24,7 @@ final class Field
 
     /** Shorthand types accepted by --fields, mapped to kind + format. */
     private const ALIASES = [
-        'string' => ['string', null], 'text' => ['text', null],
+        'string' => ['string', null], 'text' => ['text', null], 'richtext' => ['text', 'rich'],
         'email' => ['string', 'email'], 'url' => ['string', 'url'], 'tel' => ['string', 'tel'],
         'slug' => ['string', 'slug'], 'color' => ['string', 'color'],
         'int' => ['int', null], 'integer' => ['int', null],
@@ -109,6 +110,7 @@ final class Field
      *
      *   status:enum(draft|published)
      *   excerpt:string(500)               a length other than the usual 255
+     *   body:richtext                     formatted text, kept as HTML that has been cleaned
      *   category:belongsTo(Category)      stored as categoryId
      *   image:image                       an optimised image; image:image(product) names a profile
      *   manual:file(pdf|document)         any other upload
@@ -227,6 +229,12 @@ final class Field
     public function relation(): string
     {
         return substr($this->name, 0, -2);
+    }
+
+    /** Whether this is text with formatting: written in an editor, kept as HTML, cleaned on the way in and out. */
+    public function isRich(): bool
+    {
+        return $this->kind === 'text' && $this->format === 'rich';
     }
 
     /** Whether this is a file field that takes images only, and so is optimised and shown as a picture. */

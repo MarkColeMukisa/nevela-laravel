@@ -339,6 +339,15 @@ final class Nevela
         return Uploads::ref($key);
     }
 
+    /**
+     * A rich text field's HTML, as it is safe to show: only the tags and attributes in
+     * config('nevela.rich_text'). Generated API resources send every rich text field through it.
+     */
+    public static function html(?string $html): ?string
+    {
+        return $html === null ? null : Support\Html::clean($html);
+    }
+
     /** Whether a request is one Nevela answers (so errors use Flare's shape). */
     public static function handles(Request $request): bool
     {

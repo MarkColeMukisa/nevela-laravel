@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Validator as Validation;
 use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
+use Nevela\Laravel\Support\Html;
 
 /**
  * Base for generated resource requests.
@@ -31,6 +32,43 @@ abstract class ResourceRequest extends FormRequest
 
     /** @return array<string, string> field => column */
     abstract protected function columns(): array;
+
+    /**
+     * Fields that hold rich text. A generated request with any says which.
+     *
+     * @return list<string>
+     */
+    protected function rich(): array
+    {
+        return [];
+    }
+
+    /**
+     * Rich text is cleaned before anything looks at it: what is checked for being there,
+     * and for being short enough, is the HTML that would be stored.
+     */
+    protected function prepareForValidation(): void
+    {
+        $this->merge(self::cleaned($this->rich(), $this->all()));
+    }
+
+    /**
+     * @param  list<string>  $fields
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed> The fields that were sent as text, cleaned. One with nothing left to read is empty.
+     */
+    private static function cleaned(array $fields, array $input): array
+    {
+        $clean = [];
+        foreach ($fields as $field) {
+            if (is_string($input[$field] ?? null)) {
+                $html = Html::clean($input[$field]);
+                $clean[$field] = $html === '' ? null : $html;
+            }
+        }
+
+        return $clean;
+    }
 
     /** Tables known to have a trash. Only "yes" is remembered: the column can arrive with a migration. */
     private static array $trashes = [];
@@ -174,6 +212,7 @@ abstract class ResourceRequest extends FormRequest
                     $issues[] = ['path' => (string) $key, 'message' => 'Unknown field.'];
                 }
             }
+            $row = self::cleaned($this->rich(), $row) + $row;
             $validator = Validation::make($row, $rules);
             if ($validator->fails()) {
                 self::explainTrashed($validator, $row);

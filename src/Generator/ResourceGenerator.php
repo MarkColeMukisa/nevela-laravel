@@ -527,8 +527,8 @@ final class ResourceGenerator
             }
             $line = match (true) {
                 $f->kind === 'file' => "\$table->string('{$c}', 512)",
-                // More than a text column holds on MySQL.
-                $f->kind === 'text' && $f->maxLength > 65535 => "\$table->longText('{$c}')",
+                // More than a text column holds on MySQL, or HTML, whose tags count against it too.
+                $f->kind === 'text' && ($f->isRich() || $f->maxLength > 65535) => "\$table->longText('{$c}')",
                 $f->kind === 'text' => "\$table->text('{$c}')",
                 $f->kind === 'int' => "\$table->integer('{$c}')",
                 $f->kind === 'float' && $f->format === 'money' => "\$table->decimal('{$c}', 12, 2)",
@@ -645,6 +645,17 @@ final class ResourceGenerator
         }
         $ruleLines = implode("\n", $rules);
         $columnMap = implode(', ', $columns);
+        // Only where there is one: a resource without rich text has the request it always had.
+        $rich = implode(', ', array_map(fn (Field $f) => "'{$f->name}'", array_filter($d->fields, fn (Field $f) => $f->isRich())));
+        $richBlock = $rich === '' ? '' : <<<PHP
+
+
+            /** Fields that hold HTML. It is cleaned before it is checked, so the length is that of what is kept. */
+            protected function rich(): array
+            {
+                return [{$rich}];
+            }
+        PHP;
         $m = self::M;
         $e = self::E;
 
@@ -686,7 +697,7 @@ final class ResourceGenerator
             protected function columns(): array
             {
                 return [{$columnMap}];
-            }
+            }{$richBlock}
             {$e}
         }
 
@@ -738,6 +749,8 @@ final class ResourceGenerator
             $value = match (true) {
                 $f->kind === 'date' => "\$this->{$f->column()}?->format('Y-m-d')",
                 $f->kind === 'datetime' => "\$this->{$f->column()}?->toJSON()",
+                // Cleaned again on the way out: HTML can reach a table without passing a request.
+                $f->isRich() => "\\Nevela\\Laravel\\Nevela::html(\$this->{$f->column()})",
                 // An id is a string in the API whatever it is in the database.
                 $f->kind === 'belongsTo' && $this->hasIntIds((string) $f->target, $d, $all) => "\$this->{$f->column()} === null ? null : (string) \$this->{$f->column()}",
                 default => "\$this->{$f->column()}",
@@ -994,7 +1007,12 @@ final class ResourceGenerator
                 // A picture is worth a column in the table; other files are not.
                 'list' => $f->isImage() ? 'true' : null,
             ]);
-            $opts = $options ? '{ '.implode(', ', array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options)).' }' : '';
+            $parts = array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options);
+            if ($f->isRich()) {
+                // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.
+                $parts[] = '...({ rich: true } as {})';
+            }
+            $opts = $parts ? '{ '.implode(', ', $parts).' }' : '';
             $call = match (true) {
                 $f->kind === 'belongsTo' => "field.belongsTo({$j($f->target)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'file' => "field.file({$j($f->accept)}".($opts ? ", {$opts}" : '').')',
