@@ -30,6 +30,14 @@ final class Permissions
     private static ?array $catalog = null;
 
     /**
+     * The permissions that are a resource's own actions, such as "internship_applications.accept".
+     * They are the only ones outside the four, and are only ever given by name.
+     *
+     * @var array<string, true>
+     */
+    private static array $own = [];
+
+    /**
      * The catalog, shaped for the roles screen: modules, their groups, their features.
      * Only the feature and the action appear in a permission; the rest is for reading.
      *
@@ -41,6 +49,7 @@ final class Permissions
             return self::$catalog;
         }
 
+        self::$own = [];
         $taken = ['users' => true, 'roles' => true];
         $modules = [[
             'key' => 'access',
@@ -64,7 +73,14 @@ final class Permissions
             $taken[$descriptor->table] = true;
             $heading = trim((string) ($descriptor->group ?? '')) ?: 'Resources';
             $groups[$heading] ??= ['key' => self::slug($heading), 'name' => $heading, 'features' => []];
-            $groups[$heading]['features'][] = ['key' => $descriptor->table, 'name' => $descriptor->pluralLabel, 'actions' => self::ACTIONS];
+            $feature = ['key' => $descriptor->table, 'name' => $descriptor->pluralLabel, 'actions' => self::ACTIONS];
+            // The resource's own actions, after the four: one permission each, with the name its button has.
+            foreach ($descriptor->actions as $action) {
+                $feature['actions'][] = $action->key();
+                $feature['labels'][$action->key()] = $action->label;
+                self::$own["{$descriptor->table}.{$action->key()}"] = true;
+            }
+            $groups[$heading]['features'][] = $feature;
         }
         if ($groups !== []) {
             $modules[] = ['key' => 'resources', 'name' => 'Resources', 'groups' => array_values($groups)];
@@ -92,6 +108,7 @@ final class Permissions
     public static function forget(): void
     {
         self::$catalog = null;
+        self::$own = [];
     }
 
     /**
@@ -119,7 +136,16 @@ final class Permissions
     /** Whether `ability` has the shape of a permission, so the gate answers for it. */
     public static function isPermission(string $ability): bool
     {
-        return (bool) preg_match('/^[a-z][a-z0-9_]*\.(create|view|edit|delete)$/', $ability);
+        if (preg_match('/^[a-z][a-z0-9_]*\.(create|view|edit|delete)$/', $ability)) {
+            return true;
+        }
+        // Or one of a resource's own actions. Anything else with a dot in it is the app's to define.
+        if (! str_contains($ability, '.')) {
+            return false;
+        }
+        self::catalog();
+
+        return isset(self::$own[$ability]);
     }
 
     /**
@@ -144,6 +170,11 @@ final class Permissions
      * A pattern is checked to its end: "products.*" covers "products.view", and "*.view"
      * covers "products.view" and nothing else of products. Stopping at the first "*"
      * would turn "*.view" into "everything".
+     *
+     * In the second half, "*" is the four things every feature has: create, view, edit and
+     * delete. A resource's own action, such as accepting an application, is covered only
+     * by its own name or by "*" alone. Someone given "everything to do with the records"
+     * has not thereby been given the button that sends a letter.
      */
     public static function matches(string $pattern, string $key): bool
     {
@@ -165,7 +196,7 @@ final class Permissions
             return false;
         }
 
-        return $action === '*' || $action === $k[1];
+        return $action === '*' ? in_array($k[1], self::ACTIONS, true) : $action === $k[1];
     }
 
     /**
@@ -236,10 +267,10 @@ final class Permissions
         if ($grant === '*') {
             return true;
         }
-        if (! preg_match('/^(\*|@?[a-z][a-z0-9_]*)\.(\*|create|view|edit|delete)$/', $grant)) {
+        if (! preg_match('/^(\*|@?[a-z][a-z0-9_]*)\.(\*|[a-z][a-z0-9_]*)$/', $grant, $m)) {
             return false;
         }
-        if (str_starts_with($grant, '@')) {
+        if (str_starts_with($grant, '@') && in_array($m[2], ['*', ...self::ACTIONS], true)) {
             return in_array(substr(explode('.', $grant)[0], 1), ['access', 'resources', 'app'], true);
         }
 

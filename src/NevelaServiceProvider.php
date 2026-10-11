@@ -33,6 +33,7 @@ use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\TokenController;
+use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Media\Uploads;
@@ -221,6 +222,10 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/resources', fn () => response()->json([
                 'data' => array_map(fn ($d) => $d->toArray(), Nevela::all()),
             ]))->name('resources');
+
+            // A resource's own actions: on one record, and on the list or a selection from it.
+            Route::post('{slug}/_actions/{action}', [ActionController::class, 'collection'])->name('actions.collection');
+            Route::post('{slug}/{id}/_actions/{action}', [ActionController::class, 'record'])->name('actions.record');
 
             if (is_file($routes = base_path('routes/nevela.php'))) {
                 require $routes;

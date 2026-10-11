@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Generator;
 
+use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Naming;
@@ -41,7 +42,48 @@ final class ResourceGenerator
             new GeneratedFile($api, "app/Policies/{$d->name}Policy.php", $this->policy($d), GeneratedFile::MODE_ONCE),
             new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/'.Naming::kebab($d->name).'.resource.ts', $this->typescript($d, $all)),
             ...$this->pages($d),
+            ...array_values(array_map(fn (Action $action) => new GeneratedFile($api, "app/Nevela/Actions/{$d->name}/{$action->className()}.php", $this->action($d, $action), GeneratedFile::MODE_ONCE), $d->actions)),
         ];
+    }
+
+    /**
+     * The class an action is written in: what happens when its button is pressed. Written
+     * once and then the app's own, like a policy. Until someone fills it in it says so.
+     */
+    public function action(Descriptor $d, Action $action): string
+    {
+        $var = $d->variable();
+        $class = $action->className();
+        $path = "app/Nevela/Actions/{$d->name}/{$class}.php";
+        $asks = $action->fields === [] ? 'It asks for nothing, so $input is empty.' : 'What the person filled in, checked: '.implode(', ', array_keys($action->fields)).'.';
+        [$imports, $signature, $what] = $action->on === 'record'
+            ? ["\nuse App\\Models\\{$d->name};\n", "{$d->name} \${$var}, array \$input", "on one {$this->lower($d->label)}"]
+            : ['', 'array $input', "on {$this->lower($d->pluralLabel)} as a whole"];
+        $permission = "{$d->table}.{$action->key()}";
+
+        return <<<PHP
+        <?php
+
+        namespace App\Nevela\Actions\\{$d->name};
+        {$imports}
+        /**
+         * {$action->label}, {$what}. Generated once — this file is yours.
+         *
+         * Nevela has done the rest by the time handle() runs: the route, the "{$permission}"
+         * permission, the check that the action applies, and the validation of what was asked
+         * for. It runs inside a database transaction, so throwing undoes what it changed, and
+         * the person is told it didn't work. What it returns is the message they see.
+         */
+        class {$class}
+        {
+            /** @param array<string, mixed> \$input {$asks} */
+            public function handle({$signature}): ?string
+            {
+                throw new \LogicException('{$action->label} does nothing yet. Write it in {$path}.');
+            }
+        }
+
+        PHP;
     }
 
     /**
@@ -325,6 +367,14 @@ final class ResourceGenerator
         $body = $names === []
             ? 'export const resources = [] as const;'
             : implode("\n", $imports)."\n\nexport { {$list} };\nexport const resources = [{$list}] as const;";
+        // What Flare's descriptor has no place for, by resource name: the actions a resource has.
+        $extras = [];
+        foreach ($all as $d) {
+            if ($d->actions !== []) {
+                $extras[$d->name]['actions'] = array_map(fn (Action $a) => ['permission' => "{$d->table}.{$a->key()}"] + $a->toArray(), $d->actions);
+            }
+        }
+        $body .= "\n\n/** What a resource has beyond its fields. Read through lib/extras.ts. */\nexport const extras: Record<string, unknown> = ".($extras === [] ? '{}' : json_encode($extras, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)).';';
         $m = self::M;
         $e = self::E;
 
