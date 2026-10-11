@@ -43,6 +43,9 @@ final class RichTextTest extends TestCase
         yield 'text is written out as text' => ['<p>1 &lt; 2 &amp;&amp; "quoted" &lt;script&gt;</p>', '<p>1 &lt; 2 &amp;&amp; "quoted" &lt;script&gt;</p>'];
         yield 'other alphabets and emoji' => ['<p>Kampala — Ünïcödé 日本語 🎉</p>', '<p>Kampala — Ünïcödé 日本語 🎉</p>'];
         yield 'broken markup is closed' => ['<p>one<strong>two', '<p>one<strong>two</strong></p>'];
+        yield 'what Chrome writes for a list after a paragraph' => ['<h2>A heading</h2><p>Plain words, then <b>bold ones</b></p><p><ul><li>first item</li><li>second item</li></ul></p>', '<h2>A heading</h2><p>Plain words, then <strong>bold ones</strong></p><ul><li>first item</li><li>second item</li></ul>'];
+        yield 'tags with nothing in them' => ['<p></p><p>kept</p><h2> </h2><ul><li></li></ul><p><strong></strong></p>', '<p>kept</p>'];
+        yield 'a blank line between paragraphs' => ['<p>one</p><p><br></p><p>two</p>', '<p>one</p><p><br></p><p>two</p>'];
         yield 'an editor opened and left' => ['<p><br></p>', ''];
         yield 'spaces and nothing else' => [" <p> &nbsp; </p>\n<div></div>", ''];
         yield 'nothing' => ['', ''];

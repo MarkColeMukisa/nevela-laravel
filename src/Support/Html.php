@@ -157,6 +157,12 @@ final class Html
         if ($name === 'a' && $kept === '') {
             return $inner;
         }
+        // A tag with nothing in it is nothing. Browsers leave these behind: Chrome puts a
+        // list inside the paragraph it was started in, which leaves an empty paragraph
+        // before it once the two are told apart. (A blank line is <p><br></p>, and is kept.)
+        if (! in_array($name, self::EMPTY, true) && trim($inner) === '') {
+            return '';
+        }
 
         return in_array($name, self::EMPTY, true) ? "<{$name}{$kept}>" : "<{$name}{$kept}>{$inner}</{$name}>";
     }
