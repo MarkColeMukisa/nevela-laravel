@@ -7,6 +7,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
@@ -124,10 +125,30 @@ final class Nevela
         }
 
         foreach ($list->filters as $filter) {
+            $field = $resource->fields[$filter['field']] ?? null;
+            if ($filter['value'] !== null && $field?->kind === 'belongsTo' && ! self::couldBeId((string) $field->target, (string) $filter['value'])) {
+                // Nothing belongs to a record that can't exist. Asked anyway, some databases
+                // answer a number column given letters with an error instead of with no rows.
+                $query->whereRaw('1 = 0');
+
+                continue;
+            }
             $filter['value'] === null
                 ? $query->whereNull($filter['column'])
                 : $query->where($filter['column'], $filter['value']);
         }
+    }
+
+    /** Whether a value has the shape of one of a resource's ids: digits, or a UUID. */
+    private static function couldBeId(string $name, string $value): bool
+    {
+        try {
+            $integers = self::resource($name)->idType === 'int';
+        } catch (InvalidArgumentException) {
+            return true; // not a resource this app describes: its ids are its own business
+        }
+
+        return $integers ? preg_match('/^[0-9]{1,18}$/', $value) === 1 : Str::isUuid($value);
     }
 
     /**

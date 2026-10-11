@@ -6,6 +6,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator as Validation;
+use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
 
@@ -31,9 +32,12 @@ abstract class ResourceRequest extends FormRequest
     /** @return array<string, string> field => column */
     abstract protected function columns(): array;
 
+    /** Tables known to have a trash. Only "yes" is remembered: the column can arrive with a migration. */
+    private static array $trashes = [];
+
     protected function validationRules()
     {
-        $rules = parent::validationRules();
+        $rules = self::withoutTrashed(parent::validationRules());
         if (! $this->isMethod('PATCH')) {
             return $rules;
         }
@@ -58,8 +62,35 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * A relation points at a record that is there, and one in the trash is not: nothing
+     * lists it and its own page answers 404. Laravel's exists rule looks at the table,
+     * where a deleted record still is, so it is told to leave those out.
+     *
+     * @param  array<string, mixed>  $rules
+     * @return array<string, mixed>
+     */
+    private static function withoutTrashed(array $rules): array
+    {
+        foreach ($rules as $set) {
+            foreach (is_array($set) ? $set : [] as $rule) {
+                if (! $rule instanceof Exists) {
+                    continue;
+                }
+                // "exists:categories,id": the rule keeps its table to itself.
+                $table = (string) strtok(substr((string) $rule, strlen('exists:')), ',');
+                if (self::$trashes[$table] ?? (Schema::hasColumn($table, 'deleted_at') && (self::$trashes[$table] = true))) {
+                    $rule->withoutTrashed();
+                }
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
      * A unique value can be held by a record nobody can see: one in the trash. "Already
      * taken" would send someone looking through a list it isn't in, so say where it is.
+     * The same goes for a relation to a record that is in the trash.
      *
      * @param  array<string, mixed>  $data
      * @return list<array{path: string, message: string}> The messages that were replaced
@@ -82,6 +113,25 @@ abstract class ResourceRequest extends FormRequest
             $validator->errors()->add($field, $message);
             $replaced[] = ['path' => (string) $field, 'message' => $message];
         }
+        foreach ($validator->failed() as $field => $rules) {
+            // And for a failed exists rule: the table and the column, then what else it asked.
+            [$table, $column] = array_pad($rules['Exists'] ?? [], 2, null);
+            $value = $data[$field] ?? null;
+            if (! is_string($table) || ! is_string($column) || ! is_scalar($value) || ! (self::$trashes[$table] ?? false)) {
+                continue;
+            }
+            try {
+                $trashed = DB::table($table)->where($column, $value)->whereNotNull('deleted_at')->exists();
+            } catch (\Throwable) {
+                continue; // not something that could be an id at all
+            }
+            if ($trashed) {
+                $message = 'This one is in the trash. Restore it, or choose another.';
+                $validator->errors()->forget($field);
+                $validator->errors()->add($field, $message);
+                $replaced[] = ['path' => (string) $field, 'message' => $message];
+            }
+        }
 
         return $replaced;
     }
@@ -101,7 +151,7 @@ abstract class ResourceRequest extends FormRequest
      */
     public function many(array $rows): array
     {
-        $rules = $this->rules();
+        $rules = self::withoutTrashed($this->rules());
         $columns = $this->columns();
         $known = array_keys($columns);
         $computed = array_map(fn (string $field) => $field.'File', $known);
