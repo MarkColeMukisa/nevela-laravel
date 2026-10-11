@@ -38,12 +38,21 @@ final class AdoptCommand extends Command
             $all = Nevela::all();
             // The descriptor this table has already, if it is being adopted again.
             $others = array_values(array_filter($all, fn (Descriptor $d) => $d->table !== $table));
-            if (count($others) !== count($all) && ! $this->option('force')) {
+            $existing = array_values(array_filter($all, fn (Descriptor $d) => $d->table === $table))[0] ?? null;
+            if ($existing !== null && ! $this->option('force')) {
                 $this->components->error("{$table} is a resource already. Edit its descriptor and run: php artisan nevela:generate. To read it from the table again, add --force.");
 
                 return self::FAILURE;
             }
-            $adoption = Adoption::of($table, $others, $this->option('name'), $this->option('icon'), $this->option('group'));
+            $name = $this->option('name');
+            // Read again, it stays the resource it is. Under another name the first descriptor
+            // would still be there, and the table would be two resources.
+            if ($existing !== null && $name !== null && Naming::pascal($name) !== $existing->name) {
+                $this->components->error("{$table} is the {$existing->name} resource, and --force reads it again under that name. To call it something else, remove nevela/resources/".Naming::kebab($existing->name).'.json and the code generated for it, then adopt the table again.');
+
+                return self::FAILURE;
+            }
+            $adoption = Adoption::of($table, $others, $existing?->name ?? $name, $this->option('icon') ?? $existing?->icon, $this->option('group') ?? $existing?->group);
         } catch (InvalidArgumentException $e) {
             $this->components->error($e->getMessage());
 

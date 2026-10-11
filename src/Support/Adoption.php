@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Support;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -56,7 +57,39 @@ final class Adoption
             throw new InvalidArgumentException("There is no table called {$table}.");
         }
 
-        return self::describe($table, Schema::getColumns($table), Schema::getIndexes($table), Schema::getForeignKeys($table), $resources, $name, $icon, $group);
+        $columns = Schema::getColumns($table);
+
+        return self::describe($table, $columns, Schema::getIndexes($table), Schema::getForeignKeys($table), $resources, $name, $icon, $group, self::longest($table, $columns));
+    }
+
+    /**
+     * The longest value in each string column that has no length of its own.
+     *
+     * PostgreSQL's `varchar` can be declared without one, and SQLite keeps none at all,
+     * so nothing about such a column says how long its values may be. The values do.
+     *
+     * @param  list<array<string, mixed>>  $columns
+     * @return array<string, int> by column
+     */
+    private static function longest(string $table, array $columns): array
+    {
+        $unbounded = [];
+        foreach ($columns as $column) {
+            if (in_array(strtolower((string) ($column['type_name'] ?? '')), self::STRINGS, true) && ! str_contains((string) ($column['type'] ?? ''), '(')) {
+                $unbounded[] = (string) $column['name'];
+            }
+        }
+        if ($unbounded === []) {
+            return [];
+        }
+        try {
+            $grammar = DB::connection()->getQueryGrammar();
+            $row = (array) DB::table($table)->selectRaw(implode(', ', array_map(fn (string $column) => 'max(length('.$grammar->wrap($column).')) as '.$grammar->wrap($column), $unbounded)))->first();
+        } catch (\Throwable) {
+            return []; // a database that measures some other way: the usual length, as for any string
+        }
+
+        return array_map(fn ($length) => (int) $length, $row);
     }
 
     /**
@@ -67,10 +100,11 @@ final class Adoption
      * @param  list<array<string, mixed>>  $indexes
      * @param  list<array<string, mixed>>  $foreignKeys
      * @param  list<Descriptor>  $resources
+     * @param  array<string, int>  $longest  The longest value in a string column that declares no length, by column
      *
      * @throws InvalidArgumentException
      */
-    public static function describe(string $table, array $columns, array $indexes, array $foreignKeys, array $resources = [], ?string $name = null, ?string $icon = null, ?string $group = null): self
+    public static function describe(string $table, array $columns, array $indexes, array $foreignKeys, array $resources = [], ?string $name = null, ?string $icon = null, ?string $group = null, array $longest = []): self
     {
         $name = Naming::pascal($name ?? Str::singular($table));
         $byName = [];
@@ -151,6 +185,11 @@ final class Adoption
                 $leave(strtolower((string) ($info['type_name'] ?? 'this type')).' has no field kind');
 
                 continue;
+            }
+            // No length of its own, and more in it already than the usual one allows.
+            if ($kind['kind'] === 'string' && ! isset($kind['maxLength']) && ($longest[$column] ?? 0) > 255) {
+                $kind['maxLength'] = max(65_535, $longest[$column]);
+                $notes[] = "{$column} declares no length and holds values longer than 255 characters, so it is adopted with room for ".number_format($kind['maxLength']).'.';
             }
             try {
                 $fields[$column] = new Field($field, $kind['kind'], required: $required, unique: isset($unique[$column]), options: $kind['options'] ?? [], maxLength: $kind['maxLength'] ?? null);

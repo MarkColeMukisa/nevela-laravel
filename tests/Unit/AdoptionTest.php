@@ -184,6 +184,29 @@ final class AdoptionTest extends TestCase
         $this->assertSame(['title' => 'string', 'live' => 'boolean'], array_map(Adoption::spec(...), $sqlite->descriptor->fields));
     }
 
+    public function test_a_string_that_declares_no_length_is_as_long_as_what_is_in_it(): void
+    {
+        $columns = [
+            self::column('id', 'integer', auto: true),
+            self::column('title', 'varchar'),
+            self::column('summary', 'varchar'),
+            self::column('code', 'varchar(255)'),
+            self::column('created_at', 'datetime', nullable: true),
+            self::column('updated_at', 'datetime', nullable: true),
+        ];
+
+        // Nothing longer than the usual 255 is in the table: the usual rule.
+        $short = Adoption::describe('posts', $columns, [], [], longest: ['title' => 40, 'summary' => 255]);
+        $this->assertSame(['title' => 'string', 'summary' => 'string', 'code' => 'string'], array_map(Adoption::spec(...), $short->descriptor->fields));
+        $this->assertSame([], $short->notes);
+
+        // A value that is there already has to be one the form will save again.
+        $long = Adoption::describe('posts', $columns, [], [], longest: ['title' => 40, 'summary' => 900]);
+        $this->assertSame(['title' => 'string', 'summary' => 'string(65535)', 'code' => 'string'], array_map(Adoption::spec(...), $long->descriptor->fields));
+        $this->assertStringContainsString('summary declares no length and holds values longer than 255', $long->notes[0]);
+        $this->assertSame('string(100000)', Adoption::spec(Adoption::describe('posts', $columns, [], [], longest: ['summary' => 100_000])->descriptor->fields['summary']));
+    }
+
     public function test_a_table_with_soft_deletes_of_its_own_is_adopted_with_a_warning_about_the_trash(): void
     {
         $columns = [...self::applications(), self::column('deleted_at', 'timestamp', nullable: true)];
