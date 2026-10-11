@@ -28,10 +28,11 @@ final class GenerateCommand extends Command
      * @param  list<string>  $createMigrations  The contents of the table's own migration(s); none for a resource that is new
      * @param  bool  $written  Whether an add_trash_to_… migration exists for the table already
      * @param  bool  $columnExists  Whether the table has deleted_at in the database now
+     * @param  bool  $adopted  Whether the table was there before Nevela: then there may be no migration of that name to read
      */
-    public static function needsTrashMigration(array $createMigrations, bool $written, bool $columnExists): bool
+    public static function needsTrashMigration(array $createMigrations, bool $written, bool $columnExists, bool $adopted = false): bool
     {
-        if ($createMigrations === []) {
+        if ($createMigrations === [] && ! $adopted) {
             return false;
         }
         foreach ($createMigrations as $contents) {
@@ -127,7 +128,7 @@ final class GenerateCommand extends Command
             // resource's own migration, written by the line above, already has the column.
             $made = array_map(fn (string $file) => (string) file_get_contents($file), glob(database_path("migrations/*_create_{$descriptor->table}_table.php")) ?: []);
             $written = (glob(database_path("migrations/*_add_trash_to_{$descriptor->table}_table.php")) ?: []) !== [];
-            if (self::needsTrashMigration($made, $written, self::hasTrashColumn($descriptor->table))) {
+            if (self::needsTrashMigration($made, $written, self::hasTrashColumn($descriptor->table), $descriptor->adopted)) {
                 $files[] = $generator->trashMigrationFile($descriptor);
             }
         }

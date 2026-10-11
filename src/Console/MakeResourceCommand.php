@@ -15,6 +15,7 @@ final class MakeResourceCommand extends Command
         {--fields= : "name:string, sku:string!, price:money, status:enum(draft|live), notes:text?"}
         {--icon= : Lucide icon name for the dashboard, e.g. package}
         {--group= : Sidebar group in the dashboard}
+        {--id=uuid : What a record\'s id is: uuid, or int for the numbered ids of $table->id()}
         {--force : Overwrite an existing descriptor}
         {--migrate : Run the new migration straight away}
         {--seed= : Fill the new resource with records too (25, or the number you give). Runs the migration first}';
@@ -29,6 +30,7 @@ final class MakeResourceCommand extends Command
                 (string) ($this->option('fields') ?? $this->ask('Fields (e.g. name:string, price:money, active:boolean)')),
                 $this->option('icon'),
                 $this->option('group'),
+                (string) $this->option('id'),
             );
         } catch (InvalidArgumentException $e) {
             $this->components->error($e->getMessage());

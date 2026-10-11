@@ -175,7 +175,9 @@ final class SeedCommand extends Command
             for ($i = $done; $i < min($count, $done + $chunk); $i++) {
                 // Spread over the last 60 days, so the dashboard's "this week" and trend have something to show.
                 $created = date('Y-m-d H:i:s', $now - mt_rand(0, 60 * 86400));
-                $rows[] = ['id' => (string) Str::uuid7()] + Fake::row($resource, $offset + $i + 1, $pools) + ['created_at' => $created, 'updated_at' => $created];
+                // An integer id is the database's to give.
+                $id = $resource->idType === 'int' ? [] : ['id' => (string) Str::uuid7()];
+                $rows[] = $id + Fake::row($resource, $offset + $i + 1, $pools) + ['created_at' => $created, 'updated_at' => $created];
             }
             DB::table($resource->table)->insert($rows);
             $bar->advance(count($rows));

@@ -92,7 +92,7 @@ final class TrashController
     public function restore(string $slug, string $id): JsonResponse
     {
         ['descriptor' => $descriptor, 'model' => $model] = $this->resource($slug);
-        $record = $model::onlyTrashed()->find($id) ?? throw new NotFoundHttpException("No deleted {$this->noun($descriptor)} with that id.");
+        $record = $this->deleted($model, $id) ?? throw new NotFoundHttpException("No deleted {$this->noun($descriptor)} with that id.");
         if (! Trash::may('restore', $record)) {
             throw new AccessDeniedHttpException("You don't have access to this.");
         }
@@ -119,7 +119,7 @@ final class TrashController
     public function destroy(string $slug, string $id): JsonResponse|Response
     {
         ['descriptor' => $descriptor, 'model' => $model] = $this->resource($slug);
-        $record = $model::onlyTrashed()->find($id) ?? throw new NotFoundHttpException("No deleted {$this->noun($descriptor)} with that id.");
+        $record = $this->deleted($model, $id) ?? throw new NotFoundHttpException("No deleted {$this->noun($descriptor)} with that id.");
         if (! Trash::may('forceDelete', $record)) {
             throw new AccessDeniedHttpException("You don't have access to this.");
         }
@@ -165,6 +165,22 @@ final class TrashController
         }
 
         return $resource;
+    }
+
+    /**
+     * The deleted record with this id, if there is one.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $model
+     */
+    private function deleted(string $model, string $id): ?\Illuminate\Database\Eloquent\Model
+    {
+        // Where ids are integers, something that isn't one is nobody's id. Asked anyway,
+        // some databases answer with an error instead of with nothing.
+        if ((new $model)->getKeyType() === 'int' && ! preg_match('/^[0-9]{1,18}$/', $id)) {
+            return null;
+        }
+
+        return $model::onlyTrashed()->find($id);
     }
 
     private function noun(Descriptor $descriptor): string

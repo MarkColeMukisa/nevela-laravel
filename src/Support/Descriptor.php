@@ -12,7 +12,14 @@ use JsonException;
  */
 final class Descriptor
 {
-    /** @param array<string, Field> $fields keyed by field name, in declaration order */
+    /** What a record's id can be: a UUID, which is what Nevela makes, or the auto-incrementing integer of `$table->id()`. */
+    public const ID_TYPES = ['uuid', 'int'];
+
+    /**
+     * @param  array<string, Field>  $fields  keyed by field name, in declaration order
+     * @param  string  $idType  "uuid" or "int". Chosen when the resource is made: changing it later means migrating the table yourself.
+     * @param  bool  $adopted  The table was there before Nevela, so no migration is written to create it
+     */
     public function __construct(
         public readonly string $name,
         public readonly array $fields,
@@ -23,9 +30,14 @@ final class Descriptor
         public readonly ?string $icon = null,
         public readonly ?string $group = null,
         public readonly ?string $titleField = null,
+        public readonly string $idType = 'uuid',
+        public readonly bool $adopted = false,
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
+        }
+        if (! in_array($idType, self::ID_TYPES, true)) {
+            throw new InvalidArgumentException("\"{$idType}\" is not an id type. Use uuid or int.");
         }
         if ($fields === []) {
             throw new InvalidArgumentException("Resource {$name} needs at least one field.");
@@ -36,7 +48,7 @@ final class Descriptor
     }
 
     /** Build from a name and a `--fields` string: "name:string, price:money, status:enum(draft|live)?". */
-    public static function fromSpec(string $name, string $spec, ?string $icon = null, ?string $group = null): self
+    public static function fromSpec(string $name, string $spec, ?string $icon = null, ?string $group = null, string $idType = 'uuid'): self
     {
         $fields = [];
         foreach (array_filter(array_map('trim', self::splitSpec($spec))) as $token) {
@@ -47,11 +59,11 @@ final class Descriptor
             $fields[$field->name] = $field;
         }
 
-        return self::make(Naming::pascal($name), $fields, icon: $icon, group: $group);
+        return self::make(Naming::pascal($name), $fields, icon: $icon, group: $group, idType: $idType);
     }
 
     /** @param array<string, Field> $fields */
-    public static function make(string $name, array $fields, ?string $icon = null, ?string $group = null, ?string $titleField = null): self
+    public static function make(string $name, array $fields, ?string $icon = null, ?string $group = null, ?string $titleField = null, string $idType = 'uuid'): self
     {
         $plural = Naming::plural($name);
 
@@ -65,6 +77,7 @@ final class Descriptor
             $icon,
             $group,
             $titleField,
+            $idType,
         );
     }
 
@@ -88,6 +101,8 @@ final class Descriptor
             $data['icon'] ?? null,
             $data['group'] ?? null,
             $data['titleField'] ?? null,
+            (string) ($data['id'] ?? 'uuid'),
+            (bool) ($data['adopted'] ?? false),
         );
     }
 
@@ -107,6 +122,9 @@ final class Descriptor
             '$schema' => 'https://nevela.dev/schema/resource.v1.json',
             'name' => $this->name,
             'table' => $this->table,
+            // Left out when they are what every descriptor written before them means.
+            'id' => $this->idType === 'uuid' ? null : $this->idType,
+            'adopted' => $this->adopted ?: null,
             'slug' => $this->slug,
             'label' => $this->label,
             'pluralLabel' => $this->pluralLabel,

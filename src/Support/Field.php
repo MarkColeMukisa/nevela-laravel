@@ -40,6 +40,7 @@ final class Field
      * @param  string|null  $target  belongsTo: the resource this points at, e.g. "Category"
      * @param  list<string>  $accept  file: the categories it takes, e.g. ["image"]
      * @param  string|null  $profile  file: the image profile uploads are optimised with (config nevela.uploads.profiles)
+     * @param  int|null  $maxLength  string and text: the most characters it holds, where that isn't the usual 255 or 65,535
      */
     public function __construct(
         public readonly string $name,
@@ -52,6 +53,7 @@ final class Field
         public readonly ?string $target = null,
         public readonly array $accept = [],
         public readonly ?string $profile = null,
+        public readonly ?int $maxLength = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -64,6 +66,9 @@ final class Field
         }
         if ($format !== null && ! in_array($format, self::FORMATS[$kind] ?? [], true)) {
             throw new InvalidArgumentException("Format \"{$format}\" is not valid for {$kind} field \"{$name}\".");
+        }
+        if ($maxLength !== null && (! in_array($kind, ['string', 'text'], true) || $format === 'color' || $maxLength < 1)) {
+            throw new InvalidArgumentException("\"{$name}\" can't have a length of {$maxLength}: a length is a whole number of 1 or more, on a string or text field.");
         }
         if ($kind === 'enum' && $options === []) {
             throw new InvalidArgumentException("Enum field \"{$name}\" needs values, e.g. {$name}:enum(draft|published).");
@@ -103,6 +108,7 @@ final class Field
      * Parse one `name:type` token. Suffix `?` = optional (nullable), `!` = unique; both may be combined.
      *
      *   status:enum(draft|published)
+     *   excerpt:string(500)               a length other than the usual 255
      *   category:belongsTo(Category)      stored as categoryId
      *   image:image                       an optimised image; image:image(product) names a profile
      *   manual:file(pdf|document)         any other upload
@@ -141,8 +147,10 @@ final class Field
             throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
         }
         [$kind, $format] = self::ALIASES[$type];
+        // excerpt:string(500): a length of its own.
+        $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
 
-        return new self($name, $kind, $format, $required, $unique);
+        return new self($name, $kind, $format, $required, $unique, maxLength: $maxLength);
     }
 
     /**
@@ -183,6 +191,7 @@ final class Field
             $data['target'] ?? null,
             array_values($data['accept'] ?? []),
             $data['profile'] ?? null,
+            isset($data['maxLength']) ? (int) $data['maxLength'] : null,
         );
     }
 
@@ -196,6 +205,7 @@ final class Field
             'target' => $this->target,
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,
+            'maxLength' => $this->maxLength,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,

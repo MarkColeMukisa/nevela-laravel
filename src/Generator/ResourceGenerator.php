@@ -27,12 +27,16 @@ final class ResourceGenerator
     {
         $timestamp ??= date('Y_m_d_His');
         $api = GeneratedFile::TARGET_API;
+        // An adopted table is already there, made by a migration of the app's own.
+        $migration = $d->adopted ? [] : [
+            new GeneratedFile($api, "database/migrations/{$timestamp}_create_{$d->table}_table.php", $this->migration($d, $all), GeneratedFile::MODE_ONCE, "database/migrations/*_create_{$d->table}_table.php"),
+        ];
 
         return [
             new GeneratedFile($api, "app/Models/{$d->name}.php", $this->model($d, $all)),
-            new GeneratedFile($api, "database/migrations/{$timestamp}_create_{$d->table}_table.php", $this->migration($d, $all), GeneratedFile::MODE_ONCE, "database/migrations/*_create_{$d->table}_table.php"),
+            ...$migration,
             new GeneratedFile($api, "app/Http/Requests/Nevela/{$d->name}Request.php", $this->request($d, $all)),
-            new GeneratedFile($api, "app/Http/Resources/Nevela/{$d->name}Resource.php", $this->resource($d)),
+            new GeneratedFile($api, "app/Http/Resources/Nevela/{$d->name}Resource.php", $this->resource($d, $all)),
             new GeneratedFile($api, "app/Http/Controllers/Api/{$d->name}Controller.php", $this->controller($d, $all)),
             new GeneratedFile($api, "app/Policies/{$d->name}Policy.php", $this->policy($d), GeneratedFile::MODE_ONCE),
             new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/'.Naming::kebab($d->name).'.resource.ts', $this->typescript($d, $all)),
@@ -88,6 +92,23 @@ final class ResourceGenerator
         }
 
         return Naming::snake(Naming::plural($name));
+    }
+
+    /**
+     * Whether a resource's ids are integers. A relation's column, its validation and what
+     * the API sends for it all follow the resource it points at, not the one it is on.
+     *
+     * @param  list<Descriptor>  $all
+     */
+    private function hasIntIds(string $name, Descriptor $d, array $all): bool
+    {
+        foreach ([$d, ...$all] as $candidate) {
+            if ($candidate->name === $name) {
+                return $candidate->idType === 'int';
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -226,7 +247,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash'];
+        \$nevela = ['resource', 'adopt', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -252,6 +273,7 @@ final class ResourceGenerator
               php nevela status                check versions, migrations, users and the dashboard
               php nevela resource Product --fields="name:string, price:money" --seed
                                                add a resource, create its table, fill it
+              php nevela adopt posts           make a resource of a table you already have
               php nevela generate              regenerate after editing a descriptor
               php nevela seed Product          fill a resource with records
               php nevela user                  create someone who can sign in
@@ -387,7 +409,9 @@ final class ResourceGenerator
             $lines[] = "Route::get('{$d->slug}/_stats', [{$controller}, 'stats'])->name('{$d->slug}.stats');";
             $lines[] = "Route::get('{$d->slug}/_insights', [{$controller}, 'insights'])->name('{$d->slug}.insights');";
             $lines[] = "Route::post('{$d->slug}/_bulk', [{$controller}, 'bulk'])->name('{$d->slug}.bulk');";
-            $lines[] = "Route::apiResource('{$d->slug}', {$controller});";
+            // An integer id is digits and nothing else: anything else in its place is no record's address.
+            $where = $d->idType === 'int' ? "->where(['{$d->routeParameter()}' => '[0-9]{1,18}'])" : '';
+            $lines[] = "Route::apiResource('{$d->slug}', {$controller}){$where};";
         }
         $body = implode("\n", $lines);
         $m = self::M;
@@ -448,6 +472,8 @@ final class ResourceGenerator
             }
         }
         $castBlock = $casts ? implode("\n", $casts) : '';
+        // An integer id is Eloquent's own default: the database numbers the records.
+        [$import, $trait] = $d->idType === 'int' ? ['', ''] : ["use Illuminate\\Database\\Eloquent\\Concerns\\HasUuids;\n", "    use HasUuids;\n\n"];
         $m = self::M;
         $e = self::E;
 
@@ -456,14 +482,11 @@ final class ResourceGenerator
 
         namespace App\Models;
 
-        use Illuminate\Database\Eloquent\Concerns\HasUuids;
-        use Illuminate\Database\Eloquent\Model;
+        {$import}use Illuminate\Database\Eloquent\Model;
 
         class {$d->name} extends Model
         {
-            use HasUuids;
-
-            protected \$table = '{$d->table}';
+        {$trait}    protected \$table = '{$d->table}';
 
             {$m}
             // Deleted records go to the trash, where they can be restored for a while.
@@ -493,7 +516,8 @@ final class ResourceGenerator
             $c = $f->column();
             if ($f->kind === 'belongsTo') {
                 // A required parent can't be deleted while it has children; an optional one lets go of them.
-                $columns[] = "            \$table->foreignUuid('{$c}')"
+                $foreign = $this->hasIntIds((string) $f->target, $d, $all) ? 'foreignId' : 'foreignUuid';
+                $columns[] = "            \$table->{$foreign}('{$c}')"
                     .($f->required ? '' : '->nullable()')
                     .($f->unique ? '->unique()' : '->index()')
                     ."->constrained('{$this->tableOf((string) $f->target, $d, $all)}')"
@@ -503,6 +527,8 @@ final class ResourceGenerator
             }
             $line = match (true) {
                 $f->kind === 'file' => "\$table->string('{$c}', 512)",
+                // More than a text column holds on MySQL.
+                $f->kind === 'text' && $f->maxLength > 65535 => "\$table->longText('{$c}')",
                 $f->kind === 'text' => "\$table->text('{$c}')",
                 $f->kind === 'int' => "\$table->integer('{$c}')",
                 $f->kind === 'float' && $f->format === 'money' => "\$table->decimal('{$c}', 12, 2)",
@@ -510,6 +536,7 @@ final class ResourceGenerator
                 $f->kind === 'boolean' => "\$table->boolean('{$c}')->default(false)",
                 $f->kind === 'date' => "\$table->date('{$c}')",
                 $f->kind === 'datetime' => "\$table->dateTime('{$c}')",
+                $f->maxLength !== null => "\$table->string('{$c}', {$f->maxLength})",
                 $f->format === 'url' => "\$table->string('{$c}', 2048)",
                 default => "\$table->string('{$c}')",
             };
@@ -524,6 +551,7 @@ final class ResourceGenerator
             $columns[] = "            {$line};";
         }
         $cols = implode("\n", $columns);
+        $id = $d->idType === 'int' ? '$table->id();' : "\$table->uuid('id')->primary();";
 
         return <<<PHP
         <?php
@@ -538,7 +566,7 @@ final class ResourceGenerator
             public function up(): void
             {
                 Schema::create('{$d->table}', function (Blueprint \$table) {
-                    \$table->uuid('id')->primary();
+                    {$id}
         {$cols}
                     \$table->timestamps();
                     // When a record was deleted. Until it is removed for good it sits in the trash.
@@ -672,16 +700,19 @@ final class ResourceGenerator
     private function rules(Descriptor $d, Field $f, array $all = []): array
     {
         $rules = [$f->required ? "'required'" : "'nullable'"];
+        // A length of the field's own takes the place of the usual one.
+        $max = fn (int $usual) => "'max:".($f->maxLength ?? $usual)."'";
         $type = match (true) {
-            $f->kind === 'belongsTo' => ["'uuid'", "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
+            // An integer id is up to 18 digits, which is as many as always fit in the column.
+            $f->kind === 'belongsTo' => [...($this->hasIntIds((string) $f->target, $d, $all) ? ["'integer'", "'digits_between:1,18'"] : ["'uuid'"]), "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
-            $f->format === 'email' => ["'email'", "'max:255'"],
-            $f->format === 'url' => ["'url'", "'max:2048'"],
-            $f->format === 'tel' => ["'string'", "'max:32'"],
-            $f->format === 'slug' => ["'string'", "'alpha_dash'", "'max:255'"],
+            $f->format === 'email' => ["'email'", $max(255)],
+            $f->format === 'url' => ["'url'", $max(2048)],
+            $f->format === 'tel' => ["'string'", $max(32)],
+            $f->format === 'slug' => ["'string'", "'alpha_dash'", $max(255)],
             $f->format === 'color' => ["'string'", "'regex:/^#[0-9a-fA-F]{6}$/'"],
-            $f->kind === 'string' => ["'string'", "'max:255'"],
-            $f->kind === 'text' => ["'string'", "'max:65535'"],
+            $f->kind === 'string' => ["'string'", $max(255)],
+            $f->kind === 'text' => ["'string'", $max(65535)],
             $f->kind === 'int' && $f->format === 'percent' => ["'integer'", "'between:0,100'"],
             $f->kind === 'int' => ["'integer'"],
             $f->kind === 'float' && $f->format === 'percent' => ["'numeric'", "'between:0,100'"],
@@ -699,13 +730,16 @@ final class ResourceGenerator
         return $rules;
     }
 
-    public function resource(Descriptor $d): string
+    /** @param list<Descriptor> $all */
+    public function resource(Descriptor $d, array $all = []): string
     {
         $lines = [];
         foreach ($d->fields as $f) {
-            $value = match ($f->kind) {
-                'date' => "\$this->{$f->column()}?->format('Y-m-d')",
-                'datetime' => "\$this->{$f->column()}?->toJSON()",
+            $value = match (true) {
+                $f->kind === 'date' => "\$this->{$f->column()}?->format('Y-m-d')",
+                $f->kind === 'datetime' => "\$this->{$f->column()}?->toJSON()",
+                // An id is a string in the API whatever it is in the database.
+                $f->kind === 'belongsTo' && $this->hasIntIds((string) $f->target, $d, $all) => "\$this->{$f->column()} === null ? null : (string) \$this->{$f->column()}",
                 default => "\$this->{$f->column()}",
             };
             $lines[] = "            '{$f->name}' => {$value},";
@@ -715,6 +749,7 @@ final class ResourceGenerator
             }
         }
         $body = implode("\n", $lines);
+        $id = $d->idType === 'int' ? '(string) $this->id' : '$this->id';
         $m = self::M;
         $e = self::E;
 
@@ -734,7 +769,7 @@ final class ResourceGenerator
             public function toArray(Request \$request): array
             {
                 return [
-                    'id' => \$this->id,
+                    'id' => {$id},
                     {$m}
         {$body}
                     {$e}
@@ -953,6 +988,7 @@ final class ResourceGenerator
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
+                'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
                 // What the migration does when the parent goes: an optional link is cleared.
                 'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
                 // A picture is worth a column in the table; other files are not.
