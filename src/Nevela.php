@@ -340,6 +340,17 @@ final class Nevela
     }
 
     /**
+     * The same for a private file: what it is, and the address it is fetched from by
+     * someone who may view the record, which names the record and never the file's key.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function privateFile(?string $key, string $slug, mixed $id, string $field): ?array
+    {
+        return Uploads::privateRef($key, $slug, $id, $field);
+    }
+
+    /**
      * A rich text field's HTML, as it is safe to show: only the tags and attributes in
      * config('nevela.rich_text'). Generated API resources send every rich text field through it.
      */

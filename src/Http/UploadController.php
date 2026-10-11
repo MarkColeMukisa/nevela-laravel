@@ -110,7 +110,8 @@ final class UploadController
     public function show(string $path): Response
     {
         // A key is letters, digits, dashes, dots and slashes. Anything else was never one.
-        if ($path === '' || str_contains($path, '..') || ! preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]*$#', $path)) {
+        // And a private file's key is not an address, whoever has it.
+        if ($path === '' || str_contains($path, '..') || ! preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]*$#', $path) || Uploads::isPrivate($path)) {
             abort(404);
         }
         $cache ='public, max-age=31536000, immutable';
@@ -150,6 +151,46 @@ final class UploadController
             'Cache-Control' => $cache,
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /**
+     * A private file, to someone who may view the record it belongs to.
+     *
+     *   GET {prefix}/_nevela/private/{slug}/{id}/{field}
+     *
+     * The address names the record and the field, and the file is found from them: there
+     * is no key in it to pass around. It is never to be kept by a cache on the way.
+     */
+    public function download(string $slug, string $id, string $field): Response
+    {
+        $descriptor = null;
+        foreach (Nevela::all() as $candidate) {
+            if ($candidate->slug === $slug) {
+                $descriptor = $candidate;
+            }
+        }
+        $definition = $descriptor?->fields[$field] ?? null;
+        $model = 'App\\Models\\'.($descriptor?->name ?? '');
+        if ($descriptor === null || $definition === null || $definition->kind !== 'file' || ! $definition->private || ! class_exists($model)
+            || ($descriptor->idType === 'int' && ! preg_match('/^[0-9]{1,18}$/', $id))) {
+            abort(404);
+        }
+        // A record in the trash is found by nobody here: trashing it exposes nothing.
+        $record = $model::query()->find($id) ?? abort(404);
+        Gate::authorize('view', $record);
+
+        $key = $record->getAttribute($definition->column());
+        $upload = Uploads::isPrivate($key) ? Upload::query()->where('key', $key)->first() : null;
+        $disk = $upload === null ? null : Storage::disk($upload->disk);
+        if ($upload === null || $disk === null || ! $disk->exists(Uploads::privatePath($key))) {
+            abort(404);
+        }
+
+        return $disk->response(Uploads::privatePath($key), $upload->name, [
+            'Content-Type' => $upload->mime,
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+        ], 'attachment');
     }
 
     private static function refuse(int $status, string $message): JsonResponse

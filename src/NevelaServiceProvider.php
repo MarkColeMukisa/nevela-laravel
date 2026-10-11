@@ -180,6 +180,8 @@ final class NevelaServiceProvider extends ServiceProvider
 
         Route::prefix($prefix)->middleware(config('nevela.middleware', ['api', 'auth:sanctum']))->name('nevela.')->group(function () {
             Route::put('_nevela/uploads/{resource}/{field}', [UploadController::class, 'store'])->name('uploads.store');
+            // A private file: only for someone who may view the record it belongs to.
+            Route::get('_nevela/private/{slug}/{id}/{field}', [UploadController::class, 'download'])->name('private.show');
 
             // The image profiles, for a client that wants to know which renditions exist.
             Route::get('_nevela/profiles', fn () => response()->json([

@@ -42,6 +42,7 @@ final class Field
      * @param  list<string>  $accept  file: the categories it takes, e.g. ["image"]
      * @param  string|null  $profile  file: the image profile uploads are optimised with (config nevela.uploads.profiles)
      * @param  int|null  $maxLength  string and text: the most characters it holds, where that isn't the usual 255 or 65,535
+     * @param  bool  $private  file: kept where the web server doesn't reach, and handed only to someone who may view the record
      */
     public function __construct(
         public readonly string $name,
@@ -55,6 +56,7 @@ final class Field
         public readonly array $accept = [],
         public readonly ?string $profile = null,
         public readonly ?int $maxLength = null,
+        public readonly bool $private = false,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -87,6 +89,9 @@ final class Field
                 throw new InvalidArgumentException("A belongsTo field holds an id, so its name ends in \"Id\": {$name}Id.");
             }
         }
+        if ($private && $kind !== 'file') {
+            throw new InvalidArgumentException("\"{$name}\" can't be private: that is for file fields. Who may see a record's other fields is its policy's to say.");
+        }
         if ($kind === 'file') {
             if ($accept === []) {
                 throw new InvalidArgumentException("File field \"{$name}\" needs what it accepts, e.g. {$name}:image or {$name}:file(pdf|image).");
@@ -114,6 +119,7 @@ final class Field
      *   category:belongsTo(Category)      stored as categoryId
      *   image:image                       an optimised image; image:image(product) names a profile
      *   manual:file(pdf|document)         any other upload
+     *   cv:file(pdf|private)              one only those who may view the record can fetch
      *
      * Grit's and Flare's spellings are understood too: see normalise().
      */
@@ -143,7 +149,10 @@ final class Field
             return new self($name, 'file', null, $required, $unique, accept: ['image'], profile: $list[0] ?? null);
         }
         if ($type === 'file') {
-            return new self($name, 'file', null, $required, $unique, accept: $list ?: ['any']);
+            // cv:file(pdf|private): "private" among what it takes is how it is kept, not a kind of file.
+            $accept = array_values(array_diff($list, ['private']));
+
+            return new self($name, 'file', null, $required, $unique, accept: $accept ?: ['any'], private: count($accept) !== count($list));
         }
         if (! isset(self::ALIASES[$type])) {
             throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
@@ -194,6 +203,7 @@ final class Field
             array_values($data['accept'] ?? []),
             $data['profile'] ?? null,
             isset($data['maxLength']) ? (int) $data['maxLength'] : null,
+            (bool) ($data['private'] ?? false),
         );
     }
 
@@ -208,6 +218,7 @@ final class Field
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,
             'maxLength' => $this->maxLength,
+            'private' => $this->private ?: null,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,

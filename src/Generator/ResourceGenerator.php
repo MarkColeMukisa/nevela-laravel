@@ -808,7 +808,10 @@ final class ResourceGenerator
             $lines[] = "            '{$f->name}' => {$value},";
             if ($f->kind === 'file') {
                 // The key is what a record stores; this is what a page needs to show it.
-                $lines[] = "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::file(\$this->{$f->column()}),";
+                $lines[] = $f->private
+                    // A private file is fetched through its record, so its details say which record.
+                    ? "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::privateFile(\$this->{$f->column()}, '{$d->slug}', \$this->getKey(), '{$f->name}'),"
+                    : "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::file(\$this->{$f->column()}),";
             }
         }
         $body = implode("\n", $lines);
@@ -1054,10 +1057,13 @@ final class ResourceGenerator
                 'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
                 // What the migration does when the parent goes: an optional link is cleared.
                 'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
-                // A picture is worth a column in the table; other files are not.
-                'list' => $f->isImage() ? 'true' : null,
+                // A picture is worth a column in the table; other files are not, and a private one has no thumbnail to show.
+                'list' => $f->isImage() && ! $f->private ? 'true' : null,
             ]);
             $parts = array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options);
+            if ($f->private) {
+                $parts[] = '...({ private: true } as {})';
+            }
             if ($f->isRich()) {
                 // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.
                 $parts[] = '...({ rich: true } as {})';

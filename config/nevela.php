@@ -155,13 +155,22 @@ return [
     |
     | Files go on a disk from config/filesystems.php and are handed out by Nevela's own
     | route, GET {prefix}/_nevela/files/{key}, so nothing needs linking or publishing. Keys
-    | are unguessable, but anyone who has one can fetch the file: don't use these fields
-    | for documents that must stay private. If a CDN or your web server serves the disk,
-    | put its address in NEVELA_UPLOADS_URL and the API's links point there.
+    | are unguessable, but anyone who has one can fetch the file. If a CDN or your web
+    | server serves the disk, put its address in NEVELA_UPLOADS_URL and the API's links
+    | point there.
+    |
+    | A document that must stay private goes in a private file field ("private": true in
+    | the descriptor, or cv:file(pdf|private)). It is kept on private_disk, which must not
+    | be one the web server serves, and is handed out by
+    | GET {prefix}/_nevela/private/{slug}/{id}/{field} to someone signed in who may view
+    | that record. Its key opens nothing.
     */
     'uploads' => [
         'disk' => env('NEVELA_UPLOADS_DISK', 'public'),
         'url' => env('NEVELA_UPLOADS_URL'),
+
+        /* Where private files are kept. Never served: not "public", and not a bucket anyone can read. */
+        'private_disk' => env('NEVELA_PRIVATE_DISK', 'local'),
 
         /* Where untouched originals are kept, so an image can be optimised again later. Never served. */
         'originals_disk' => env('NEVELA_ORIGINALS_DISK', 'local'),

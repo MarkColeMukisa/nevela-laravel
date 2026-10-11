@@ -4,6 +4,9 @@ namespace Nevela\Laravel\Concerns;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Schema;
+use InvalidArgumentException;
+use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Trash\TrashedScope;
 
 /**
@@ -57,6 +60,26 @@ trait Trashable
         static::deleting(function (self $model) {
             if (! static::trashes()) {
                 $model->forceDeleting = true;
+            }
+        });
+
+        // A private file goes when its record goes for good. In the trash the record still
+        // exists, and so does its file, unreachable, for the day it is restored.
+        static::deleted(function (self $model) {
+            if ($model->exists) {
+                return;
+            }
+            try {
+                $resource = Nevela::resource(class_basename($model));
+            } catch (InvalidArgumentException) {
+                return; // a model that uses the trash without being a resource
+            }
+            foreach ($resource->fields as $field) {
+                $key = $field->kind === 'file' && $field->private ? $model->getAttribute($field->column()) : null;
+                // Not while another record of the table still points at the same file.
+                if (is_string($key) && $key !== '' && ! $model->newQueryWithoutScopes()->where($field->column(), $key)->exists()) {
+                    Uploads::discard($key);
+                }
             }
         });
     }
