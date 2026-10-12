@@ -155,7 +155,8 @@ final class BlogPages
         slug: String(row["__BY__"] ?? row.id),
         excerpt,
         body,
-        image: picture(FIELDS.image ? row[FIELDS.image] : null, "card"),
+        // "thumb" is the small rendition every image profile makes. One that was never made is answered with the picture itself.
+        image: picture(FIELDS.image ? row[FIELDS.image] : null, "thumb"),
         imageLarge: picture(FIELDS.image ? row[FIELDS.image] : null),
         publishedAt: text(FIELDS.published) || null,
       };
