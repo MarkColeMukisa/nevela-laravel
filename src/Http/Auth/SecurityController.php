@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Http\Auth;
 
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -13,6 +14,7 @@ use Nevela\Laravel\Auth\Passkeys;
 use Nevela\Laravel\Auth\Totp;
 use Nevela\Laravel\Models\Passkey;
 use Nevela\Laravel\Models\TwoFactor;
+use Nevela\Laravel\Support\Key;
 use RuntimeException;
 
 /**
@@ -161,6 +163,9 @@ final class SecurityController
     public function renamePasskey(Request $request, string $id): JsonResponse
     {
         $input = $request->validate(['name' => ['required', 'string', 'max:80']]);
+        if (! Key::fits(Passkey::class, $id)) {
+            throw (new ModelNotFoundException)->setModel(Passkey::class, [$id]);
+        }
         $passkey = Passkey::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->findOrFail($id);
         $passkey->fill(['name' => trim($input['name'])])->save();
 
@@ -170,7 +175,9 @@ final class SecurityController
     /** DELETE auth/passkeys/{id} */
     public function removePasskey(Request $request, string $id): Response
     {
-        Passkey::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->where('id', $id)->delete();
+        if (Key::fits(Passkey::class, $id)) {
+            Passkey::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->where('id', $id)->delete();
+        }
 
         return response()->noContent();
     }

@@ -21,6 +21,7 @@ use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Rules\UploadKey;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
+use Nevela\Laravel\Support\Key;
 
 /**
  * An account and what its owner can do with it: create it, prove the email address,
@@ -281,9 +282,11 @@ final class AccountController
     public function revokeSession(Request $request, string $id): Response
     {
         $user = $request->user();
-        DB::table('personal_access_tokens')
-            ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
-            ->where('id', $id)->delete();
+        if (Key::isInt($id)) {
+            DB::table('personal_access_tokens')
+                ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
+                ->where('id', $id)->delete();
+        }
 
         return response()->noContent();
     }

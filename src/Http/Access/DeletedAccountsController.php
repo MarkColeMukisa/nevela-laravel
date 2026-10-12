@@ -11,6 +11,7 @@ use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Http\Auth\Answers;
+use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -144,7 +145,7 @@ final class DeletedAccountsController
 
     private function find(string $id): mixed
     {
-        return ClosedAccounts::closed()->find($id) ?? throw new NotFoundHttpException('No such deleted account.');
+        return (Key::fits(Account::model(), $id) ? ClosedAccounts::closed()->find($id) : null) ?? throw new NotFoundHttpException('No such deleted account.');
     }
 
     /** An upgraded app keeps no deleted accounts until it has run its migrations. */

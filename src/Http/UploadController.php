@@ -14,6 +14,7 @@ use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
+use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -171,8 +172,7 @@ final class UploadController
         }
         $definition = $descriptor?->fields[$field] ?? null;
         $model = 'App\\Models\\'.($descriptor?->name ?? '');
-        if ($descriptor === null || $definition === null || $definition->kind !== 'file' || ! $definition->private || ! class_exists($model)
-            || ($descriptor->idType === 'int' && ! preg_match('/^[0-9]{1,18}$/', $id))) {
+        if ($descriptor === null || $definition === null || $definition->kind !== 'file' || ! $definition->private || ! class_exists($model) || ! Key::fits($model, $id)) {
             abort(404);
         }
         // A record in the trash is found by nobody here: trashing it exposes nothing.

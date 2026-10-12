@@ -13,6 +13,7 @@ use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Models\Role;
+use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -124,7 +125,7 @@ final class RolesController
 
     private function find(string $id): Role
     {
-        return Role::query()->find($id) ?? throw new NotFoundHttpException('No such role.');
+        return (Key::fits(Role::class, $id) ? Role::query()->find($id) : null) ?? throw new NotFoundHttpException('No such role.');
     }
 
     private function users(Role $role): int

@@ -28,6 +28,11 @@ use Throwable;
  * hour names them. Nothing is lost: every record is in the dashboard.
  *
  * Both are queued, so a slow mail server doesn't keep a visitor waiting.
+ *
+ * Called while a record is being saved (a model's `created`, inside a transaction), the
+ * counting and the sending wait until the save is committed. A record that is rolled
+ * back sends nothing, and nothing here can spoil the transaction it was called in: on
+ * Postgres one failed statement, such as a lock someone else holds, would abort it all.
  */
 final class PublicMail
 {
@@ -37,7 +42,8 @@ final class PublicMail
 
     /**
      * Write to an address a form was given. False when it has been written to too often
-     * and this one was dropped.
+     * and this one was dropped. (Inside a transaction that isn't known yet: the answer is
+     * true, and the limit is applied when the transaction commits.)
      */
     public static function toVisitor(string $address, Mailable $mail): bool
     {
@@ -47,7 +53,7 @@ final class PublicMail
         }
         $who = self::fingerprint($address);
 
-        return self::counted("visitor:{$who}", function () use ($address, $mail, $who) {
+        return self::whenSaved(fn () => self::counted("visitor:{$who}", function () use ($address, $mail, $who) {
             $hour = self::sentSince('visitor', $who, now()->subHour());
             $day = self::sentSince('visitor', $who, now()->subDay());
             if ($hour >= (int) config('nevela.public.mail.visitor_per_hour', 1) || $day >= (int) config('nevela.public.mail.visitor_per_day', 3)) {
@@ -57,7 +63,7 @@ final class PublicMail
             Mail::to($address)->queue($mail);
 
             return true;
-        });
+        }));
     }
 
     /**
@@ -74,7 +80,7 @@ final class PublicMail
             return false;
         }
 
-        return self::counted('owner', function () use ($mail, $line, $url, $to) {
+        return self::whenSaved(fn () => self::counted('owner', function () use ($mail, $line, $url, $to) {
             if (self::sentSince('owner', 'owner', now()->subHour()) >= (int) config('nevela.public.notify.max_per_hour', 10)) {
                 DB::table(self::HELD)->insert([
                     'id' => (string) Str::uuid(),
@@ -90,7 +96,7 @@ final class PublicMail
             Mail::to($to)->queue($mail);
 
             return true;
-        });
+        }));
     }
 
     /**
@@ -169,6 +175,22 @@ final class PublicMail
         }
 
         return is_string($subject) && $subject !== '' ? $subject : Str::headline(class_basename($mail));
+    }
+
+    /**
+     * Now, or once the transaction this was called in has committed. Never inside it.
+     *
+     * @param  callable(): bool  $send
+     */
+    private static function whenSaved(callable $send): bool
+    {
+        $sent = null;
+        // Runs at once where there is no transaction to wait for.
+        DB::afterCommit(function () use (&$sent, $send) {
+            $sent = $send();
+        });
+
+        return $sent ?? true;
     }
 
     /**

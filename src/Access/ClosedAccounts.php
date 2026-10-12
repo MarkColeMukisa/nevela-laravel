@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Auth\Account;
+use Nevela\Laravel\Support\Key;
 
 /**
  * Accounts that were closed, and the emails that may not have a new one.
@@ -207,7 +208,7 @@ final class ClosedAccounts
     /** Let an email whose account was removed for good be used again. False when there is no such entry. */
     public static function allow(string $id): bool
     {
-        return DB::table(self::BLOCKED)->where('id', $id)->whereNull('user_id')->delete() > 0;
+        return Key::isUuid($id) && DB::table(self::BLOCKED)->where('id', $id)->whereNull('user_id')->delete() > 0;
     }
 
     /** Remember an email by its fingerprint: for a closed account, or with no account left. */

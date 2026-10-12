@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Trash\Trash;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -176,7 +177,7 @@ final class TrashController
     {
         // Where ids are integers, something that isn't one is nobody's id. Asked anyway,
         // some databases answer with an error instead of with nothing.
-        if ((new $model)->getKeyType() === 'int' && ! preg_match('/^[0-9]{1,18}$/', $id)) {
+        if (! Key::fits($model, $id)) {
             return null;
         }
 

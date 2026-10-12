@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -128,7 +129,7 @@ final class ActionController
     private function one(Descriptor $descriptor, string $id): ?Model
     {
         $model = "App\\Models\\{$descriptor->name}";
-        if (! class_exists($model) || ($descriptor->idType === 'int' && ! preg_match('/^[0-9]{1,18}$/', $id))) {
+        if (! class_exists($model) || ! Key::fits($model, $id)) {
             return null;
         }
         $record = $model::query()->find($id);

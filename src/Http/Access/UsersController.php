@@ -19,6 +19,7 @@ use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Role;
+use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -248,7 +249,7 @@ final class UsersController
 
     private function find(string $id): mixed
     {
-        return ClosedAccounts::open()->find($id) ?? throw new NotFoundHttpException('No such user.');
+        return (Key::fits(Account::model(), $id) ? ClosedAccounts::open()->find($id) : null) ?? throw new NotFoundHttpException('No such user.');
     }
 
     /**

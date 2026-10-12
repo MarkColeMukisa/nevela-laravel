@@ -102,7 +102,9 @@ final class Trash
     public static function purge(Model $record): bool
     {
         try {
-            $record->forceDelete();
+            // In a transaction of its own. Called inside another, that makes it a savepoint:
+            // on Postgres a refused delete would otherwise abort everything around it.
+            $record->getConnection()->transaction(fn () => $record->forceDelete());
 
             return true;
         } catch (QueryException $e) {
