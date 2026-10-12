@@ -44,7 +44,12 @@ final class SetupCommand extends Command
         // dashboard, /blog to read it at, and three posts so neither is empty. Not having
         // one is no reason to call the setup failed.
         if (! $this->option('no-blog')) {
-            $this->call('nevela:blog', ['--sample' => true]);
+            // The sample posts are for development: asked for in production they are refused,
+            // which would read as the blog having failed.
+            $blog = $this->call('nevela:blog', app()->environment('production') ? [] : ['--sample' => true]);
+            if ($blog !== self::SUCCESS) {
+                $this->components->warn('The blog could not be set up, so this app has none yet. Everything else is in place. Add it later: php nevela blog');
+            }
         }
 
         if ($this->option('email')) {
