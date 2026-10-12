@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Forms;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
@@ -42,6 +43,12 @@ final class FormGuard
      * (a company, a second address line): filled in for them, it would turn them away.
      */
     private const BAIT = ['website', 'homepage', 'url', 'site', 'web'];
+
+    /**
+     * How long a token that was taken is remembered, in seconds, so it can't be taken
+     * again. Cloudflare's are good for 300; past that it refuses them itself.
+     */
+    private const REMEMBERED = 600;
 
     /** Where a form is built, and never where it is live. */
     private const LOCAL = ['localhost', '127.0.0.1'];
@@ -239,6 +246,12 @@ final class FormGuard
         if (! is_string($token) || $token === '' || strlen($token) > 2048) {
             return $failed;
         }
+        // One this app has already taken. Cloudflare says a token is good once, and has been
+        // seen to say yes to the same one again, so that is kept count of here as well.
+        $taken = 'nevela-turnstile:'.hash('sha256', $token);
+        if (Cache::has($taken)) {
+            return $failed;
+        }
 
         try {
             $response = Http::asForm()->timeout(8)->post((string) config('nevela.public.turnstile.verify_url', 'https://challenges.cloudflare.com/turnstile/v0/siteverify'), [
@@ -278,7 +291,13 @@ final class FormGuard
             return new Refusal('hostname', 422, self::NOT_A_PERSON);
         }
 
-        return (string) $response->json('action') === self::action($resource) ? null : $failed;
+        if ((string) $response->json('action') !== self::action($resource)) {
+            return $failed;
+        }
+
+        // Taken, once: of two requests that arrive together with the same token, the second
+        // finds it there. (The test keys' one token is everyone's, and is not kept.)
+        return Cache::add($taken, true, self::REMEMBERED) ? null : $failed;
     }
 
     public static function secret(): string
