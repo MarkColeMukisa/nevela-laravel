@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Tests\Unit;
 use InvalidArgumentException;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Forms\Disposable;
+use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\PublicAccess;
@@ -150,5 +151,25 @@ final class FormProtectionTest extends TestCase
         $this->assertFalse(Disposable::is('safemailinator.org'));
         $this->assertFalse(Disposable::is('com'));
         $this->assertFalse(Disposable::is(''));
+    }
+
+    public function test_every_form_has_a_name_of_its_own_for_the_robot_check(): void
+    {
+        $named = fn (string $name) => FormGuard::action(Descriptor::fromArray(['name' => $name, 'fields' => ['email' => ['kind' => 'string']]]));
+
+        // The slug, where it fits what Cloudflare allows: letters, digits, _ and -, up to 32.
+        $this->assertSame('subscribers', $named('Subscriber'));
+        $this->assertSame('internship-applications', $named('InternshipApplication'));
+
+        // Two long ones that begin alike are cut to the length, and are still two names.
+        $spring = $named('InternationalScholarshipApplicationSpring');
+        $autumn = $named('InternationalScholarshipApplicationAutumn');
+        $this->assertNotSame($spring, $autumn);
+        foreach ([$spring, $autumn] as $action) {
+            $this->assertMatchesRegularExpression('/^[A-Za-z0-9_-]{1,32}$/', $action);
+            $this->assertStringStartsWith('international-scholarsh', $action);
+        }
+        // And the same one every time.
+        $this->assertSame($spring, $named('InternationalScholarshipApplicationSpring'));
     }
 }

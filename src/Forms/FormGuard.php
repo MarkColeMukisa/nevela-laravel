@@ -82,10 +82,15 @@ final class FormGuard
      * The name a form's robot check is made under. The widget is given it, Cloudflare
      * returns it with its answer, and the two must agree: a token solved for one form
      * can't be spent on another. (Cloudflare allows letters, digits, _ and -, up to 32.)
+     *
+     * A slug longer than that is cut, and ends in a few characters made from the whole of
+     * it: two long slugs that begin alike are still two names.
      */
     public static function action(Descriptor $resource): string
     {
-        return substr((string) preg_replace('/[^A-Za-z0-9_-]/', '-', $resource->slug), 0, 32);
+        $name = (string) preg_replace('/[^A-Za-z0-9_-]/', '-', $resource->slug);
+
+        return strlen($name) <= 32 ? $name : substr($name, 0, 23).'-'.substr(hash('sha256', $resource->slug), 0, 8);
     }
 
     /**
