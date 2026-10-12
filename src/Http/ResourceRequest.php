@@ -10,6 +10,7 @@ use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
 use Nevela\Laravel\Support\Html;
+use Nevela\Laravel\Support\Slug;
 
 /**
  * Base for generated resource requests.
@@ -54,6 +55,43 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Fields made from another when a create leaves them empty: a slug from a title. A
+     * generated request with any says which, and where to look for the ones taken.
+     *
+     * @return array<string, array{from: string, table: string, column: string}>
+     */
+    protected function made(): array
+    {
+        return [];
+    }
+
+    /**
+     * Fill what a create left empty and can be made, and keep a later save from emptying
+     * it: once made, a slug is an address, and an address doesn't move.
+     *
+     * @param  array<string, mixed>  $values  by column
+     * @param  array<string, true>  $taken  Values made for earlier rows of the same batch
+     * @return array<string, mixed>
+     */
+    private function make(array $values, bool $creating, array &$taken = []): array
+    {
+        $columns = $this->columns();
+        foreach ($this->made() as $definition) {
+            $column = $definition['column'];
+            $empty = ! isset($values[$column]) || $values[$column] === '';
+            if (! $empty) {
+                $taken[(string) $values[$column]] = true;
+            } elseif ($creating) {
+                $values[$column] = Slug::free($definition['table'], $column, (string) ($values[$columns[$definition['from']] ?? ''] ?? ''), $taken);
+            } else {
+                unset($values[$column]);
+            }
+        }
+
+        return $values;
+    }
+
+    /**
      * A create from some of the fields only: a public form's, where nobody is asked who
      * they are and so only what the descriptor lists is taken.
      *
@@ -93,7 +131,7 @@ abstract class ResourceRequest extends FormRequest
             }
         }
 
-        return ['values' => $values, 'issues' => []];
+        return ['values' => $this->make($values, true), 'issues' => []];
     }
 
     /**
@@ -252,6 +290,7 @@ abstract class ResourceRequest extends FormRequest
         $values = [];
         $problems = [];
         $taken = [];
+        $made = [];
         foreach (array_values($rows) as $index => $row) {
             $number = $index + 1;
             if (! is_array($row) || array_is_list($row)) {
@@ -299,7 +338,8 @@ abstract class ResourceRequest extends FormRequest
                     $mapped[$column] = $defaults[$field];
                 }
             }
-            $values[] = $mapped;
+            // Two rows with one title get two slugs: what was made for an earlier row is remembered.
+            $values[] = $this->make($mapped, true, $made);
         }
 
         return ['values' => $values, 'problems' => $problems];
@@ -322,6 +362,6 @@ abstract class ResourceRequest extends FormRequest
             }
         }
 
-        return $values;
+        return $this->make($values, $this->isMethod('POST'));
     }
 }

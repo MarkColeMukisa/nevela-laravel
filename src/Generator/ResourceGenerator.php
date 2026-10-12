@@ -289,7 +289,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'adopt', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash'];
+        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -316,6 +316,7 @@ final class ResourceGenerator
               php nevela resource Product --fields="name:string, price:money" --seed
                                                add a resource, create its table, fill it
               php nevela adopt posts           make a resource of a table you already have
+              php nevela blog                  give the site a blog: posts in the dashboard, /blog to read them
               php nevela generate              regenerate after editing a descriptor
               php nevela seed Product          fill a resource with records
               php nevela user                  create someone who can sign in
@@ -372,6 +373,13 @@ final class ResourceGenerator
         foreach ($all as $d) {
             if ($d->actions !== []) {
                 $extras[$d->name]['actions'] = array_map(fn (Action $a) => ['permission' => "{$d->table}.{$a->key()}"] + $a->toArray(), $d->actions);
+            }
+            // The field its records are published by, and where on the site they are a blog.
+            if ($d->publish !== null) {
+                $extras[$d->name]['publish'] = $d->publish;
+            }
+            if ($d->blog !== null) {
+                $extras[$d->name]['blog'] = $d->blog;
             }
         }
         $body .= "\n\n/** What a resource has beyond its fields. Read through lib/extras.ts. */\nexport const extras: Record<string, unknown> = ".($extras === [] ? '{}' : json_encode($extras, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)).';';
@@ -578,7 +586,25 @@ final class ResourceGenerator
         }
         $castBlock = $casts ? implode("\n", $casts) : '';
         // Written with the model, outside its generated block: which records are public is the app's to say.
-        $scope = $d->public?->read === null ? '' : <<<PHP
+        $published = $d->publish === null ? null : $d->fields[$d->publish]->column();
+        $scope = match (true) {
+            $d->public?->read === null => '',
+            // A resource with a publish date has said it already: the ones whose time has come.
+            $published !== null => <<<PHP
+
+
+            /**
+             * Which {$this->lower($d->pluralLabel)} anyone may read, signed in or not: the published ones. The
+             * public list and the public page of one both go through here. A draft has no
+             * {$published}, and a scheduled one has a time still to come, which this lets
+             * through when it does, with nobody saving anything.
+             */
+            public function scopePublicQuery(\Illuminate\Database\Eloquent\Builder \$query): void
+            {
+                \$query->whereNotNull('{$published}')->where('{$published}', '<=', now());
+            }
+        PHP,
+            default => <<<PHP
 
 
             /**
@@ -592,7 +618,8 @@ final class ResourceGenerator
             {
                 \$query->whereRaw('1 = 0');
             }
-        PHP;
+        PHP,
+        };
         // An integer id is Eloquent's own default: the database numbers the records.
         [$import, $trait] = $d->idType === 'int' ? ['', ''] : ["use Illuminate\\Database\\Eloquent\\Concerns\\HasUuids;\n", "    use HasUuids;\n\n"];
         $m = self::M;
@@ -780,6 +807,19 @@ final class ResourceGenerator
                 return [{$defaults}];
             }
         PHP;
+        $made = implode(', ', array_map(
+            fn (Field $f) => "'{$f->name}' => ['from' => '{$f->from}', 'table' => '{$d->table}', 'column' => '{$f->column()}']",
+            array_filter($d->fields, fn (Field $f) => $f->from !== null),
+        ));
+        $madeBlock = $made === '' ? '' : <<<PHP
+
+
+            /** Fields made from another when a create leaves them empty. They are never remade afterwards. */
+            protected function made(): array
+            {
+                return [{$made}];
+            }
+        PHP;
         // Only where there is one: a resource without rich text has the request it always had.
         $rich = implode(', ', array_map(fn (Field $f) => "'{$f->name}'", array_filter($d->fields, fn (Field $f) => $f->isRich())));
         $richBlock = $rich === '' ? '' : <<<PHP
@@ -832,7 +872,7 @@ final class ResourceGenerator
             protected function columns(): array
             {
                 return [{$columnMap}];
-            }{$richBlock}{$defaultsBlock}
+            }{$richBlock}{$defaultsBlock}{$madeBlock}
             {$e}
         }
 
@@ -845,7 +885,8 @@ final class ResourceGenerator
      */
     private function rules(Descriptor $d, Field $f, array $all = []): array
     {
-        $rules = [$f->required ? "'required'" : "'nullable'"];
+        // A slug that is made from another field may be left empty: the request fills it in.
+        $rules = [$f->required && $f->from === null ? "'required'" : "'nullable'"];
         // With a default, leaving it out is saying "the usual". Sent, it is checked like any other.
         if ($f->default !== null) {
             array_unshift($rules, "'sometimes'");
@@ -1139,7 +1180,8 @@ final class ResourceGenerator
         $fields = [];
         foreach ($d->fields as $f) {
             $options = array_filter([
-                'required' => $f->required ? null : 'false',
+                // (A slug made from another field is optional in the form: left empty, Laravel makes it.)
+                'required' => $f->required && $f->from === null ? null : 'false',
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
@@ -1153,6 +1195,9 @@ final class ResourceGenerator
             $parts = array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options);
             if ($f->private) {
                 $parts[] = '...({ private: true } as {})';
+            }
+            if ($f->from !== null) {
+                $parts[] = '...({ from: '.$j($f->from).' } as {})';
             }
             if ($f->isRich()) {
                 // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.

@@ -25,7 +25,14 @@ final class ListQuery
 
     public ?string $q = null;
 
-    /** @var list<array{field: string, column: string, value: string|int|float|bool|null}> */
+    /** The three things a record with a publish date can be. */
+    public const PUBLISHED = ['published', 'draft', 'scheduled'];
+
+    /**
+     * A filter on the field a resource is published by carries `state` in place of a value.
+     *
+     * @var list<array{field: string, column: string, value: string|int|float|bool|null, state?: string}>
+     */
     public array $filters = [];
 
     /** @param array<string, mixed> $params */
@@ -66,6 +73,15 @@ final class ListQuery
         foreach ($filters as $key => $value) {
             $param = "filter[{$key}]";
             $field = $resource->fields[$key] ?? null;
+            // filter[publishedAt]=draft: not a date to match, but which of the three it is.
+            if ($field !== null && $resource->publish === $key) {
+                $state = is_string($value) ? strtolower($value) : '';
+                in_array($state, self::PUBLISHED, true)
+                    ? $query->filters[] = ['field' => $key, 'column' => $field->column(), 'value' => null, 'state' => $state]
+                    : $query->issue($param, 'Must be one of: '.implode(', ', self::PUBLISHED).'.');
+
+                continue;
+            }
             if ($field === null || ! $field->filterable()) {
                 $query->issue($param, "Can't filter by \"{$key}\".");
 

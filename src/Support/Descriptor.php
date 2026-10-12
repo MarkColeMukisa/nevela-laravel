@@ -21,6 +21,8 @@ final class Descriptor
      * @param  bool  $adopted  The table was there before Nevela, so no migration is written to create it
      * @param  array<string, Action>  $actions  What can be done to a record or to the list beyond create, edit and delete, by name
      * @param  PublicAccess|null  $public  What of it anyone may read or create without signing in. Nothing, when null.
+     * @param  string|null  $publish  The date-and-time field that says when a record is published: empty is a draft, a time to come is scheduled
+     * @param  string|null  $blog  Where on the site its public records are a blog, e.g. "/blog". The pages are written by `nevela:blog`.
      */
     public function __construct(
         public readonly string $name,
@@ -36,6 +38,8 @@ final class Descriptor
         public readonly bool $adopted = false,
         public readonly array $actions = [],
         public readonly ?PublicAccess $public = null,
+        public readonly ?string $publish = null,
+        public readonly ?string $blog = null,
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
@@ -63,6 +67,22 @@ final class Descriptor
             $keys[$action->key()] = true;
         }
         $public?->check($name, $fields);
+        foreach ($fields as $field) {
+            if ($field->from !== null && (! isset($fields[$field->from]) || ! in_array($fields[$field->from]->kind, ['string', 'text'], true))) {
+                throw new InvalidArgumentException("{$name}: \"{$field->name}\" is made from \"{$field->from}\", which has to be a string field of {$name}.");
+            }
+        }
+        if ($publish !== null && (! isset($fields[$publish]) || $fields[$publish]->kind !== 'datetime' || $fields[$publish]->required)) {
+            throw new InvalidArgumentException("{$name}: \"publish\" names the field that says when a record is published. It has to be an optional datetime: {$publish}:datetime?");
+        }
+        if ($blog !== null) {
+            if (! preg_match('#^/[a-z0-9][a-z0-9/-]*$#', $blog)) {
+                throw new InvalidArgumentException("{$name}: \"blog\" is where the blog is on the site, such as \"/blog\".");
+            }
+            if ($public?->read === null || $public->by === null) {
+                throw new InvalidArgumentException("{$name}: a blog reads its posts publicly, each by a unique field. Give it \"public\": { \"read\": { \"by\": \"slug\", \"fields\": […] } }.");
+            }
+        }
     }
 
     /** Build from a name and a `--fields` string: "name:string, price:money, status:enum(draft|live)?". */
@@ -127,6 +147,8 @@ final class Descriptor
             (bool) ($data['adopted'] ?? false),
             $actions,
             isset($data['public']) ? PublicAccess::fromArray((array) $data['public']) : null,
+            $data['publish'] ?? null,
+            $data['blog'] ?? null,
         );
     }
 
@@ -155,6 +177,8 @@ final class Descriptor
             'icon' => $this->icon,
             'group' => $this->group,
             'titleField' => $this->titleField,
+            'publish' => $this->publish,
+            'blog' => $this->blog,
             'fields' => array_map(fn (Field $f) => $f->toArray(), $this->fields),
             'actions' => $this->actions ? array_map(fn (Action $a) => $a->toArray(), $this->actions) : null,
             'public' => $this->public?->toArray(),

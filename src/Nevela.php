@@ -136,6 +136,16 @@ final class Nevela
         }
 
         foreach ($list->filters as $filter) {
+            if (isset($filter['state'])) {
+                // Published: its time has come. Scheduled: it has one, still to come. Draft: it has none.
+                match ($filter['state']) {
+                    'draft' => $query->whereNull($filter['column']),
+                    'scheduled' => $query->where($filter['column'], '>', now()),
+                    default => $query->whereNotNull($filter['column'])->where($filter['column'], '<=', now()),
+                };
+
+                continue;
+            }
             $field = $resource->fields[$filter['field']] ?? null;
             if ($filter['value'] !== null && $field?->kind === 'belongsTo' && ! self::couldBeId((string) $field->target, (string) $filter['value'])) {
                 // Nothing belongs to a record that can't exist. Asked anyway, some databases

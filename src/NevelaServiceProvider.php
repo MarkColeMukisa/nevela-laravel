@@ -14,6 +14,7 @@ use Illuminate\Support\ServiceProvider;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Console\AdoptCommand;
+use Nevela\Laravel\Console\BlogCommand;
 use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
@@ -61,7 +62,7 @@ final class NevelaServiceProvider extends ServiceProvider
 
             $this->publishes([__DIR__.'/../config/nevela.php' => config_path('nevela.php')], 'nevela-config');
             $this->commands([
-                MakeResourceCommand::class, AdoptCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
+                MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
                 TrashCommand::class,
             ]);

@@ -44,6 +44,7 @@ final class Field
      * @param  int|null  $maxLength  string and text: the most characters it holds, where that isn't the usual 255 or 65,535
      * @param  bool  $private  file: kept where the web server doesn't reach, and handed only to someone who may view the record
      * @param  string|int|float|bool|null  $default  What the field is when a create leaves it out. Also the column's default.
+     * @param  string|null  $from  slug: the field it is made from when a create leaves it empty, e.g. "title"
      */
     public function __construct(
         public readonly string $name,
@@ -59,6 +60,7 @@ final class Field
         public readonly ?int $maxLength = null,
         public readonly bool $private = false,
         public readonly string|int|float|bool|null $default = null,
+        public readonly ?string $from = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -107,6 +109,14 @@ final class Field
                 throw new InvalidArgumentException("\"{$name}\" is unique, so only one record could ever have its default.");
             }
         }
+        if ($from !== null) {
+            if ($kind !== 'string' || $format !== 'slug') {
+                throw new InvalidArgumentException("\"{$name}\" can't be made from another field: that is for a slug ({$name}:slug({$from})).");
+            }
+            if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $from) || $from === $name) {
+                throw new InvalidArgumentException("\"{$name}\" is made from a field of the same resource, named as it is there: {$name}:slug(title).");
+            }
+        }
         if ($private && $kind !== 'file') {
             throw new InvalidArgumentException("\"{$name}\" can't be private: that is for file fields. Who may see a record's other fields is its policy's to say.");
         }
@@ -139,6 +149,7 @@ final class Field
      *   manual:file(pdf|document)         any other upload
      *   cv:file(pdf|private)              one only those who may view the record can fetch
      *   status:enum(pending|paid)=pending what it is when a create leaves it out
+     *   slug:slug(title)!                 made from the title when left empty
      *
      * Grit's and Flare's spellings are understood too: see normalise().
      */
@@ -198,6 +209,10 @@ final class Field
             throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
         }
         [$kind, $format] = self::ALIASES[$type];
+        // slug:slug(title)!: made from the title when a create leaves it empty.
+        if ($format === 'slug' && $args !== '' && ! ctype_digit($args)) {
+            return new self($name, $kind, $format, $required, $unique, from: Naming::camel($args));
+        }
         // excerpt:string(500): a length of its own.
         $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
 
@@ -245,6 +260,7 @@ final class Field
             isset($data['maxLength']) ? (int) $data['maxLength'] : null,
             (bool) ($data['private'] ?? false),
             $data['default'] ?? null,
+            $data['from'] ?? null,
         );
     }
 
@@ -261,6 +277,7 @@ final class Field
             'maxLength' => $this->maxLength,
             'private' => $this->private ?: null,
             'default' => $this->default,
+            'from' => $this->from,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,
