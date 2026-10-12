@@ -24,6 +24,7 @@ final class FormBlocks
         'too_fast' => 'sent too fast',
         'expired' => 'form left open too long',
         'robot' => 'robot check',
+        'hostname' => 'robot check solved on another site',
         'disposable' => 'throwaway address',
         'undeliverable' => 'address that takes no mail',
         'throttled' => 'too many from one address',

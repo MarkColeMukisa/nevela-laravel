@@ -38,7 +38,7 @@ final class FormsController
             'protect' => $protect,
             'confirm' => $descriptor->public->confirm,
             // Asked for and not possible: the form is refusing everyone (production) or checking nobody (development).
-            'robotCheck' => ($protect['turnstile'] ?? false) ? (FormGuard::secret() !== '' ? 'on' : (app()->environment('production') ? 'refusing' : 'skipped')) : 'off',
+            'robotCheck' => ($protect['turnstile'] ?? false) ? FormGuard::robotCheck() : 'off',
             'blocked' => FormBlocks::summary($descriptor->name),
         ]);
     }

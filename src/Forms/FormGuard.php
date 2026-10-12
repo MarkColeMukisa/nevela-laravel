@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
+use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Support\Descriptor;
 use Throwable;
 
@@ -42,6 +43,9 @@ final class FormGuard
      */
     private const BAIT = ['website', 'homepage', 'url', 'site', 'web'];
 
+    /** Where a form is built, and never where it is live. */
+    private const LOCAL = ['localhost', '127.0.0.1'];
+
     /** Asks whether a domain takes mail. Replaced in tests, which have no DNS to ask. @var (callable(string): bool)|null */
     public static $takesMail = null;
 
@@ -49,7 +53,7 @@ final class FormGuard
      * What a form needs before it is shown: the token to send back, the name of the field
      * to leave empty, and whether the robot check is on.
      *
-     * @return array{token: string|null, honeypot: string|null, minSeconds: int, turnstile: bool}
+     * @return array{token: string|null, honeypot: string|null, minSeconds: int, turnstile: bool, action: string|null}
      */
     public static function issue(Descriptor $resource): array
     {
@@ -60,9 +64,62 @@ final class FormGuard
             'token' => $timed ? self::sign($resource->name, now()->getTimestamp()) : null,
             'honeypot' => ($protect['honeypot'] ?? false) ? self::honeypot($resource) : null,
             'minSeconds' => (int) ($protect['minSeconds'] ?? 0),
-            // On only where there is a secret to check the answer with: see robot().
-            'turnstile' => ($protect['turnstile'] ?? false) && self::secret() !== '',
+            // On only where the answer can be checked: see robot().
+            'turnstile' => $robot = ($protect['turnstile'] ?? false) && self::robotCheck() === 'on',
+            // What the widget is rendered with, and Cloudflare hands back: which form the check was for.
+            'action' => $robot ? self::action($resource) : null,
         ];
+    }
+
+    /**
+     * The name a form's robot check is made under. The widget is given it, Cloudflare
+     * returns it with its answer, and the two must agree: a token solved for one form
+     * can't be spent on another. (Cloudflare allows letters, digits, _ and -, up to 32.)
+     */
+    public static function action(Descriptor $resource): string
+    {
+        return substr((string) preg_replace('/[^A-Za-z0-9_-]/', '-', $resource->slug), 0, 32);
+    }
+
+    /**
+     * The sites a robot check may have been solved on: TURNSTILE_HOSTNAMES, or failing that
+     * the web app's own. A name stands for its subdomains too, as it does on the widget.
+     *
+     * A widget usually lists localhost beside the real site, so the form can be built. This
+     * is what stops a token solved on someone's own machine being spent on the live form:
+     * in production localhost is never accepted, whatever the setting says.
+     *
+     * @return list<string>
+     */
+    public static function hostnames(?Request $request = null): array
+    {
+        $set = config('nevela.public.turnstile.hostnames');
+        $names = array_values(array_filter(array_map(
+            fn ($name) => strtolower(trim((string) $name)),
+            is_array($set) ? $set : explode(',', (string) $set),
+        )));
+        if ($names === []) {
+            $names = [strtolower(Web::host($request))];
+        }
+
+        return app()->environment('production')
+            ? array_values(array_diff($names, self::LOCAL))
+            : array_values(array_unique([...$names, ...self::LOCAL]));
+    }
+
+    /**
+     * Whether the robot check can be made here: "on"; "skipped", in development with no
+     * secret key; or "refusing", in production with something it needs missing. A form that
+     * asks for the check never goes without it quietly.
+     */
+    public static function robotCheck(): string
+    {
+        $production = app()->environment('production');
+        if (self::secret() === '') {
+            return $production ? 'refusing' : 'skipped';
+        }
+
+        return $production && self::hostnames() === [] ? 'refusing' : 'on';
     }
 
     /** The field a person never sees, for this form. */
@@ -126,7 +183,7 @@ final class FormGuard
             }
         }
 
-        if ($protect['turnstile'] && ($refusal = self::robot($request, $input)) !== null) {
+        if ($protect['turnstile'] && ($refusal = self::robot($resource, $request, $input)) !== null) {
             return $refusal;
         }
 
@@ -163,19 +220,23 @@ final class FormGuard
      * form that asked for the check and quietly went without would be open, and nobody
      * would know.
      *
+     * A yes from Cloudflare says a person solved a check for this widget. It is taken only
+     * if it was solved on this site and for this form: see hostnames() and action().
+     *
      * @param  array<string, mixed>  $input
      */
-    private static function robot(Request $request, array $input): ?Refusal
+    private static function robot(Descriptor $resource, Request $request, array $input): ?Refusal
     {
         $secret = self::secret();
-        if ($secret === '') {
-            return app()->environment('production')
-                ? new Refusal('unconfigured', 503, "This form can't be sent at the moment. Please try again later.")
-                : null;
+        $unconfigured = new Refusal('unconfigured', 503, "This form can't be sent at the moment. Please try again later.");
+        $state = self::robotCheck();
+        if ($state !== 'on') {
+            return $state === 'refusing' ? $unconfigured : null;
         }
         $token = $input[self::TURNSTILE] ?? $input['cf-turnstile-response'] ?? null;
         $failed = new Refusal('robot', 422, self::NOT_A_PERSON);
-        if (! is_string($token) || $token === '') {
+        // (Cloudflare's tokens are at most 2048 characters. Anything longer is not one.)
+        if (! is_string($token) || $token === '' || strlen($token) > 2048) {
             return $failed;
         }
 
@@ -195,7 +256,29 @@ final class FormGuard
         }
 
         // A token is good once: a second use is answered with "timeout-or-duplicate", which is a no.
-        return $response->json('success') === true ? null : $failed;
+        if ($response->json('success') !== true) {
+            return $failed;
+        }
+        // The keys Cloudflare publishes for testing say yes to everything, name no form, and
+        // call every site example.com. Good for building a form. On a live one they are no check at all.
+        if ($response->json('metadata.result_with_testing_key') === true) {
+            return app()->environment('production') ? $unconfigured : null;
+        }
+
+        $solvedOn = strtolower((string) $response->json('hostname'));
+        $expected = self::hostnames($request);
+        $here = false;
+        foreach ($expected as $name) {
+            $here = $here || $solvedOn === $name || str_ends_with($solvedOn, '.'.$name);
+        }
+        if (! $here) {
+            // Most often a setting, not an attack: the site is served from a name this app wasn't told of.
+            logger()->warning("Nevela refused a robot check solved on \"{$solvedOn}\". This app accepts: ".implode(', ', $expected).'. If that is your site, add it to TURNSTILE_HOSTNAMES or correct NEVELA_WEB_URL.');
+
+            return new Refusal('hostname', 422, self::NOT_A_PERSON);
+        }
+
+        return (string) $response->json('action') === self::action($resource) ? null : $failed;
     }
 
     public static function secret(): string

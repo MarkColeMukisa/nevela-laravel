@@ -137,7 +137,9 @@ return [
     | turnstile   Cloudflare's robot check. The secret key is this app's alone; the site key
     |             goes in the web app (NEXT_PUBLIC_TURNSTILE_SITE_KEY). With no secret the
     |             check is skipped in development, and in production a form that asks for
-    |             it answers 503: it is never quietly left open.
+    |             it answers 503: it is never quietly left open. A check counts only if it
+    |             was solved on one of `hostnames` (a name stands for its subdomains), and
+    |             never on localhost in production.
     | form_lifetime  How long a form can sit open before it must be loaded again, in seconds.
     | mail        The most one address is emailed because someone typed it into a form
     |             (PublicMail::toVisitor), across every form. Past it the email is dropped
@@ -151,6 +153,8 @@ return [
     'public' => [
         'turnstile' => [
             'secret' => env('TURNSTILE_SECRET_KEY'),
+            /* The sites a check may be solved on, with commas between: "example.com, shop.example.com". The web app's own (NEVELA_WEB_URL), unless set. */
+            'hostnames' => env('TURNSTILE_HOSTNAMES'),
             'verify_url' => 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
         ],
         'form_lifetime' => 2 * 60 * 60,

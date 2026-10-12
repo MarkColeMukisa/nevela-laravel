@@ -102,9 +102,10 @@ final class StatusCommand extends Command
         if ($checked !== []) {
             $forms = implode(', ', $checked);
             $row('Robot check (Turnstile)', match (true) {
-                FormGuard::secret() !== '' => "on for {$forms}",
-                app()->environment('production') => $bad("TURNSTILE_SECRET_KEY is not set, so the form for {$forms} answers 503 to everyone"),
-                default => "<fg=yellow>skipped: TURNSTILE_SECRET_KEY is not set, so nothing checks {$forms}. Set it before going live.</>",
+                FormGuard::robotCheck() === 'on' => "on for {$forms}, solved on ".implode(', ', FormGuard::hostnames()),
+                FormGuard::secret() === '' && app()->environment('production') => $bad("TURNSTILE_SECRET_KEY is not set, so the form for {$forms} answers 503 to everyone"),
+                FormGuard::secret() === '' => "<fg=yellow>skipped: TURNSTILE_SECRET_KEY is not set, so nothing checks {$forms}. Set it before going live.</>",
+                default => $bad("no site to accept a check from, so the form for {$forms} answers 503 to everyone: set NEVELA_WEB_URL to the site's address, or TURNSTILE_HOSTNAMES"),
             });
         }
 
