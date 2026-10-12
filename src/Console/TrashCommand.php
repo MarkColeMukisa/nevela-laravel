@@ -3,6 +3,8 @@
 namespace Nevela\Laravel\Console;
 
 use Illuminate\Console\Command;
+use Nevela\Laravel\Forms\Confirmation;
+use Nevela\Laravel\Forms\PublicMail;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Trash\Trash;
 
@@ -20,6 +22,13 @@ final class TrashCommand extends Command
         if ($unclaimed > 0) {
             $this->components->info('Removed '.number_format($unclaimed).' file(s) uploaded through a public form and never used.');
         }
+
+        // People who joined a list and never followed the link that proves their address.
+        $hours = Confirmation::hours();
+        foreach (Confirmation::purge() as $resource => $count) {
+            $this->components->info('Removed '.number_format($count)." {$resource} record(s) whose address wasn't confirmed within {$hours} hours.");
+        }
+        PublicMail::prune();
 
         $days = Trash::days();
         if ($days === null) {

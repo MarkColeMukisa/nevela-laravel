@@ -146,6 +146,11 @@ final class Nevela
 
                 continue;
             }
+            if (isset($filter['confirmed'])) {
+                $filter['confirmed'] ? $query->whereNotNull($filter['column']) : $query->whereNull($filter['column']);
+
+                continue;
+            }
             $field = $resource->fields[$filter['field']] ?? null;
             if ($filter['value'] !== null && $field?->kind === 'belongsTo' && ! self::couldBeId((string) $field->target, (string) $filter['value'])) {
                 // Nothing belongs to a record that can't exist. Asked anyway, some databases
@@ -157,6 +162,18 @@ final class Nevela
             $filter['value'] === null
                 ? $query->whereNull($filter['column'])
                 : $query->where($filter['column'], $filter['value']);
+        }
+    }
+
+    /**
+     * A count is of the people who are really there: where a resource's form asks for an
+     * address to be proved, the ones who haven't yet are left out. The list still shows
+     * them, marked.
+     */
+    private static function proved(Builder $query, Descriptor $resource): void
+    {
+        if ($resource->public?->confirm !== null && method_exists($query->getModel(), 'scopeConfirmed')) {
+            $query->confirmed();
         }
     }
 
@@ -196,6 +213,7 @@ final class Nevela
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
         }
         self::narrow($query, $resource, $list);
+        self::proved($query, $resource);
         $base = fn () => (clone $query)->reorder();
 
         // Counted per day by the database, one grouped query over the created_at index,
@@ -330,6 +348,7 @@ final class Nevela
         $now = now();
         $since = $now->copy()->subDays($days);
         $before = $now->copy()->subDays($days * 2);
+        self::proved($query, $resource);
         $base = fn () => (clone $query)->reorder();
 
         $values = [];

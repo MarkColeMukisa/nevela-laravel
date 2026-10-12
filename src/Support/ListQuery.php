@@ -28,10 +28,13 @@ final class ListQuery
     /** The three things a record with a publish date can be. */
     public const PUBLISHED = ['published', 'draft', 'scheduled'];
 
+    /** The filter that isn't a field: whether a record's address has been proved ("confirm"). */
+    public const CONFIRMED = 'confirmed';
+
     /**
      * A filter on the field a resource is published by carries `state` in place of a value.
      *
-     * @var list<array{field: string, column: string, value: string|int|float|bool|null, state?: string}>
+     * @var list<array{field: string, column: string, value: string|int|float|bool|null, state?: string, confirmed?: bool}>
      */
     public array $filters = [];
 
@@ -79,6 +82,15 @@ final class ListQuery
                 in_array($state, self::PUBLISHED, true)
                     ? $query->filters[] = ['field' => $key, 'column' => $field->column(), 'value' => null, 'state' => $state]
                     : $query->issue($param, 'Must be one of: '.implode(', ', self::PUBLISHED).'.');
+
+                continue;
+            }
+            // filter[confirmed]=true: whether the address was proved, for a resource whose form asks.
+            if ($field === null && $key === self::CONFIRMED && $resource->public?->confirm !== null) {
+                $proved = is_array($value) ? null : filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                $proved === null
+                    ? $query->issue($param, 'Must be true or false.')
+                    : $query->filters[] = ['field' => $key, 'column' => 'confirmed_at', 'value' => null, 'confirmed' => $proved];
 
                 continue;
             }

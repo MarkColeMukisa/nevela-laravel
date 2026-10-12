@@ -8,6 +8,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Nevela\Laravel\Forms\Confirmation;
+use Nevela\Laravel\Forms\FormBlocks;
+use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Nevela;
@@ -22,6 +25,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *   GET  {prefix}/public/{slug}/{id}     one of them, by id or by the field the section names
  *   POST {prefix}/public/{slug}          create one, from the fields the section lists
  *   PUT  {prefix}/public/_nevela/uploads/{Resource}/{field}   a file for such a create
+ *   GET  {prefix}/public/_nevela/form/{slug}                  what a protected form sends back with it
+ *   POST {prefix}/public/_nevela/confirm/{slug}/{id}/{key}    the link that proves an address
  *
  * The routes are generated (routes/nevela-public.php), one set per resource that has a
  * section and only for what it opens, so a resource without one has nothing here to call.
@@ -75,8 +80,39 @@ final class PublicController
         $requestClass = "App\\Http\\Requests\\Nevela\\{$descriptor->name}Request";
         $model = $this->model($descriptor);
         $input = $request->json()->all() ?: $request->request->all();
+        $input = is_array($input) ? $input : [];
 
-        $checked = (new $requestClass)->forFields($public->create, is_array($input) ? $input : []);
+        // Before anything is validated or stored: what "protect" asks for. What is turned
+        // away is counted, and a program is told it worked.
+        if (($refusal = FormGuard::check($descriptor, $request, $input)) !== null) {
+            FormBlocks::record($descriptor->name, $refusal->reason);
+
+            return $refusal->response();
+        }
+        $input = FormGuard::strip($descriptor, $input);
+
+        $address = null;
+        if ($public->confirm !== null) {
+            $column = $descriptor->fields[$public->confirm]->column();
+            $typed = $input[$public->confirm] ?? null;
+            if (is_string($typed) && filter_var(trim($typed), FILTER_VALIDATE_EMAIL)) {
+                // One spelling of an address, so the same one can't join twice.
+                $address = $input[$public->confirm] = strtolower(trim($typed));
+                // Already on the list, or once was: answered exactly as the first time, so the
+                // form can't be used to ask who is on it. Someone still waiting gets the link
+                // again, as often as an address may be written to.
+                $existing = DB::table($descriptor->table)->whereRaw("lower({$column}) = ?", [$address])->first();
+                if ($existing !== null) {
+                    if (property_exists($existing, 'confirmed_at') && $existing->confirmed_at === null && ($existing->deleted_at ?? null) === null) {
+                        Confirmation::send($descriptor, $existing->id, $address, $request);
+                    }
+
+                    return response()->noContent(201);
+                }
+            }
+        }
+
+        $checked = (new $requestClass)->forFields($public->create, $input);
         // A file has to be one a visitor uploaded for this, a moment ago, and not yet used.
         foreach ($public->create as $field) {
             $key = $checked['values'][$descriptor->fields[$field]->column()] ?? null;
@@ -89,7 +125,12 @@ final class PublicController
         }
 
         $record = DB::transaction(function () use ($model, $checked, $descriptor, $public) {
-            $record = $model::create($checked['values']);
+            $record = new $model($checked['values']);
+            if ($public->confirm !== null) {
+                // Not yet: see Concerns\Confirmable.
+                $record->setAttribute('confirmed_at', null);
+            }
+            $record->save();
             // Claimed: the nightly clear-out of uploads nobody used leaves it alone from here on.
             foreach ($public->create as $field) {
                 $key = $descriptor->fields[$field]->kind === 'file' ? $record->getAttribute($descriptor->fields[$field]->column()) : null;
@@ -101,13 +142,56 @@ final class PublicController
             return $record;
         });
 
-        // What they may read of what they made, or nothing where nothing may be read.
-        if ($public->read === null) {
+        if ($address !== null) {
+            Confirmation::send($descriptor, $record->getKey(), $address, $request);
+        }
+
+        // What they may read of what they made, or nothing where nothing may be read. A
+        // form with checks, or an address to prove, says nothing either way: the answer to
+        // one that was sent has to be the answer to one that was quietly turned away.
+        if ($public->read === null || $public->protected() || $public->confirm !== null) {
             return response()->noContent(201);
         }
         $resourceClass = $this->resourceClass($descriptor);
 
         return response()->json($this->visible($descriptor, $public, (new $resourceClass($record->refresh()))->resolve($request)), 201);
+    }
+
+    /**
+     * What a protected form needs before it is shown: a token that says when it was handed
+     * out, the name of the field a person never sees, and whether the robot check is on.
+     */
+    public function form(Request $request): JsonResponse
+    {
+        [$descriptor] = $this->open($request, 'create');
+
+        return response()->json(FormGuard::issue($descriptor))->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * The link in the email: the record it names is confirmed. The key is what only this
+     * app could have written for that record and that address, so a link can't be made up
+     * and stops working if the address is changed. Following it twice does no harm.
+     */
+    public function confirm(Request $request): JsonResponse
+    {
+        [$descriptor, $public] = $this->open($request, 'create');
+        $id = (string) $request->route('id');
+        $model = $this->model($descriptor);
+        $gone = fn () => response()->json(['error' => 'This link is no longer good. It may have been used too late: sign up again for a new one.'], 404);
+        if ($public->confirm === null || ($descriptor->idType === 'int' ? ! preg_match('/^[0-9]{1,18}$/', $id) : ! \Illuminate\Support\Str::isUuid($id))) {
+            return $gone();
+        }
+        $record = $model::query()->whereKey($id)->first();
+        $address = $record?->getAttribute($descriptor->fields[$public->confirm]->column());
+        if ($record === null || ! is_string($address) || ! hash_equals(Confirmation::hash($descriptor, $id, $address), (string) $request->route('key'))) {
+            return $gone();
+        }
+        if ($record->getAttribute('confirmed_at') === null) {
+            $record->forceFill(['confirmed_at' => now()])->save();
+        }
+
+        return response()->json(['confirmed' => true]);
     }
 
     /** A file for a public create: the field's own types and size limit, and no sign-in. */

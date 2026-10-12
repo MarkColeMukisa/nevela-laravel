@@ -16,6 +16,8 @@ use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Console\AdoptCommand;
 use Nevela\Laravel\Console\BlogCommand;
 use Nevela\Laravel\Console\DevCommand;
+use Nevela\Laravel\Console\DigestCommand;
+use Nevela\Laravel\Console\DisposableCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\SeedCommand;
@@ -30,6 +32,7 @@ use Nevela\Laravel\Http\Access\RolesAreSetUp;
 use Nevela\Laravel\Http\Access\RolesController;
 use Nevela\Laravel\Http\Access\UsersController;
 use Nevela\Laravel\Http\FlareErrors;
+use Nevela\Laravel\Http\FormsController;
 use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
@@ -64,7 +67,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -72,6 +75,8 @@ final class NevelaServiceProvider extends ServiceProvider
             // happens whenever someone opens the trash.
             $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
                 $schedule->command(TrashCommand::class)->dailyAt('03:40')->withoutOverlapping();
+                // The notices to the owner that were held back in a busy hour, as one email.
+                $schedule->command(DigestCommand::class)->hourly()->withoutOverlapping();
             });
         }
 
@@ -204,6 +209,9 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::post('_nevela/trash/{slug}/{id}/restore', [TrashController::class, 'restore'])->name('trash.restore');
             Route::delete('_nevela/trash/{slug}/{id}', [TrashController::class, 'destroy'])->name('trash.destroy');
             Route::delete('_nevela/trash/{slug}', [TrashController::class, 'empty'])->name('trash.empty');
+
+            // A public form, from the inside: what it checks and what it has turned away.
+            Route::get('_nevela/forms/{slug}', [FormsController::class, 'show'])->name('forms.show');
 
             // Users and roles, for whoever holds the permissions to manage them.
             Route::middleware(RolesAreSetUp::class)->group(function () {

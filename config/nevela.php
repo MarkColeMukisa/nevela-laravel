@@ -132,6 +132,43 @@ return [
     ],
 
     /*
+    | Forms anyone can send: a resource's "public" create, with "protect" or "confirm".
+    |
+    | turnstile   Cloudflare's robot check. The secret key is this app's alone; the site key
+    |             goes in the web app (NEXT_PUBLIC_TURNSTILE_SITE_KEY). With no secret the
+    |             check is skipped in development, and in production a form that asks for
+    |             it answers 503: it is never quietly left open.
+    | form_lifetime  How long a form can sit open before it must be loaded again, in seconds.
+    | mail        The most one address is emailed because someone typed it into a form
+    |             (PublicMail::toVisitor), across every form. Past it the email is dropped
+    |             and the record is still saved. This is what stops a form being used to
+    |             mail strangers.
+    | notify      Who is told a form was sent (PublicMail::toOwner), and how often: past
+    |             max_per_hour the rest wait for one email at the top of the hour.
+    | confirm     How long an address has to follow its link ("confirm"), after which the
+    |             record is removed, and the page of the web app the link opens.
+    */
+    'public' => [
+        'turnstile' => [
+            'secret' => env('TURNSTILE_SECRET_KEY'),
+            'verify_url' => 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        ],
+        'form_lifetime' => 2 * 60 * 60,
+        'mail' => [
+            'visitor_per_hour' => 1,
+            'visitor_per_day' => 3,
+        ],
+        'notify' => [
+            'to' => env('NEVELA_NOTIFY_TO'),
+            'max_per_hour' => 10,
+        ],
+        'confirm' => [
+            'hours' => 48,
+            'path' => '/confirm',
+        ],
+    ],
+
+    /*
     | Rich text fields (body:richtext). Whatever is sent is parsed and written out again
     | with only these tags and attributes: nothing the editor, a script or a visitor sends
     | is trusted. A tag that isn't listed goes and its words stay. The list matches the

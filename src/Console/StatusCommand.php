@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\ClosedAccounts;
+use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\Releases;
@@ -93,6 +94,18 @@ final class StatusCommand extends Command
             } catch (Throwable) {
                 $row("Resource: {$resource->name}", $bad("the {$resource->table} table is missing: php nevela migrate"));
             }
+        }
+
+        // --- public forms ---
+        // A form that asks for the robot check can only make it with the secret key.
+        $checked = array_map(fn ($r) => $r->name, array_values(array_filter($resources, fn ($r) => $r->public?->protect['turnstile'] ?? false)));
+        if ($checked !== []) {
+            $forms = implode(', ', $checked);
+            $row('Robot check (Turnstile)', match (true) {
+                FormGuard::secret() !== '' => "on for {$forms}",
+                app()->environment('production') => $bad("TURNSTILE_SECRET_KEY is not set, so the form for {$forms} answers 503 to everyone"),
+                default => "<fg=yellow>skipped: TURNSTILE_SECRET_KEY is not set, so nothing checks {$forms}. Set it before going live.</>",
+            });
         }
 
         // --- dashboard ---

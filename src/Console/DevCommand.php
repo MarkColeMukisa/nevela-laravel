@@ -40,6 +40,13 @@ final class DevCommand extends Command
             $web = Process::fromShellCommandline(self::packageManager($webPath).' run dev', $webPath, ['NEVELA_API_URL' => "{$url}/api"], null, null);
         }
 
+        // Mail a public form causes is queued, and a queue with nobody working it sends
+        // nothing: a confirmation link would never arrive. So the queue is worked here too,
+        // unless the app runs jobs as they are made.
+        $queue = in_array(config('queue.default'), ['sync', 'null', null], true)
+            ? null
+            : new Process([$php, 'artisan', 'queue:listen', '--tries=1', '--sleep=2'], base_path(), null, null, null);
+
         $this->components->info('Starting '.($web ? 'the API and the dashboard' : 'the API').'. Press Ctrl+C to stop.');
         $this->components->twoColumnDetail('API', $url);
         if ($web) {
@@ -49,6 +56,7 @@ final class DevCommand extends Command
 
         $api->start($this->printer('api', 35));
         $web?->start($this->printer('web', 36));
+        $queue?->start($this->printer('queue', 33));
 
         try {
             while ($api->isRunning() && ($web === null || $web->isRunning())) {
@@ -56,6 +64,7 @@ final class DevCommand extends Command
             }
         } finally {
             // Whichever stopped, or Ctrl+C: don't leave the other one running behind.
+            $queue?->stop(3);
             $web?->stop(3);
             $api->stop(3);
         }

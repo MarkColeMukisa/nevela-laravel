@@ -6,6 +6,7 @@ use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Naming;
+use Nevela\Laravel\Support\PublicAccess;
 
 /**
  * Turns descriptors into files. Pure: no Laravel, no filesystem — Writer does the I/O.
@@ -289,7 +290,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash'];
+        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -321,6 +322,7 @@ final class ResourceGenerator
               php nevela seed Product          fill a resource with records
               php nevela user                  create someone who can sign in
               php nevela trash                 remove deleted records whose time in the trash is up
+              php nevela disposable            fetch the current list of throwaway email domains
               php nevela upgrade               bring this app to the latest Nevela
               php nevela version               which Nevela this is
 
@@ -380,6 +382,10 @@ final class ResourceGenerator
             }
             if ($d->blog !== null) {
                 $extras[$d->name]['blog'] = $d->blog;
+            }
+            // What its public form checks, and the address it has proved.
+            if ($d->public?->protect !== null || $d->public?->confirm !== null) {
+                $extras[$d->name]['form'] = array_filter(['protect' => $d->public->toArray()['create']['protect'] ?? null, 'confirm' => $d->public->confirm], fn ($v) => $v !== null);
             }
         }
         $body .= "\n\n/** What a resource has beyond its fields. Read through lib/extras.ts. */\nexport const extras: Record<string, unknown> = ".($extras === [] ? '{}' : json_encode($extras, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)).';';
@@ -523,6 +529,14 @@ final class ResourceGenerator
                         $lines[] = "Route::put('_nevela/uploads/{$d->name}/{$field}', [{$controller}, 'upload']){$for}->defaults('field', '{$field}')->middleware([{$throttle($public->createThrottle, 'upload')}{$more}])->name('{$d->slug}.upload.{$field}');";
                     }
                 }
+                // What a protected form asks for before it is shown, and after each attempt.
+                if ($public->protected()) {
+                    $lines[] = "Route::get('_nevela/form/{$d->slug}', [{$controller}, 'form']){$for}->middleware([{$throttle(PublicAccess::READ_THROTTLE, 'form')}])->name('{$d->slug}.form');";
+                }
+                // The link that proves an address.
+                if ($public->confirm !== null) {
+                    $lines[] = "Route::post('_nevela/confirm/{$d->slug}/{id}/{key}', [{$controller}, 'confirm']){$for}->middleware([{$throttle(PublicAccess::READ_THROTTLE, 'confirm')}])->name('{$d->slug}.confirm');";
+                }
             }
         }
         $body = $lines === [] ? '// No resource has a "public" section, so nothing is open.' : implode("\n", $lines);
@@ -622,6 +636,11 @@ final class ResourceGenerator
         };
         // An integer id is Eloquent's own default: the database numbers the records.
         [$import, $trait] = $d->idType === 'int' ? ['', ''] : ["use Illuminate\\Database\\Eloquent\\Concerns\\HasUuids;\n", "    use HasUuids;\n\n"];
+        $confirmable = $d->public?->confirm === null ? '' : <<<'PHP'
+
+            // Its public form asks for an address to be proved: Subscriber::confirmed() is who has.
+            use \Nevela\Laravel\Concerns\Confirmable;
+        PHP;
         $m = self::M;
         $e = self::E;
 
@@ -638,7 +657,7 @@ final class ResourceGenerator
 
             {$m}
             // Deleted records go to the trash, where they can be restored for a while.
-            use \Nevela\Laravel\Concerns\Trashable;
+            use \Nevela\Laravel\Concerns\Trashable;{$confirmable}
 
             protected \$fillable = [{$fillable}];
 
@@ -701,6 +720,10 @@ final class ResourceGenerator
                 $line .= '->index()';
             }
             $columns[] = "            {$line};";
+        }
+        if ($d->public?->confirm !== null) {
+            $columns[] = '            // When the address was proved, by the link emailed to it. Empty until then.';
+            $columns[] = "            \$table->timestamp('confirmed_at')->nullable()->index();";
         }
         $cols = implode("\n", $columns);
         $id = $d->idType === 'int' ? '$table->id();' : "\$table->uuid('id')->primary();";
@@ -774,6 +797,58 @@ final class ResourceGenerator
         };
 
         PHP;
+    }
+
+    /**
+     * For a table made before its form asked for addresses to be proved: the column that
+     * records it. The records already there are taken as proved. They were on the list
+     * before anyone was asked, and asking now would empty it.
+     */
+    public function confirmMigration(Descriptor $d): string
+    {
+        return <<<PHP
+        <?php
+
+        use Illuminate\Database\Migrations\Migration;
+        use Illuminate\Database\Schema\Blueprint;
+        use Illuminate\Support\Facades\DB;
+        use Illuminate\Support\Facades\Schema;
+
+        // {$d->pluralLabel} now prove their address: a record made through the public form is
+        // unconfirmed until the link emailed to it is followed. Generated once by Nevela.
+        return new class extends Migration
+        {
+            public function up(): void
+            {
+                if (Schema::hasTable('{$d->table}') && ! Schema::hasColumn('{$d->table}', 'confirmed_at')) {
+                    Schema::table('{$d->table}', function (Blueprint \$table) {
+                        \$table->timestamp('confirmed_at')->nullable()->index();
+                    });
+                    // Whoever is on the list already stays on it.
+                    DB::table('{$d->table}')->update(['confirmed_at' => now()]);
+                }
+            }
+
+            public function down(): void
+            {
+                if (Schema::hasColumn('{$d->table}', 'confirmed_at')) {
+                    Schema::table('{$d->table}', function (Blueprint \$table) {
+                        \$table->dropIndex(['confirmed_at']);
+                        \$table->dropColumn('confirmed_at');
+                    });
+                }
+            }
+        };
+
+        PHP;
+    }
+
+    /** The file `confirmMigration()` goes in. Written once for a table, whatever its date. */
+    public function confirmMigrationFile(Descriptor $d, ?string $timestamp = null): GeneratedFile
+    {
+        $timestamp ??= date('Y_m_d_His');
+
+        return new GeneratedFile(GeneratedFile::TARGET_API, "database/migrations/{$timestamp}_add_confirmation_to_{$d->table}_table.php", $this->confirmMigration($d), GeneratedFile::MODE_ONCE, "database/migrations/*_add_confirmation_to_{$d->table}_table.php");
     }
 
     /** The file `trashMigration()` goes in. Not made again once one exists for the table, whatever its date. */
@@ -943,6 +1018,10 @@ final class ResourceGenerator
                     ? "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::privateFile(\$this->{$f->column()}, '{$d->slug}', \$this->getKey(), '{$f->name}'),"
                     : "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::file(\$this->{$f->column()}),";
             }
+        }
+        if ($d->public?->confirm !== null) {
+            // Not a field: when the address was proved, for the dashboard to say "Not confirmed" until it is.
+            $lines[] = "            'confirmedAt' => \$this->confirmed_at?->toJSON(),";
         }
         $body = implode("\n", $lines);
         $id = $d->idType === 'int' ? '(string) $this->id' : '$this->id';

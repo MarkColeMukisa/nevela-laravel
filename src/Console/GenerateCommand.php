@@ -44,6 +44,27 @@ final class GenerateCommand extends Command
         return $written || ! $columnExists;
     }
 
+    /**
+     * Whether a resource whose form proves an address needs the migration that adds the
+     * column for it: when its table was made without one. A new resource's own migration
+     * has it.
+     *
+     * @param  list<string>  $createMigrations  The contents of the table's own migration(s); none for a resource that is new
+     */
+    public static function needsConfirmMigration(array $createMigrations, bool $adopted = false): bool
+    {
+        if ($createMigrations === []) {
+            return $adopted;
+        }
+        foreach ($createMigrations as $contents) {
+            if (str_contains($contents, 'confirmed_at')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /** Whether the table has the column now. No, where there is no database to ask. */
     private static function hasTrashColumn(string $table): bool
     {
@@ -130,6 +151,10 @@ final class GenerateCommand extends Command
             $written = (glob(database_path("migrations/*_add_trash_to_{$descriptor->table}_table.php")) ?: []) !== [];
             if (self::needsTrashMigration($made, $written, self::hasTrashColumn($descriptor->table), $descriptor->adopted)) {
                 $files[] = $generator->trashMigrationFile($descriptor);
+            }
+            // The same for "confirm" added to a resource whose table is already made.
+            if ($descriptor->public?->confirm !== null && self::needsConfirmMigration($made, $descriptor->adopted)) {
+                $files[] = $generator->confirmMigrationFile($descriptor);
             }
         }
         $files[] = $generator->routes($all);
