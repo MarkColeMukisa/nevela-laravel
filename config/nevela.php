@@ -153,7 +153,7 @@ return [
     'public' => [
         'turnstile' => [
             'secret' => env('TURNSTILE_SECRET_KEY'),
-            /* The sites a check may be solved on, with commas between: "example.com, shop.example.com". The web app's own (NEVELA_WEB_URL), unless set. */
+            /* The sites a check may be solved on, with commas and no spaces between: example.com,shop.example.com. The web app's own (NEVELA_WEB_URL), unless set. */
             'hostnames' => env('TURNSTILE_HOSTNAMES'),
             'verify_url' => 'https://challenges.cloudflare.com/turnstile/v0/siteverify',
         ],
