@@ -25,6 +25,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  *   GET  {prefix}/public/{slug}/{id}     one of them, by id or by the field the section names
  *   POST {prefix}/public/{slug}          create one, from the fields the section lists
  *   PUT  {prefix}/public/_nevela/uploads/{Resource}/{field}   a file for such a create
+ *   PUT  {prefix}/public/{slug}/_uploads/{field}              the same, by the form's own address
  *   GET  {prefix}/public/_nevela/form/{slug}                  what a protected form sends back with it
  *   POST {prefix}/public/_nevela/confirm/{slug}/{id}/{key}    the link that proves an address
  *

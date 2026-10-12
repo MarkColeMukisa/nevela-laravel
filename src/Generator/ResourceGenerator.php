@@ -527,6 +527,8 @@ final class ResourceGenerator
                 foreach ($public->create as $field) {
                     if ($d->fields[$field]->kind === 'file') {
                         $lines[] = "Route::put('_nevela/uploads/{$d->name}/{$field}', [{$controller}, 'upload']){$for}->defaults('field', '{$field}')->middleware([{$throttle($public->createThrottle, 'upload')}{$more}])->name('{$d->slug}.upload.{$field}');";
+                        // The same, beside the form's own address: a page knows the form by its slug, not by the resource's name.
+                        $lines[] = "Route::put('{$d->slug}/_uploads/{$field}', [{$controller}, 'upload']){$for}->defaults('field', '{$field}')->middleware([{$throttle($public->createThrottle, 'upload')}{$more}])->name('{$d->slug}.upload.{$field}.here');";
                     }
                 }
                 // What a protected form asks for before it is shown, and after each attempt.
