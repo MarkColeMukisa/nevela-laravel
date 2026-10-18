@@ -114,8 +114,12 @@ final class SocialController
                     return $made;
                 }
                 $user = $made;
+            } elseif ($user->email_verified_at === null) {
+                $this->reclaim($user);
             }
-            $this->link($provider, $profile, $user);
+            if (! $this->link($provider, $profile, $user)) {
+                return $this->refuse('ALREADY_LINKED', "That {$label} account is connected to another account here.", 409, ['next' => $next]);
+            }
         }
         // The provider has seen this address work.
         if ($profile['verified'] && $user->email_verified_at === null && mb_strtolower((string) $user->email) === $profile['email']) {
@@ -174,25 +178,54 @@ final class SocialController
             return null;
         }
         $row = DB::table(self::TABLE)->where('provider', $provider)->where('provider_id', $providerId)->first();
+        if ($row === null) {
+            return null;
+        }
+        $user = Account::model()::query()->find($row->user_id);
+        // Connected to an account that is gone: the connection goes too, so it can be made again.
+        if ($user === null) {
+            DB::table(self::TABLE)->where('id', $row->id)->delete();
+        }
 
-        return $row === null ? null : Account::model()::query()->find($row->user_id);
+        return $user;
     }
 
-    /** @param array{id: string, email: string|null, verified: bool, name: string|null} $profile */
-    private function link(string $provider, array $profile, mixed $user): void
+    /**
+     * Connect a provider account to this one. False when it is connected to another account,
+     * as when two requests raced to connect it.
+     *
+     * @param  array{id: string, email: string|null, verified: bool, name: string|null}  $profile
+     */
+    private function link(string $provider, array $profile, mixed $user): bool
     {
         if (! Schema::hasTable(self::TABLE)) {
-            return; // not migrated yet: matched by address every time until it is
+            return true; // not migrated yet: matched by address every time until it is
         }
+        $id = (string) $user->getAuthIdentifier();
         DB::table(self::TABLE)->insertOrIgnore([
             'id' => (string) Str::uuid(),
-            'user_id' => (string) $user->getAuthIdentifier(),
+            'user_id' => $id,
             'provider' => $provider,
             'provider_id' => $profile['id'],
             'email' => $profile['email'],
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        // Whichever row is there now is the answer.
+        return DB::table(self::TABLE)->where('provider', $provider)->where('provider_id', $profile['id'])->value('user_id') === $id;
+    }
+
+    /**
+     * The provider has just proved this address belongs to whoever is signing in. Nobody had
+     * proved it before: the account may have been made by someone else, in their name, with a
+     * password of their own. So that password stops working and every device is signed out.
+     * The owner signs in with the provider from here, or sets a password with "Forgot password".
+     */
+    private function reclaim(mixed $user): void
+    {
+        Account::revokeTokens($user);
+        $user->forceFill(['password' => Hash::make(Str::random(48))])->save();
     }
 
     /** @param array{id: string, email: string|null, verified: bool, name: string|null} $profile */
@@ -203,10 +236,9 @@ final class SocialController
             return $this->refuse('UNAUTHENTICATED', 'Sign in again, then connect it.', 401, ['next' => $next]);
         }
         $holder = $this->linked($provider, $profile['id']);
-        if ($holder !== null && (string) $holder->getAuthIdentifier() !== $userId) {
+        if (($holder !== null && (string) $holder->getAuthIdentifier() !== $userId) || ! $this->link($provider, $profile, $user)) {
             return $this->refuse('ALREADY_LINKED', 'That '.Social::LABELS[$provider].' account is connected to another account here.', 409, ['next' => $next]);
         }
-        $this->link($provider, $profile, $user);
 
         return response()->json(['linked' => true, 'provider' => $provider, 'next' => $next]);
     }
