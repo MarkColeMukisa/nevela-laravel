@@ -17,6 +17,22 @@ use Nevela\Laravel\Support\PublicAccess;
  */
 final class ResourceGenerator
 {
+    /**
+     * @param  string|null  $currency  The app's currency (nevela.currency), for a money field that names none
+     */
+    public function __construct(private readonly ?string $currency = null)
+    {
+        if ($currency !== null && ! Field::isCurrency($currency)) {
+            throw new \InvalidArgumentException("NEVELA_CURRENCY is \"{$currency}\", which is not a currency. Use its three-letter ISO 4217 code, in capitals: UGX, USD, EUR.");
+        }
+    }
+
+    /** The currency a money field is shown in: its own, or the app's. Null for any other field, or when neither says. */
+    private function currencyOf(Field $f): ?string
+    {
+        return $f->kind === 'float' && $f->format === 'money' ? ($f->currency ?? $this->currency) : null;
+    }
+
     private const M = '// '.Writer::START;
 
     private const E = '// '.Writer::END;
@@ -374,7 +390,16 @@ final class ResourceGenerator
         $extras = [];
         foreach ($all as $d) {
             if ($d->actions !== []) {
-                $extras[$d->name]['actions'] = array_map(fn (Action $a) => ['permission' => "{$d->table}.{$a->key()}"] + $a->toArray(), $d->actions);
+                $extras[$d->name]['actions'] = array_map(function (Action $a) use ($d) {
+                    $action = ['permission' => "{$d->table}.{$a->key()}"] + $a->toArray();
+                    foreach ($a->fields as $key => $field) {
+                        if (($currency = $this->currencyOf($field)) !== null) {
+                            $action['fields'][$key]['currency'] = $currency;
+                        }
+                    }
+
+                    return $action;
+                }, $d->actions);
             }
             // The field its records are published by, and where on the site they are a blog.
             if ($d->publish !== null) {
@@ -648,6 +673,12 @@ final class ResourceGenerator
 
             // Its public form asks for an address to be proved: Subscriber::confirmed() is who has.
             use \Nevela\Laravel\Concerns\Confirmable;
+        PHP;
+        $hasEnum = array_filter($d->fields, fn (Field $f) => $f->kind === 'enum') !== [];
+        $confirmable .= ! $hasEnum ? '' : <<<'PHP'
+
+            // $record->optionLabel('status'): what its value is called, in the dashboard's words.
+            use \Nevela\Laravel\Concerns\OptionLabels;
         PHP;
         $m = self::M;
         $e = self::E;
@@ -1272,6 +1303,8 @@ final class ResourceGenerator
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
+                'currency' => ($currency = $this->currencyOf($f)) !== null ? $j($currency) : null,
+                'optionLabels' => $f->optionLabels !== [] ? $j($f->optionLabels) : null,
                 'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
                 'default' => $f->default !== null ? $j($f->default) : null,
                 // What the migration does when the parent goes: an optional link is cleared.

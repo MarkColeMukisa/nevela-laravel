@@ -45,6 +45,8 @@ final class Field
      * @param  bool  $private  file: kept where the web server doesn't reach, and handed only to someone who may view the record
      * @param  string|int|float|bool|null  $default  What the field is when a create leaves it out. Also the column's default.
      * @param  string|null  $from  slug: the field it is made from when a create leaves it empty, e.g. "title"
+     * @param  array<string, string>  $optionLabels  enum: what each value is called where people read it. The value is what is stored.
+     * @param  string|null  $currency  money: an ISO 4217 code, "UGX". The app's (nevela.currency) unless set.
      */
     public function __construct(
         public readonly string $name,
@@ -61,6 +63,8 @@ final class Field
         public readonly bool $private = false,
         public readonly string|int|float|bool|null $default = null,
         public readonly ?string $from = null,
+        public readonly array $optionLabels = [],
+        public readonly ?string $currency = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -83,6 +87,27 @@ final class Field
         foreach ($options as $option) {
             if (! preg_match('/^[A-Za-z0-9_-]+$/', $option)) {
                 throw new InvalidArgumentException("Enum value \"{$option}\" on \"{$name}\" may only use letters, digits, _ and -.");
+            }
+        }
+        if ($optionLabels !== []) {
+            if ($kind !== 'enum') {
+                throw new InvalidArgumentException("\"{$name}\" can't have option labels: they are for an enum field's values.");
+            }
+            foreach ($optionLabels as $value => $text) {
+                if (! in_array((string) $value, $options, true)) {
+                    throw new InvalidArgumentException("\"{$name}\" has a label for \"{$value}\", which is not one of its values: ".implode(', ', $options).'.');
+                }
+                if (! is_string($text) || trim($text) === '' || mb_strlen($text) > 255) {
+                    throw new InvalidArgumentException("The label for \"{$value}\" on \"{$name}\" has to be some words, at most 255 characters.");
+                }
+            }
+        }
+        if ($currency !== null) {
+            if ($kind !== 'float' || $format !== 'money') {
+                throw new InvalidArgumentException("\"{$name}\" can't have a currency: that is for a money field ({$name}:money).");
+            }
+            if (! self::isCurrency($currency)) {
+                throw new InvalidArgumentException("\"{$currency}\" on \"{$name}\" is not a currency. Use its three-letter ISO 4217 code, in capitals: UGX, USD, EUR.");
             }
         }
         if ($kind === 'belongsTo') {
@@ -149,6 +174,7 @@ final class Field
      *   manual:file(pdf|document)         any other upload
      *   cv:file(pdf|private)              one only those who may view the record can fetch
      *   status:enum(pending|paid)=pending what it is when a create leaves it out
+     *   timeline:enum(asap=As soon as possible|month=Within a month)   what each value is called
      *   slug:slug(title)!                 made from the title when left empty
      *
      * Grit's and Flare's spellings are understood too: see normalise().
@@ -158,7 +184,9 @@ final class Field
         $written = trim($token);
         // status:enum(pending|paid)=pending: what the field is when a create leaves it out.
         $default = null;
-        if (($at = strpos($written, '=')) !== false) {
+        // The default comes after the type, so an "=" inside its brackets (a value's label) isn't it.
+        $close = strrpos($written, ')');
+        if (($at = strpos($written, '=', $close === false ? 0 : $close)) !== false) {
             $default = trim(substr($written, $at + 1));
             $written = rtrim(substr($written, 0, $at));
         }
@@ -188,7 +216,17 @@ final class Field
         $list = array_values(array_filter(array_map('trim', explode('|', $args)), fn ($v) => $v !== ''));
 
         if ($type === 'enum') {
-            return new self($name, 'enum', null, $required, $unique, $list);
+            $values = [];
+            $labels = [];
+            foreach ($list as $item) {
+                [$value, $text] = array_pad(array_map('trim', explode('=', $item, 2)), 2, null);
+                $values[] = $value;
+                if ($text !== null && $text !== '') {
+                    $labels[$value] = $text;
+                }
+            }
+
+            return new self($name, 'enum', null, $required, $unique, $values, optionLabels: $labels);
         }
         if (in_array($type, ['belongsTo', 'belongs_to', 'belongsto'], true)) {
             // "category" and "categoryId" both mean the column category_id.
@@ -261,6 +299,8 @@ final class Field
             (bool) ($data['private'] ?? false),
             $data['default'] ?? null,
             $data['from'] ?? null,
+            array_map('strval', (array) ($data['optionLabels'] ?? [])),
+            $data['currency'] ?? null,
         );
     }
 
@@ -271,6 +311,8 @@ final class Field
             'kind' => $this->kind,
             'format' => $this->format,
             'options' => $this->options ?: null,
+            'optionLabels' => $this->optionLabels ?: null,
+            'currency' => $this->currency,
             'target' => $this->target,
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,
@@ -293,6 +335,30 @@ final class Field
     {
         // "categoryId" reads as "Category", which is what the picker shows.
         return $this->label ?? Naming::humanize($this->kind === 'belongsTo' ? substr($this->name, 0, -2) : $this->name);
+    }
+
+    /**
+     * What an enum value is called where people read it: its label, or the value made
+     * readable as the dashboard does it ("on_hold" → "On hold"). An app's emails and PDFs
+     * say the same words as its dashboard this way.
+     */
+    public function optionLabel(?string $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+        if (isset($this->optionLabels[$value])) {
+            return $this->optionLabels[$value];
+        }
+        $words = trim((string) preg_replace('/[_-]+/', ' ', $value));
+
+        return $words === '' ? $value : mb_strtoupper(mb_substr($words, 0, 1)).mb_substr($words, 1);
+    }
+
+    /** Whether a string is a currency's code as ISO 4217 writes it: three capital letters. */
+    public static function isCurrency(mixed $code): bool
+    {
+        return is_string($code) && preg_match('/^[A-Z]{3}$/', $code) === 1;
     }
 
     /** belongsTo: the name of the relation on the model, e.g. "category" for categoryId. */

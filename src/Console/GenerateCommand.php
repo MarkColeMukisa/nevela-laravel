@@ -118,7 +118,14 @@ final class GenerateCommand extends Command
     /** @param list<Descriptor> $targets @param list<Descriptor> $all */
     public static function generate(Command $command, array $targets, array $all, bool $force): int
     {
-        $generator = new ResourceGenerator;
+        try {
+            // A money field that names no currency is shown in the app's.
+            $generator = new ResourceGenerator(config('nevela.currency') ?: null);
+        } catch (InvalidArgumentException $e) {
+            $command->components->error($e->getMessage());
+
+            return self::FAILURE;
+        }
         $byName = [];
         foreach ($all as $descriptor) {
             $byName[$descriptor->name] = $descriptor;

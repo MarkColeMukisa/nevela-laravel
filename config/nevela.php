@@ -142,6 +142,14 @@ return [
         'issuer' => null,
     ],
 
+    /*
+    | The currency money is shown in, as its ISO 4217 code: "UGX", "USD". A money field
+    | can name its own ("currency": "EUR"). Shown with the currency's own decimals, so
+    | UGX 4,500,000 and $4,500,000.00. Unset, money looks as it always has. Run
+    | `php nevela generate` after changing it.
+    */
+    'currency' => env('NEVELA_CURRENCY'),
+
     /* List defaults, matching Flare's client. */
     'per_page' => 25,
     'max_per_page' => 100,

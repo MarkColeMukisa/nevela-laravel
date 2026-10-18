@@ -126,7 +126,7 @@ final class AdoptCommand extends Command
             $roots[GeneratedFile::TARGET_WEB] = $web;
         }
         $taken = [];
-        foreach ((new ResourceGenerator)->forResource($descriptor, null, $all) as $file) {
+        foreach ((new ResourceGenerator(config('nevela.currency') ?: null))->forResource($descriptor, null, $all) as $file) {
             $root = $roots[$file->target] ?? null;
             $absolute = $root === null ? null : rtrim($root, '/\\').DIRECTORY_SEPARATOR.$file->path;
             if ($file->mode === GeneratedFile::MODE_BLOCK && $absolute !== null && is_file($absolute) && Writer::block((string) file_get_contents($absolute)) === null) {
