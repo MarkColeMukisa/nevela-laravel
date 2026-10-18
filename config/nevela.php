@@ -54,6 +54,31 @@ return [
         */
         'registration' => (bool) env('NEVELA_REGISTRATION', false),
 
+        /*
+        | Signing in with Google or GitHub (Laravel Socialite). SOCIAL_AUTH_ENABLED is the
+        | switch for the whole app: off, no button shows and the routes refuse. On, a provider
+        | shows once its two keys are set. The dashboard asks on every page, so the switch
+        | needs no rebuild, only `php artisan config:clear` where the config is cached.
+        |
+        | Give the provider this address to send people back to:
+        |     {NEVELA_WEB_URL}/api/auth/oauth/{provider}/callback
+        |
+        | Who may come in follows `registration`. Off: only someone with an account, found by
+        | the provider account connected to it or by an address the provider says is
+        | verified. On: anyone, and a new account is made for a new address.
+        */
+        'social' => [
+            'enabled' => (bool) env('SOCIAL_AUTH_ENABLED', false),
+            'google' => [
+                'client_id' => env('GOOGLE_CLIENT_ID'),
+                'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+            ],
+            'github' => [
+                'client_id' => env('GITHUB_CLIENT_ID'),
+                'client_secret' => env('GITHUB_CLIENT_SECRET'),
+            ],
+        ],
+
         /* A sign-in link by email. */
         'magic_link' => true,
 

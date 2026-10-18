@@ -447,7 +447,10 @@ final class ResourceGenerator
           checkBreachedPasswords: {$flag('check_breached_passwords')},
           /** People can close their own account, from the Account page. */
           closeAccount: {$flag('close_account')},
-          /** Signing in with Google, GitHub and the like isn't part of Nevela yet. */
+          /**
+           * Always empty here. Which of Google and GitHub show is asked of Laravel on each
+           * page, so SOCIAL_AUTH_ENABLED needs no generate or rebuild: see lib/social.ts.
+           */
           social: [] as SocialProvider[],
         };
         {$e}
@@ -455,7 +458,10 @@ final class ResourceGenerator
         /** Whether any second factor can be set up. */
         export const twoFactorAvailable = authConfig.twoFactor.authenticator || authConfig.twoFactor.email;
 
-        /** The social providers that are switched on and configured. None yet. */
+        /**
+         * @deprecated Kept so a page written before 0.10 still builds. It shows no providers:
+         * use `enabledSocialProviders` from "@/lib/social", which asks Laravel.
+         */
         export function enabledSocialProviders(): SocialProvider[] {
           return authConfig.social;
         }

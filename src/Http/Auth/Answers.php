@@ -10,9 +10,10 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 /** What the auth controllers share: how they refuse, and how they check a setting or a password. */
 trait Answers
 {
-    private function refuse(string $code, string $message, int $status = 400): JsonResponse
+    /** @param array<string, mixed> $more Anything else the client needs with it, such as where to go next */
+    private function refuse(string $code, string $message, int $status = 400, array $more = []): JsonResponse
     {
-        return response()->json(['error' => $message, 'code' => $code], $status);
+        return response()->json(['error' => $message, 'code' => $code] + $more, $status);
     }
 
     /** A method switched off in config/nevela.php is refused, not just hidden. */

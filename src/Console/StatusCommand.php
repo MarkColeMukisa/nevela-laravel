@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\ClosedAccounts;
+use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
@@ -107,6 +108,17 @@ final class StatusCommand extends Command
                 FormGuard::secret() === '' => "<fg=yellow>skipped: TURNSTILE_SECRET_KEY is not set, so nothing checks {$forms}. Set it before going live.</>",
                 default => $bad("no site to accept a check from, so the form for {$forms} answers 503 to everyone: set NEVELA_WEB_URL to the site's address, or TURNSTILE_HOSTNAMES"),
             });
+        }
+
+        // --- social sign-in ---
+        if (Social::enabled()) {
+            $missing = array_values(array_filter(array_keys(Social::PROVIDERS), fn (string $provider) => ! Social::configured($provider)));
+            $row('Social sign-in', Social::available() === []
+                ? '<fg=yellow>switched on, and no provider has its keys: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or GitHub\'s</>'
+                : 'on: '.implode(', ', array_map(fn (string $provider) => Social::LABELS[$provider], Social::available()))
+                    .($missing === [] ? '' : ' <fg=gray>('.implode(', ', array_map(fn (string $provider) => Social::LABELS[$provider], $missing)).' has no keys)</>'));
+        } else {
+            $row('Social sign-in', '<fg=gray>off (SOCIAL_AUTH_ENABLED)</>');
         }
 
         // --- dashboard ---

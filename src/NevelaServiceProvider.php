@@ -36,6 +36,7 @@ use Nevela\Laravel\Http\FormsController;
 use Nevela\Laravel\Http\Auth\AccountController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
+use Nevela\Laravel\Http\Auth\SocialController;
 use Nevela\Laravel\Http\PublicThrottle;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
@@ -139,6 +140,9 @@ final class NevelaServiceProvider extends ServiceProvider
                     Route::post('email-code/verify', [SignInController::class, 'code'])->name('email-code.verify');
                     Route::post('passkey/options', [SignInController::class, 'passkeyOptions'])->name('passkey.options');
                     Route::post('passkey', [SignInController::class, 'passkey'])->name('passkey.verify');
+                    // Google and GitHub: called by the dashboard's server, on the way out and on the way back.
+                    Route::post('oauth/{provider}/start', [SocialController::class, 'start'])->name('oauth.start');
+                    Route::post('oauth/{provider}/callback', [SocialController::class, 'callback'])->name('oauth.callback');
                     Route::post('register', [AccountController::class, 'register'])->name('register');
                     Route::post('email/send', [AccountController::class, 'resendVerification'])->name('email.send');
                     Route::post('email/verify', [AccountController::class, 'verifyEmail'])->name('email.verify');
@@ -164,6 +168,9 @@ final class NevelaServiceProvider extends ServiceProvider
                         Route::post('two-factor/disable', [SecurityController::class, 'disable'])->name('two-factor.disable');
                         Route::post('two-factor/backup-codes', [SecurityController::class, 'regenerateBackupCodes'])->name('two-factor.backup-codes');
                     });
+
+                    Route::get('social', [SocialController::class, 'accounts'])->name('social');
+                    Route::delete('social/{id}', [SocialController::class, 'disconnect'])->name('social.disconnect');
 
                     Route::get('passkeys', [SecurityController::class, 'passkeys'])->name('passkeys');
                     Route::post('passkeys/options', [SecurityController::class, 'passkeyOptions'])->name('passkeys.options');

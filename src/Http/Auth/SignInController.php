@@ -11,6 +11,7 @@ use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Passkeys;
+use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Models\TwoFactor;
 use RuntimeException;
@@ -51,6 +52,8 @@ final class SignInController
             ],
             'requireEmailVerification' => (bool) config('nevela.auth.require_email_verification', false),
             'closeAccount' => (bool) config('nevela.auth.close_account', true),
+            // Switched on, and with their keys: the buttons to draw.
+            'social' => Social::available(),
         ];
     }
 
