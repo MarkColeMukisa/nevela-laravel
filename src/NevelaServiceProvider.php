@@ -10,6 +10,7 @@ use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -108,6 +109,13 @@ final class NevelaServiceProvider extends ServiceProvider
             }
         });
 
+        // Octane and queue workers keep one app for many requests and jobs, where PHP-FPM
+        // starts each request afresh. What Nevela keeps for one request is let go of at the
+        // start of the next. (Octane's events are named, not imported: it may not be installed.)
+        Event::listen([
+            'Laravel\Octane\Events\RequestReceived', 'Laravel\Octane\Events\TaskReceived', 'Laravel\Octane\Events\TickReceived', JobProcessing::class,
+        ], fn () => self::newRequest());
+
         // An ability shaped like a permission ("products.view") is answered from the
         // person's roles. So `$user->can('products.view')`, `Gate::authorize(...)` and
         // `@can` all work, in a policy or anywhere else. Any other ability is left to
@@ -124,6 +132,18 @@ final class NevelaServiceProvider extends ServiceProvider
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
         }
+    }
+
+    /**
+     * What a new request starts without, in a process that served one before: whose roles
+     * grant what, the uploads looked up for a page, and which tables and columns are there
+     * (read again from bootstrap/cache, which another process may have cleared).
+     */
+    public static function newRequest(): void
+    {
+        Access::forget();
+        Uploads::forget();
+        SchemaFacts::refresh();
     }
 
     /**

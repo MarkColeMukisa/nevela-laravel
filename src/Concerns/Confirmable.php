@@ -3,7 +3,7 @@
 namespace Nevela\Laravel\Concerns;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Schema;
+use Nevela\Laravel\Support\SchemaFacts;
 
 /**
  * A model whose records hold an address that has to be proved: a list people join.
@@ -24,23 +24,18 @@ use Illuminate\Support\Facades\Schema;
  */
 trait Confirmable
 {
-    /** Whether this model's table has the column. Only "yes" is remembered: it can arrive later in a process. */
-    private static bool $hasConfirmation = false;
-
+    /** Whether this model's table has the column. Only "yes" is remembered (by SchemaFacts): it can arrive at any time. */
     public static function confirms(): bool
     {
-        if (static::$hasConfirmation) {
-            return true;
-        }
         $model = new static;
 
-        return static::$hasConfirmation = Schema::connection($model->getConnectionName())->hasColumn($model->getTable(), 'confirmed_at');
+        return SchemaFacts::hasColumn($model->getTable(), 'confirmed_at', $model->getConnectionName());
     }
 
     /** Ask the database again next time. For a test that adds the column within one process. */
     public static function forgetConfirmation(): void
     {
-        static::$hasConfirmation = false;
+        SchemaFacts::forget();
     }
 
     public static function bootConfirmable(): void

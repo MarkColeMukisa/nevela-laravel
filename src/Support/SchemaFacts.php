@@ -54,6 +54,18 @@ final class SchemaFacts
         });
     }
 
+    /**
+     * A new request in a process that outlives one (Octane, a queue worker): read the file
+     * again before the next question, as PHP-FPM does by starting afresh. Another process
+     * may have forgotten since: a migration run from the deploy script.
+     */
+    public static function refresh(): void
+    {
+        if (self::persists()) {
+            self::$known = null;
+        }
+    }
+
     public static function path(): string
     {
         return app()->bootstrapPath('cache/nevela-schema.json');
