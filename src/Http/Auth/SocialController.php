@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
@@ -16,6 +15,7 @@ use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Support\Key;
+use Nevela\Laravel\Support\SchemaFacts;
 use Throwable;
 
 /**
@@ -137,7 +137,7 @@ final class SocialController
     /** GET auth/social: the providers connected to the signed-in account. */
     public function accounts(Request $request): JsonResponse
     {
-        if (! Schema::hasTable(self::TABLE)) {
+        if (! SchemaFacts::hasTable(self::TABLE)) {
             return response()->json(['data' => []]);
         }
         $rows = DB::table(self::TABLE)->where('user_id', (string) $request->user()->getAuthIdentifier())->orderBy('created_at')->get();
@@ -156,7 +156,7 @@ final class SocialController
      */
     public function disconnect(Request $request, string $id): Response
     {
-        if (Key::isUuid($id) && Schema::hasTable(self::TABLE)) {
+        if (Key::isUuid($id) && SchemaFacts::hasTable(self::TABLE)) {
             DB::table(self::TABLE)->where('id', $id)->where('user_id', (string) $request->user()->getAuthIdentifier())->delete();
         }
 
@@ -174,7 +174,7 @@ final class SocialController
     /** The account a provider's account is connected to. */
     private function linked(string $provider, string $providerId): mixed
     {
-        if (! Schema::hasTable(self::TABLE)) {
+        if (! SchemaFacts::hasTable(self::TABLE)) {
             return null;
         }
         $row = DB::table(self::TABLE)->where('provider', $provider)->where('provider_id', $providerId)->first();
@@ -198,7 +198,7 @@ final class SocialController
      */
     private function link(string $provider, array $profile, mixed $user): bool
     {
-        if (! Schema::hasTable(self::TABLE)) {
+        if (! SchemaFacts::hasTable(self::TABLE)) {
             return true; // not migrated yet: matched by address every time until it is
         }
         $id = (string) $user->getAuthIdentifier();
@@ -272,7 +272,7 @@ final class SocialController
             'email_verified_at' => now(),
         ];
         $role = config('nevela.auth.default_role', 'USER');
-        if ($role !== null && Schema::hasColumn($user->getTable(), 'role')) {
+        if ($role !== null && SchemaFacts::hasColumn($user->getTable(), 'role')) {
             $attributes['role'] = $role;
         }
         $user->forceFill($attributes)->save();

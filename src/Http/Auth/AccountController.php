@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
@@ -22,6 +21,7 @@ use Nevela\Laravel\Rules\UploadKey;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Key;
+use Nevela\Laravel\Support\SchemaFacts;
 
 /**
  * An account and what its owner can do with it: create it, prove the email address,
@@ -63,7 +63,7 @@ final class AccountController
         $user = new $model;
         $attributes = ['name' => $input['name'], 'email' => mb_strtolower(trim($input['email'])), 'password' => Hash::make($input['password'])];
         $role = config('nevela.auth.default_role', 'USER');
-        if ($role !== null && Schema::hasColumn($user->getTable(), 'role')) {
+        if ($role !== null && SchemaFacts::hasColumn($user->getTable(), 'role')) {
             $attributes['role'] = $role;
         }
         $user->forceFill($attributes)->save();
@@ -146,7 +146,7 @@ final class AccountController
                 return $this->refuse('INVALID_AVATAR', 'Upload the picture again.', 422);
             }
         }
-        if (array_key_exists('avatar', $input) && ! Schema::hasColumn($user->getTable(), 'avatar')) {
+        if (array_key_exists('avatar', $input) && ! SchemaFacts::hasColumn($user->getTable(), 'avatar')) {
             return $this->refuse('MIGRATION_NEEDED', 'Profile pictures need a migration that has not been run: php artisan migrate', 409);
         }
         $user->forceFill($input)->save();
@@ -162,7 +162,7 @@ final class AccountController
     public function avatar(Request $request): JsonResponse
     {
         $user = $request->user();
-        if (! Schema::hasColumn($user->getTable(), 'avatar')) {
+        if (! SchemaFacts::hasColumn($user->getTable(), 'avatar')) {
             return $this->refuse('MIGRATION_NEEDED', 'Profile pictures need a migration that has not been run: php artisan migrate', 409);
         }
         $field = new Field('avatar', 'file', required: false, accept: ['image'], profile: 'avatar');
@@ -259,7 +259,7 @@ final class AccountController
     {
         $user = $request->user();
         $current = $user->currentAccessToken()?->getKey();
-        $tracked = Schema::hasColumn('personal_access_tokens', 'user_agent');
+        $tracked = SchemaFacts::hasColumn('personal_access_tokens', 'user_agent');
         $rows = DB::table('personal_access_tokens')
             ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
             ->orderByDesc('last_used_at')->orderByDesc('created_at')->get();

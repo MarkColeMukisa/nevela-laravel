@@ -4,10 +4,10 @@ namespace Nevela\Laravel\Access;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Support\Key;
+use Nevela\Laravel\Support\SchemaFacts;
 
 /**
  * Accounts that were closed, and the emails that may not have a new one.
@@ -25,30 +25,25 @@ final class ClosedAccounts
 {
     public const BLOCKED = 'nevela_blocked_emails';
 
-    private static bool $ready = false;
-
     /**
      * Whether the app has run the migration this needs. Until it has, deleting a user
      * removes them as it always did, and nothing here is offered.
      */
     public static function ready(): bool
     {
-        if (self::$ready) {
-            return true;
-        }
         $model = Account::model();
         if (! class_exists($model)) {
             return false;
         }
 
-        // Only "yes" is remembered: the column can arrive later in the same process.
-        return self::$ready = Schema::hasTable(self::BLOCKED) && Schema::hasColumn((new $model)->getTable(), 'closed_at');
+        // Only "yes" is remembered, across requests: the column can arrive at any time.
+        return SchemaFacts::hasTable(self::BLOCKED) && SchemaFacts::hasColumn((new $model)->getTable(), 'closed_at');
     }
 
     /** For tests that add and drop the tables within one process. */
     public static function reset(): void
     {
-        self::$ready = false;
+        SchemaFacts::forget();
     }
 
     public static function isClosed(mixed $user): bool
@@ -196,7 +191,7 @@ final class ClosedAccounts
             Account::revokeTokens($user);
             DB::table('nevela_role_user')->where('user_id', $key)->delete();
             foreach (['nevela_two_factor', 'nevela_passkeys', 'nevela_social_accounts'] as $table) {
-                if (Schema::hasTable($table)) {
+                if (SchemaFacts::hasTable($table)) {
                     DB::table($table)->where('user_id', $key)->delete();
                 }
             }

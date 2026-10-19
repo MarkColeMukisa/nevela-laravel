@@ -9,7 +9,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
@@ -20,6 +19,7 @@ use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Support\Key;
+use Nevela\Laravel\Support\SchemaFacts;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -65,7 +65,7 @@ final class UsersController
             // Read as a list first: the link table keeps ids as text, whatever type they are here.
             $query->whereIn($instance->getKeyName(), DB::table('nevela_role_user')->where('role_id', $input['role'])->pluck('user_id')->all());
         }
-        if (isset($input['status']) && Schema::hasColumn($instance->getTable(), 'active')) {
+        if (isset($input['status']) && SchemaFacts::hasColumn($instance->getTable(), 'active')) {
             $query->where('active', $input['status'] === 'active');
         }
 
@@ -115,7 +115,7 @@ final class UsersController
         }
 
         $attributes = ['name' => $input['name'], 'email' => mb_strtolower(trim($input['email'])), 'password' => Hash::make($input['password'])];
-        if (Schema::hasColumn($user->getTable(), 'active')) {
+        if (SchemaFacts::hasColumn($user->getTable(), 'active')) {
             $attributes['active'] = (bool) ($input['active'] ?? true);
         }
         // The address is as typed by whoever is adding them. It becomes "verified" when its
@@ -182,7 +182,7 @@ final class UsersController
         if (isset($input['password'])) {
             $attributes['password'] = Hash::make($input['password']);
         }
-        if (array_key_exists('active', $input) && Schema::hasColumn($user->getTable(), 'active')) {
+        if (array_key_exists('active', $input) && SchemaFacts::hasColumn($user->getTable(), 'active')) {
             $attributes['active'] = (bool) $input['active'];
         }
         if ($attributes !== []) {
@@ -325,7 +325,7 @@ final class UsersController
                 $held[$link->user_id][] = $role;
             }
         }
-        $secondStep = Schema::hasTable('nevela_two_factor')
+        $secondStep = SchemaFacts::hasTable('nevela_two_factor')
             ? DB::table('nevela_two_factor')->whereIn('user_id', $ids)->whereNotNull('enabled_at')->pluck('user_id')->flip()
             : collect();
         $first = $users->first();

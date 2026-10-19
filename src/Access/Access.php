@@ -3,9 +3,9 @@
 namespace Nevela\Laravel\Access;
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Models\Role;
+use Nevela\Laravel\Support\SchemaFacts;
 use WeakMap;
 
 /**
@@ -20,16 +20,14 @@ final class Access
     /** @var WeakMap<object, list<string>>|null Grants per user object, so a request asks the database once. */
     private static ?WeakMap $grants = null;
 
-    private static bool $ready = false;
-
     /**
      * Whether the roles tables exist. Before an upgraded app has run its migrations they
      * don't, and until then everyone may do everything, as they could before.
      */
     public static function ready(): bool
     {
-        // Only "yes" is remembered: the tables can appear later in the same process.
-        return self::$ready = self::$ready || Schema::hasTable('nevela_roles');
+        // Only "yes" is remembered, across requests: the tables can appear at any time.
+        return SchemaFacts::hasTable('nevela_roles');
     }
 
     /**
@@ -139,7 +137,7 @@ final class Access
         $instance = new $model;
         $table = $instance->getTable();
         $key = $instance->getKeyName();
-        $hasActive = Schema::hasColumn($table, 'active');
+        $hasActive = SchemaFacts::hasColumn($table, 'active');
 
         $all = Role::query()->get()->filter(fn (Role $role) => Permissions::hasAll($role->grants))->pluck('id')->all();
         $ids = DB::table('nevela_role_user')->whereIn('role_id', $all)->distinct()->pluck('user_id')->all();
@@ -163,6 +161,6 @@ final class Access
     public static function reset(): void
     {
         self::$grants = null;
-        self::$ready = false;
+        SchemaFacts::forget();
     }
 }

@@ -3,8 +3,8 @@
 namespace Nevela\Laravel\Forms;
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Nevela\Laravel\Support\SchemaFacts;
 use Throwable;
 
 /**
@@ -55,7 +55,7 @@ final class FormBlocks
     {
         $reasons = [];
         try {
-            if (Schema::hasTable(self::TABLE)) {
+            if (SchemaFacts::hasTable(self::TABLE)) {
                 $rows = DB::table(self::TABLE)
                     ->where('resource', $resource)
                     ->where('day', '>', now()->subDays($days)->toDateString())

@@ -3,10 +3,10 @@
 namespace Nevela\Laravel\Concerns;
 
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\SchemaFacts;
 use Nevela\Laravel\Trash\TrashedScope;
 
 /**
@@ -37,15 +37,16 @@ trait Trashable
         }
         $model = new static;
 
-        // The column can arrive later in the same process (a migration run from a command),
-        // so "no" is asked again and "yes" is kept.
-        return static::$hasTrash = Schema::connection($model->getConnectionName())->hasColumn($model->getTable(), $model->getDeletedAtColumn());
+        // The column can arrive at any time (a migration), so "no" is asked again and "yes"
+        // is kept: here for this request, and in SchemaFacts for the ones after it.
+        return static::$hasTrash = SchemaFacts::hasColumn($model->getTable(), $model->getDeletedAtColumn(), $model->getConnectionName());
     }
 
     /** Ask the database again next time. For a test that adds or drops the column within one process. */
     public static function forgetTrash(): void
     {
         static::$hasTrash = false;
+        SchemaFacts::forget();
     }
 
     /** In place of SoftDeletes' own: the same scope, applied only where there is a trash. */

@@ -4,9 +4,13 @@ namespace Nevela\Laravel;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Events\MigrationsEnded;
+use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -43,6 +47,7 @@ use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Support\SchemaFacts;
 
 final class NevelaServiceProvider extends ServiceProvider
 {
@@ -84,6 +89,17 @@ final class NevelaServiceProvider extends ServiceProvider
         $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
             if (method_exists($handler, 'renderable')) {
                 $handler->renderable(fn (\Throwable $e, $request) => FlareErrors::render($e, $request));
+            }
+        });
+
+        // Which tables and columns are there is remembered across requests (SchemaFacts).
+        // Migrations change that, so it is forgotten when they start and again when they
+        // end: a request in between may have found something the next migration removes.
+        // `optimize:clear` forgets it too, for a table or column removed some other way.
+        Event::listen([MigrationsStarted::class, MigrationsEnded::class], fn () => SchemaFacts::forget());
+        Event::listen(CommandStarting::class, function (CommandStarting $event) {
+            if ($event->command === 'optimize:clear') {
+                SchemaFacts::forget();
             }
         });
 

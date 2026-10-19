@@ -5,13 +5,13 @@ namespace Nevela\Laravel\Auth;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rules\Password;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\TwoFactor;
+use Nevela\Laravel\Support\SchemaFacts;
 use RuntimeException;
 
 /**
@@ -99,7 +99,7 @@ final class Account
      */
     private static function remember(mixed $tokenId, Request $request): void
     {
-        if (! Schema::hasColumn('personal_access_tokens', 'user_agent')) {
+        if (! SchemaFacts::hasColumn('personal_access_tokens', 'user_agent')) {
             return; // the migration hasn't been run yet; signing in still works
         }
         $dashboard = self::fromDashboard($request);
