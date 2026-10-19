@@ -45,9 +45,13 @@ final class SchemaFacts
     public static function forget(): void
     {
         self::$known = [];
-        if (is_file($path = self::path())) {
-            @unlink($path);
-        }
+        // Under the lock a write takes, so a write that read the file before this can't
+        // put back afterwards what was just forgotten.
+        self::locked(function () {
+            if (is_file($path = self::path())) {
+                @unlink($path);
+            }
+        });
     }
 
     public static function path(): string
@@ -59,8 +63,9 @@ final class SchemaFacts
     private static function knows(?string $connection, string $fact, callable $ask): bool
     {
         $db = DB::connection($connection);
-        // The connection and its database, so two databases (or a test's) never share an answer.
-        $key = $db->getName().':'.$db->getDatabaseName().':'.$fact;
+        // The connection, its database and its table prefix: the same name in two databases
+        // (or a test's), or under another prefix, is another table, and never shares an answer.
+        $key = $db->getName().':'.$db->getDatabaseName().':'.$db->getTablePrefix().$fact;
 
         self::$known ??= self::read();
         if (isset(self::$known[$key])) {
@@ -86,10 +91,7 @@ final class SchemaFacts
         return is_array($facts) ? array_fill_keys(array_filter(array_keys($facts), 'is_string'), true) : [];
     }
 
-    /**
-     * Add one yes to the file. Two requests writing at once can lose one of the two; the
-     * one that is lost is asked again by a later request. Nothing wrong is ever written.
-     */
+    /** Add one yes to the file, with what is in it now (not what this process read earlier). */
     private static function write(string $key): void
     {
         if (! self::persists()) {
@@ -99,14 +101,35 @@ final class SchemaFacts
         if (! is_dir(dirname($path)) || ! is_writable(dirname($path))) {
             return;
         }
-        $facts = [...self::read(), $key => true];
-        ksort($facts);
-        $temporary = $path.'.'.bin2hex(random_bytes(4)).'.tmp';
-        if (@file_put_contents($temporary, json_encode($facts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n") === false) {
+        // Read, add and replace under one lock, which forget() takes too.
+        self::locked(function () use ($path, $key) {
+            $facts = [...self::read(), $key => true];
+            ksort($facts);
+            $temporary = $path.'.'.bin2hex(random_bytes(4)).'.tmp';
+            if (@file_put_contents($temporary, json_encode($facts, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)."\n") === false) {
+                return;
+            }
+            if (! @rename($temporary, $path)) {
+                @unlink($temporary);
+            }
+        });
+    }
+
+    /** Run $then holding the file's lock, or without one where there is no file to keep. */
+    private static function locked(callable $then): void
+    {
+        $handle = self::persists() ? @fopen(self::path().'.lock', 'c') : false;
+        if ($handle === false) {
+            $then();
+
             return;
         }
-        if (! @rename($temporary, $path)) {
-            @unlink($temporary);
+        try {
+            flock($handle, LOCK_EX);
+            $then();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
         }
     }
 

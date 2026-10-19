@@ -27,25 +27,22 @@ trait Trashable
 {
     use SoftDeletes;
 
-    /** Whether this model's table has somewhere to keep a deleted record. Only "yes" is remembered. */
-    private static bool $hasTrash = false;
-
+    /**
+     * Whether this model's table has somewhere to keep a deleted record. The column can
+     * arrive at any time (a migration), so "no" is asked again and "yes" is kept, by
+     * SchemaFacts alone: a copy here would outlive SchemaFacts being told to forget, in a
+     * process that runs for long (a queue worker).
+     */
     public static function trashes(): bool
     {
-        if (static::$hasTrash) {
-            return true;
-        }
         $model = new static;
 
-        // The column can arrive at any time (a migration), so "no" is asked again and "yes"
-        // is kept: here for this request, and in SchemaFacts for the ones after it.
-        return static::$hasTrash = SchemaFacts::hasColumn($model->getTable(), $model->getDeletedAtColumn(), $model->getConnectionName());
+        return SchemaFacts::hasColumn($model->getTable(), $model->getDeletedAtColumn(), $model->getConnectionName());
     }
 
     /** Ask the database again next time. For a test that adds or drops the column within one process. */
     public static function forgetTrash(): void
     {
-        static::$hasTrash = false;
         SchemaFacts::forget();
     }
 

@@ -188,6 +188,25 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Whether a table has a trash, for validation. SchemaFacts keeps a yes; a no is kept
+     * here, for this request only, because an import checks every one of its rows against
+     * the same tables and would otherwise ask the database again for each.
+     */
+    private static function hasTrash(string $table): bool
+    {
+        $without = request()->attributes->get('nevela.without-trash', []);
+        if (isset($without[$table])) {
+            return false;
+        }
+        if (SchemaFacts::hasColumn($table, 'deleted_at')) {
+            return true;
+        }
+        request()->attributes->set('nevela.without-trash', [...$without, $table => true]);
+
+        return false;
+    }
+
+    /**
      * A relation points at a record that is there, and one in the trash is not: nothing
      * lists it and its own page answers 404. Laravel's exists rule looks at the table,
      * where a deleted record still is, so it is told to leave those out.
@@ -204,7 +223,7 @@ abstract class ResourceRequest extends FormRequest
                 }
                 // "exists:categories,id": the rule keeps its table to itself.
                 $table = (string) strtok(substr((string) $rule, strlen('exists:')), ',');
-                if (SchemaFacts::hasColumn($table, 'deleted_at')) {
+                if (self::hasTrash($table)) {
                     $rule->withoutTrashed();
                 }
             }
@@ -231,7 +250,7 @@ abstract class ResourceRequest extends FormRequest
             if (! is_string($table) || ! is_string($column) || ! is_scalar($value) || $column === 'NULL') {
                 continue;
             }
-            if (! SchemaFacts::hasColumn($table, 'deleted_at') || ! DB::table($table)->where($column, $value)->whereNotNull('deleted_at')->exists()) {
+            if (! self::hasTrash($table) || ! DB::table($table)->where($column, $value)->whereNotNull('deleted_at')->exists()) {
                 continue;
             }
             $message = 'This belongs to a record in the trash. Restore that record, or delete it for good to use the value again.';
@@ -243,7 +262,7 @@ abstract class ResourceRequest extends FormRequest
             // And for a failed exists rule: the table and the column, then what else it asked.
             [$table, $column] = array_pad($rules['Exists'] ?? [], 2, null);
             $value = $data[$field] ?? null;
-            if (! is_string($table) || ! is_string($column) || ! is_scalar($value) || ! SchemaFacts::hasColumn($table, 'deleted_at')) {
+            if (! is_string($table) || ! is_string($column) || ! is_scalar($value) || ! self::hasTrash($table)) {
                 continue;
             }
             try {
