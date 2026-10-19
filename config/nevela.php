@@ -47,6 +47,32 @@ return [
         'token_name' => 'nevela-web',
 
         /*
+        | How long a sign-in lasts, as Grit has it. A sign-in is a session: the dashboard
+        | holds a short access token and a refresh token, and swaps the refresh token for a
+        | new pair before the access token runs out. Someone working is never interrupted;
+        | a sign-in nobody uses ends; and none lasts forever. In minutes; null for no limit.
+        |
+        | - access: how long one access token works. A sign-out takes effect within this
+        |   long on another server's copy of a token, and at once on this one.
+        | - idle: unused this long (no refresh), a sign-in ends. The refresh token lasts this long.
+        | - absolute: however busy, a sign-in ends this long after it began.
+        |
+        | A refresh token is swapped for a new one every time it is used, and an old one
+        | presented again is taken as stolen: that sign-in ends on every device holding it.
+        | Except within `reuse_seconds` of the swap, when it is a second request that set out
+        | with the same token at the same moment, and is given an access token only.
+        |
+        | Tokens your own code makes with createToken() keep to idle and absolute too,
+        | measured from their last use and their creation.
+        */
+        'session' => [
+            'access' => env('NEVELA_SESSION_ACCESS', 15),
+            'idle' => env('NEVELA_SESSION_IDLE', 60 * 24 * 7),
+            'absolute' => env('NEVELA_SESSION_ABSOLUTE', 60 * 24 * 30),
+            'reuse_seconds' => 60,
+        ],
+
+        /*
         | Let anyone create their own account at /sign-up. Off by default, and accounts come
         | from `php nevela user`: a generated policy lets every signed-in user do everything
         | until you tighten it, so open sign-up on an untouched app would hand the dashboard

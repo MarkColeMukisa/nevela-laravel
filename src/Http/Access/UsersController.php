@@ -15,6 +15,7 @@ use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Role;
@@ -329,10 +330,24 @@ final class UsersController
             ? DB::table('nevela_two_factor')->whereIn('user_id', $ids)->whereNotNull('enabled_at')->pluck('user_id')->flip()
             : collect();
         $first = $users->first();
-        $devices = DB::table('personal_access_tokens')
+        // A device is a sign-in that hasn't ended, or a token that belongs to none (from
+        // before sign-ins ended, or made by the app's own code) that is still accepted.
+        $devices = Sessions::devices(array_map('strval', $ids));
+        $tokens = DB::table('personal_access_tokens')
             ->where('tokenable_type', $first->getMorphClass())->whereIn('tokenable_id', $ids)
-            ->groupBy('tokenable_id')->selectRaw('tokenable_id, count(*) as devices, max(last_used_at) as last_used_at')
-            ->get()->keyBy(fn ($row) => (string) $row->tokenable_id);
+            ->where('name', 'not like', Sessions::TOKEN_PREFIX.'%')->get();
+        foreach ($tokens as $token) {
+            if (! Sessions::accepts($token)) {
+                continue;
+            }
+            $mine = $devices[(string) $token->tokenable_id] ?? ['devices' => 0, 'lastSeenAt' => null];
+            $mine['devices']++;
+            $used = $token->last_used_at ?? $token->created_at;
+            if ($used && ($mine['lastSeenAt'] === null || strtotime((string) $used) > strtotime($mine['lastSeenAt']))) {
+                $mine['lastSeenAt'] = (string) $used;
+            }
+            $devices[(string) $token->tokenable_id] = $mine;
+        }
 
         $callerGrants = Access::grantsFor($caller);
 
@@ -341,7 +356,7 @@ final class UsersController
             $mine = collect($held[$id] ?? [])->sortBy('name')->values();
             $avatar = $user->avatar ?? null;
             $file = is_string($avatar) && $avatar !== '' ? Uploads::ref($avatar) : null;
-            $seen = $devices->get($id);
+            $seen = $devices[$id] ?? null;
 
             return [
                 'id' => $id,
@@ -356,8 +371,8 @@ final class UsersController
                 'isSelf' => $id === (string) $caller->getAuthIdentifier(),
                 // Whether whoever is asking may change this account: it may do no more than they may.
                 'withinYours' => self::within($callerGrants, $user, $mine),
-                'devices' => (int) ($seen->devices ?? 0),
-                'lastActiveAt' => ! empty($seen?->last_used_at) ? date(DATE_ATOM, strtotime($seen->last_used_at)) : null,
+                'devices' => $seen['devices'] ?? 0,
+                'lastActiveAt' => ! empty($seen['lastSeenAt']) ? date(DATE_ATOM, strtotime($seen['lastSeenAt'])) : null,
                 'createdAt' => $user->created_at?->toAtomString(),
             ];
         })->all();

@@ -69,9 +69,10 @@ final class Account
     }
 
     /**
-     * Sign someone in: a new Sanctum token, remembered with the browser it was made for.
+     * Sign someone in on this device: a session (see Sessions), with a short access token
+     * and a refresh token. Before the app has run its migration, a plain Sanctum token.
      *
-     * @return array{token: string, user: array<string, mixed>}
+     * @return array{token: string, expiresAt?: string, refreshToken?: string, refreshExpiresAt?: string|null, user: array<string, mixed>}
      */
     public static function signIn(mixed $user, Request $request): array
     {
@@ -87,10 +88,34 @@ final class Account
             throw new RuntimeException('Add Laravel\Sanctum\HasApiTokens to '.self::model().' to issue Nevela tokens.');
         }
         $name = (string) ($request->input('deviceName') ?: config('nevela.auth.token_name', 'nevela-web'));
+        if (Sessions::ready()) {
+            $signedIn = Sessions::start($user, $request, $name);
+            unset($signedIn['session']);
+
+            return [...$signedIn, 'user' => self::describe($user)];
+        }
         $token = $user->createToken(mb_substr($name, 0, 255));
         self::remember($token->accessToken->getKey(), $request);
 
         return ['token' => $token->plainTextToken, 'user' => self::describe($user)];
+    }
+
+    /**
+     * The address and browser a request is for. The dashboard's server makes the call to
+     * Laravel, so it passes the person's own on; a direct API client is itself.
+     *
+     * @return array{0: string|null, 1: string|null}
+     */
+    public static function caller(Request $request): array
+    {
+        $dashboard = self::fromDashboard($request);
+        $ip = $dashboard ? (string) $request->header('X-Nevela-Ip', '') : '';
+        $agent = $dashboard ? (string) $request->header('X-Nevela-User-Agent', '') : '';
+
+        return [
+            filter_var($ip, FILTER_VALIDATE_IP) ? $ip : $request->ip(),
+            mb_substr($agent !== '' ? $agent : (string) $request->userAgent(), 0, 512) ?: null,
+        ];
     }
 
     /**
@@ -102,13 +127,8 @@ final class Account
         if (! SchemaFacts::hasColumn('personal_access_tokens', 'user_agent')) {
             return; // the migration hasn't been run yet; signing in still works
         }
-        $dashboard = self::fromDashboard($request);
-        $ip = $dashboard ? (string) $request->header('X-Nevela-Ip', '') : '';
-        $agent = $dashboard ? (string) $request->header('X-Nevela-User-Agent', '') : '';
-        DB::table('personal_access_tokens')->where('id', $tokenId)->update([
-            'ip_address' => filter_var($ip, FILTER_VALIDATE_IP) ? $ip : $request->ip(),
-            'user_agent' => mb_substr($agent !== '' ? $agent : (string) $request->userAgent(), 0, 512) ?: null,
-        ]);
+        [$ip, $agent] = self::caller($request);
+        DB::table('personal_access_tokens')->where('id', $tokenId)->update(['ip_address' => $ip, 'user_agent' => $agent]);
     }
 
     /**
@@ -146,16 +166,26 @@ final class Account
         return ['required', 'string', 'max:128', $rule];
     }
 
-    /** Sign every device out, except the one asking when `$except` is given. */
+    /**
+     * Sign every device out, except the one asking when `$except` (the id of its access
+     * token) is given. Its whole session is kept, and every other one ends. Returns how
+     * many devices were signed out.
+     */
     public static function revokeTokens(mixed $user, mixed $except = null): int
     {
-        $query = DB::table('personal_access_tokens')
+        $tokens = DB::table('personal_access_tokens')
             ->where('tokenable_type', $user->getMorphClass())
             ->where('tokenable_id', $user->getAuthIdentifier());
-        if ($except !== null) {
-            $query->where('id', '!=', $except);
-        }
+        $keep = $except === null ? null : Sessions::of((clone $tokens)->where('id', $except)->first());
+        $sessions = Sessions::revokeAll($user, $keep);
 
-        return $query->delete();
+        // Tokens that belong to no session (from before sessions, or the app's own) are devices too.
+        $others = (clone $tokens)->where('name', 'not like', Sessions::TOKEN_PREFIX.'%')
+            ->when($except !== null, fn ($query) => $query->where('id', '!=', $except))->delete();
+        // And any token left of a session that has ended.
+        (clone $tokens)->where('name', 'like', Sessions::TOKEN_PREFIX.'%')
+            ->when($keep !== null, fn ($query) => $query->where('name', '!=', Sessions::TOKEN_PREFIX.$keep))->delete();
+
+        return $sessions + $others;
     }
 }

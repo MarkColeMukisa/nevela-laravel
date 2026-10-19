@@ -15,8 +15,10 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Sanctum\Sanctum;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\Permissions;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Console\AdoptCommand;
 use Nevela\Laravel\Console\BlogCommand;
 use Nevela\Laravel\Console\DevCommand;
@@ -24,6 +26,7 @@ use Nevela\Laravel\Console\DigestCommand;
 use Nevela\Laravel\Console\DisposableCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
+use Nevela\Laravel\Console\PruneSessionsCommand;
 use Nevela\Laravel\Console\SeedCommand;
 use Nevela\Laravel\Console\SetupCommand;
 use Nevela\Laravel\Console\StatusCommand;
@@ -73,7 +76,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -83,6 +86,8 @@ final class NevelaServiceProvider extends ServiceProvider
                 $schedule->command(TrashCommand::class)->dailyAt('03:40')->withoutOverlapping();
                 // The notices to the owner that were held back in a busy hour, as one email.
                 $schedule->command(DigestCommand::class)->hourly()->withoutOverlapping();
+                // Sign-ins that have ended, and access tokens long expired.
+                $schedule->command(PruneSessionsCommand::class)->dailyAt('03:50')->withoutOverlapping();
             });
         }
 
@@ -108,6 +113,13 @@ final class NevelaServiceProvider extends ServiceProvider
         // `@can` all work, in a policy or anywhere else. Any other ability is left to
         // the app's own policies and gates.
         Gate::before(fn ($user, $ability) => is_string($ability) && Permissions::isPermission($ability) ? Access::allows($user, $ability) : null);
+
+        // A token Sanctum finds valid (the expiry of a session's included) is also held to
+        // the idle and absolute limits when it belongs to no session. See Auth\Sessions. An
+        // app that sets its own callback replaces this one; a session's tokens still expire.
+        if (class_exists(Sanctum::class) && method_exists(Sanctum::class, 'authenticateAccessTokensUsing')) {
+            Sanctum::authenticateAccessTokensUsing(fn ($token, bool $isValid) => $isValid && Sessions::accepts($token));
+        }
 
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
@@ -144,6 +156,10 @@ final class NevelaServiceProvider extends ServiceProvider
         if (config('nevela.auth.enabled', true)) {
             Route::prefix($prefix.'/auth')->middleware('api')->name('nevela.auth.')->group(function () {
                 Route::get('config', [SignInController::class, 'config'])->name('config');
+                // A new access token for a refresh token. Not throttled with the rest: every
+                // person using the dashboard refreshes from its server's one address, and a
+                // 64-character random token isn't something anyone can guess.
+                Route::post('refresh', [TokenController::class, 'refresh'])->name('refresh');
 
                 // Anything that takes a secret, or sends an email, is slowed down (see limitAttempts()).
                 Route::middleware('throttle:nevela-auth')->group(function () {

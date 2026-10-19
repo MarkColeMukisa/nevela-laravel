@@ -13,7 +13,9 @@ use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Auth\Web;
+use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Models\Upload;
@@ -254,27 +256,50 @@ final class AccountController
         return response()->json(['closed' => true]);
     }
 
-    /** GET auth/sessions: the devices signed in to this account. */
+    /**
+     * GET auth/sessions: the devices signed in to this account. Each is a sign-in (see
+     * Auth\Sessions), with when it ends if it isn't used again; or a token from before
+     * sign-ins ended, or made by the app's own code, which is a device of its own.
+     */
     public function sessions(Request $request): JsonResponse
     {
         $user = $request->user();
-        $current = $user->currentAccessToken()?->getKey();
-        $tracked = SchemaFacts::hasColumn('personal_access_tokens', 'user_agent');
-        $rows = DB::table('personal_access_tokens')
-            ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
-            ->orderByDesc('last_used_at')->orderByDesc('created_at')->get();
+        $current = TokenController::deviceOf($user->currentAccessToken());
+        $date = fn ($value) => $value ? date(DATE_ATOM, strtotime((string) $value)) : null;
 
-        return response()->json([
-            'current' => $current === null ? null : (string) $current,
-            'data' => $rows->map(fn ($row) => [
+        $devices = array_map(fn ($row) => [
+            'id' => (string) $row->id,
+            'name' => $row->name,
+            'userAgent' => $row->user_agent,
+            'ipAddress' => $row->ip_address,
+            'createdAt' => $date($row->created_at),
+            'lastUsedAt' => $date($row->last_seen_at),
+            'endsAt' => Sessions::endsAt($row)?->toAtomString(),
+        ], Sessions::live($user));
+
+        $tracked = SchemaFacts::hasColumn('personal_access_tokens', 'user_agent');
+        $tokens = DB::table('personal_access_tokens')
+            ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
+            ->where('name', 'not like', Sessions::TOKEN_PREFIX.'%')
+            ->orderByDesc('last_used_at')->orderByDesc('created_at')->get();
+        foreach ($tokens as $row) {
+            if (! Sessions::accepts($row)) {
+                continue;
+            }
+            $devices[] = [
                 'id' => (string) $row->id,
                 'name' => $row->name,
                 'userAgent' => $tracked ? $row->user_agent : null,
                 'ipAddress' => $tracked ? $row->ip_address : null,
-                'createdAt' => $row->created_at ? date(DATE_ATOM, strtotime($row->created_at)) : null,
-                'lastUsedAt' => $row->last_used_at ? date(DATE_ATOM, strtotime($row->last_used_at)) : null,
-                'current' => (string) $row->id === (string) $current,
-            ])->all(),
+                'createdAt' => $date($row->created_at),
+                'lastUsedAt' => $date($row->last_used_at),
+                'endsAt' => null,
+            ];
+        }
+
+        return response()->json([
+            'current' => $current,
+            'data' => array_map(fn ($device) => [...$device, 'current' => $device['id'] === $current], $devices),
         ]);
     }
 
@@ -282,7 +307,12 @@ final class AccountController
     public function revokeSession(Request $request, string $id): Response
     {
         $user = $request->user();
-        if (Key::isInt($id)) {
+        if (Key::isUuid($id) && Sessions::ready()) {
+            $mine = DB::table(Sessions::TABLE)->where('id', $id)->where('user_id', (string) $user->getAuthIdentifier())->exists();
+            if ($mine) {
+                Sessions::revoke($id);
+            }
+        } elseif (Key::isInt($id)) {
             DB::table('personal_access_tokens')
                 ->where('tokenable_type', $user->getMorphClass())->where('tokenable_id', $user->getAuthIdentifier())
                 ->where('id', $id)->delete();

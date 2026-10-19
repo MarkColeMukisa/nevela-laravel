@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\ClosedAccounts;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
@@ -119,6 +120,14 @@ final class StatusCommand extends Command
                     .($missing === [] ? '' : ' <fg=gray>('.implode(', ', array_map(fn (string $provider) => Social::LABELS[$provider], $missing)).' has no keys)</>'));
         } else {
             $row('Social sign-in', '<fg=gray>off (SOCIAL_AUTH_ENABLED)</>');
+        }
+
+        // --- how long a sign-in lasts ---
+        $length = fn (?int $minutes) => $minutes === null ? 'never' : ($minutes % 1440 === 0 ? ($minutes / 1440).' day'.($minutes === 1440 ? '' : 's') : ($minutes % 60 === 0 ? ($minutes / 60).' h' : "{$minutes} min"));
+        if (! Sessions::ready()) {
+            $row('Sign-ins', '<fg=yellow>never end: run php artisan migrate</>');
+        } else {
+            $row('Sign-ins', Sessions::accessMinutes().'-minute tokens, end after '.$length(Sessions::idleMinutes()).' unused, '.$length(Sessions::absoluteMinutes()).' at most');
         }
 
         // --- dashboard ---
