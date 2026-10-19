@@ -125,7 +125,8 @@ final class StatusCommand extends Command
         // --- how long a sign-in lasts ---
         $length = fn (?int $minutes) => $minutes === null ? 'never' : ($minutes % 1440 === 0 ? ($minutes / 1440).' day'.($minutes === 1440 ? '' : 's') : ($minutes % 60 === 0 ? ($minutes / 60).' h' : "{$minutes} min"));
         if (! Sessions::ready()) {
-            $row('Sign-ins', '<fg=yellow>never end: run php artisan migrate</>');
+            // Tokens are plain Sanctum ones until then, held to the idle and absolute limits only.
+            $row('Sign-ins', 'end after '.$length(Sessions::idleMinutes()).' unused, '.$length(Sessions::absoluteMinutes()).' at most <fg=yellow>(no short tokens or refresh until: php artisan migrate)</>');
         } else {
             $row('Sign-ins', Sessions::accessMinutes().'-minute tokens, end after '.$length(Sessions::idleMinutes()).' unused, '.$length(Sessions::absoluteMinutes()).' at most');
         }

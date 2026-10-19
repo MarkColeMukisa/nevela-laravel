@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Auth\Account;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\SchemaFacts;
 
@@ -190,6 +191,9 @@ final class ClosedAccounts
         DB::transaction(function () use ($user, $key) {
             Account::revokeTokens($user);
             DB::table('nevela_role_user')->where('user_id', $key)->delete();
+            if (SchemaFacts::hasTable(Sessions::SPENT)) {
+                DB::table(Sessions::SPENT)->whereIn('session_id', DB::table(Sessions::TABLE)->where('user_id', $key)->select('id'))->delete();
+            }
             foreach (['nevela_two_factor', 'nevela_passkeys', 'nevela_social_accounts', 'nevela_sessions'] as $table) {
                 if (SchemaFacts::hasTable($table)) {
                     DB::table($table)->where('user_id', $key)->delete();

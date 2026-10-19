@@ -25,15 +25,19 @@ use Nevela\Laravel\Support\SchemaFacts;
  * - **idle**: not refreshed for `nevela.auth.session.idle` minutes,
  * - **absolute**: `nevela.auth.session.absolute` minutes after it began, however busy,
  * - **revoked**: signed out, from this device or another, or by an administrator,
- * - **replayed**: a refresh token that was already swapped is presented again. Only the
- *   holder of the current one can refresh, so whoever comes second is using a copy. The
- *   session ends for both, which shows the theft instead of sharing the account.
+ * - **replayed**: a refresh token that was already swapped is presented again, however
+ *   many swaps ago. Only the holder of the current one can refresh, so whoever comes
+ *   second is using a copy. The session ends for both, which shows the theft instead of
+ *   sharing the account.
  *
  * Revoking a session deletes its access tokens, so a sign-out takes effect at once.
  */
 final class Sessions
 {
     public const TABLE = 'nevela_sessions';
+
+    /** Every refresh token a session has given up, by hash, so that any of them ends it if it comes back. */
+    public const SPENT = 'nevela_spent_refresh_tokens';
 
     /** The start of an access token's name: the rest is its session's id. */
     public const TOKEN_PREFIX = 'nevela-session:';
@@ -129,6 +133,9 @@ final class Sessions
         if ($swapped === 0) {
             return self::presentedAgain($hash);
         }
+        if (SchemaFacts::hasTable(self::SPENT)) {
+            DB::table(self::SPENT)->insertOrIgnore(['token_hash' => $hash, 'session_id' => $session->id, 'spent_at' => $now]);
+        }
         $session->last_seen_at = $now;
 
         return self::issue($user, $session, $next);
@@ -138,11 +145,17 @@ final class Sessions
      * A refresh token that is not the current one. If it is the one just replaced, and only
      * moments ago, a second request set out with it at the same time as the one that
      * swapped it: that is given an access token, and no refresh token, so the new one stays
-     * the only one. Later than that, it is a copy, and the sign-in ends.
+     * the only one. Later than that, or a token from swaps before, it is a copy, and the
+     * sign-in ends: a thief who has refreshed many times since is signed out with the owner.
      */
     private static function presentedAgain(string $hash): array
     {
         $session = DB::table(self::TABLE)->where('previous_token_hash', $hash)->first();
+        $justReplaced = $session !== null;
+        if (! $session && SchemaFacts::hasTable(self::SPENT)) {
+            $id = DB::table(self::SPENT)->where('token_hash', $hash)->value('session_id');
+            $session = $id !== null ? DB::table(self::TABLE)->where('id', $id)->first() : null;
+        }
         if (! $session) {
             throw self::refused('SESSION_REVOKED');
         }
@@ -150,7 +163,7 @@ final class Sessions
             throw self::refused($why);
         }
         $grace = max(0, (int) config('nevela.auth.session.reuse_seconds', 60));
-        if ($session->rotated_at && Carbon::parse((string) $session->rotated_at)->addSeconds($grace)->gte(now())) {
+        if ($justReplaced && $session->rotated_at && Carbon::parse((string) $session->rotated_at)->addSeconds($grace)->gte(now())) {
             return self::issue(self::owner($session), $session, null);
         }
 
@@ -362,6 +375,11 @@ final class Sessions
                 DB::table('personal_access_tokens')->whereIn('name', array_map(fn ($id) => self::TOKEN_PREFIX.$id, $ids))->delete();
             }
         });
+
+        // The spent tokens of sessions that are gone, by this or by an account being deleted.
+        if (SchemaFacts::hasTable(self::SPENT)) {
+            DB::table(self::SPENT)->whereNotExists(fn ($query) => $query->from(self::TABLE)->whereColumn(self::TABLE.'.id', self::SPENT.'.session_id'))->delete();
+        }
 
         return $gone;
     }
