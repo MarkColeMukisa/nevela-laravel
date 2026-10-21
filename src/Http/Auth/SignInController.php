@@ -33,9 +33,29 @@ final class SignInController
     private const EMAILED = 300;
 
     /** Which ways of signing in are switched on, for a client drawing the sign-in page. */
-    public function config(): JsonResponse
+    public function config(Request $request): JsonResponse
     {
-        return response()->json(self::methods());
+        return response()->json([...self::methods(), 'proxySecret' => self::proxySecret($request)]);
+    }
+
+    /**
+     * Whether the secret the dashboard sent is this app's (NEVELA_PROXY_SECRET), so the
+     * dashboard can say when the two differ: nothing else shows it, except that every device
+     * gets the dashboard server's address. It gives a guess nothing to go on: the secret is
+     * long and compared in constant time.
+     */
+    private static function proxySecret(Request $request): string
+    {
+        $mine = (string) config('nevela.auth.proxy_secret', '');
+        $sent = (string) $request->header('X-Nevela-Proxy-Secret', '');
+
+        return match (true) {
+            $mine === '' && $sent === '' => 'none',
+            $mine === '' => 'missingInApi',
+            $sent === '' => 'missingInDashboard',
+            hash_equals($mine, $sent) => 'ok',
+            default => 'different',
+        };
     }
 
     /** @return array<string, mixed> */
