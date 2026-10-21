@@ -53,16 +53,19 @@ final class Sessions
         return max(1, (int) (config('nevela.auth.session.access') ?: 15));
     }
 
-    /** Minutes, or null for no limit. */
+    /**
+     * Minutes, or null for no limit. Only a limit set to null or 0 is none: a config with
+     * no such setting, such as one published before 0.12, gets the package's.
+     */
     public static function idleMinutes(): ?int
     {
-        return self::minutes(config('nevela.auth.session.idle'));
+        return self::minutes(config('nevela.auth.session.idle', 60 * 24 * 7));
     }
 
-    /** Minutes, or null for no limit. */
+    /** Minutes, or null for no limit, as idleMinutes(). */
     public static function absoluteMinutes(): ?int
     {
-        return self::minutes(config('nevela.auth.session.absolute'));
+        return self::minutes(config('nevela.auth.session.absolute', 60 * 24 * 30));
     }
 
     private static function minutes(mixed $value): ?int

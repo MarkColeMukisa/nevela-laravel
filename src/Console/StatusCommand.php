@@ -12,6 +12,7 @@ use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
+use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\Releases;
 use Throwable;
 
@@ -129,6 +130,13 @@ final class StatusCommand extends Command
             $row('Sign-ins', 'end after '.$length(Sessions::idleMinutes()).' unused, '.$length(Sessions::absoluteMinutes()).' at most <fg=yellow>(no short tokens or refresh until: php artisan migrate)</>');
         } else {
             $row('Sign-ins', Sessions::accessMinutes().'-minute tokens, end after '.$length(Sessions::idleMinutes()).' unused, '.$length(Sessions::absoluteMinutes()).' at most');
+        }
+
+        // --- the app's own config/nevela.php ---
+        // Settings added since it was published have the package's values. Say which, for
+        // whoever looks for one there and doesn't find it.
+        if (($missing = PublishedConfig::missingFromApp()) !== []) {
+            $row('config/nevela.php', '<fg=yellow>has no '.PublishedConfig::describe($missing).', so the defaults apply</>');
         }
 
         // --- dashboard ---

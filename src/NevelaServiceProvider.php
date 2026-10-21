@@ -3,6 +3,7 @@
 namespace Nevela\Laravel;
 
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Scheduling\Schedule;
@@ -51,13 +52,19 @@ use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
 
 final class NevelaServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/nevela.php', 'nevela');
+        // Key by key, not Laravel's one level deep: a published config/nevela.php from an
+        // older Nevela has sections without the settings added to them since.
+        if (! ($this->app instanceof CachesConfiguration && $this->app->configurationIsCached())) {
+            $config = $this->app->make('config');
+            $config->set('nevela', PublishedConfig::merge(require __DIR__.'/../config/nevela.php', (array) $config->get('nevela', [])));
+        }
     }
 
     public function boot(): void

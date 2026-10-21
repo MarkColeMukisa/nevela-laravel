@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\DashboardUpdate;
+use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\Releases;
 use Nevela\Laravel\Support\TemplateSource;
 use RecursiveDirectoryIterator;
@@ -52,6 +53,13 @@ final class UpdateCommand extends Command
         }
 
         $status = $this->updateDashboard($check);
+
+        // Nevela's settings apply where the app's file has none, so this is only news. But
+        // someone looking for a new setting in their file should hear why it isn't there.
+        if (($missing = PublishedConfig::missingFromApp()) !== []) {
+            $this->newLine();
+            $this->components->warn('config/nevela.php has no '.PublishedConfig::describe($missing).". Nevela's defaults apply. To set them here, copy them from vendor/nevela/laravel/config/nevela.php.");
+        }
 
         // A new version may bring a table of its own (uploads did). Say so, don't run it:
         // changing a database is the developer's call.
