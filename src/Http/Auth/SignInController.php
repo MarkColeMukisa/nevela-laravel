@@ -54,6 +54,9 @@ final class SignInController
             'closeAccount' => (bool) config('nevela.auth.close_account', true),
             // Switched on, and with their keys: the buttons to draw.
             'social' => Social::available(),
+            // Switched on and no provider has its keys. Outside production the sign-in page
+            // says so, rather than quietly showing no buttons.
+            'socialNeedsKeys' => Social::enabled() && Social::available() === [] && ! app()->isProduction(),
         ];
     }
 

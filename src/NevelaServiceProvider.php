@@ -29,6 +29,7 @@ use Nevela\Laravel\Console\DisposableCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\PruneSessionsCommand;
+use Nevela\Laravel\Console\PublishCommand;
 use Nevela\Laravel\Console\SeedCommand;
 use Nevela\Laravel\Console\SetupCommand;
 use Nevela\Laravel\Console\StatusCommand;
@@ -84,7 +85,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's

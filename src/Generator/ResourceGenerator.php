@@ -306,7 +306,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable'];
+        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -339,6 +339,7 @@ final class ResourceGenerator
               php nevela user                  create someone who can sign in
               php nevela trash                 remove deleted records whose time in the trash is up
               php nevela disposable            fetch the current list of throwaway email domains
+              php nevela publish               write config/nevela.php, to change settings that have no .env variable
               php nevela upgrade               bring this app to the latest Nevela
               php nevela version               which Nevela this is
 
