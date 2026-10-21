@@ -33,8 +33,16 @@ final class PublishCommand extends Command
             return self::SUCCESS;
         }
 
+        // Written beside it and moved into place, so a copy that fails half way never leaves
+        // the app with half a config file, which Laravel couldn't load.
         is_dir(dirname($file)) || mkdir(dirname($file), 0775, true);
-        copy(dirname(__DIR__, 2).'/config/nevela.php', $file);
+        $temporary = $file.'.'.bin2hex(random_bytes(4)).'.tmp';
+        if (! @copy(dirname(__DIR__, 2).'/config/nevela.php', $temporary) || ! @rename($temporary, $file)) {
+            @unlink($temporary);
+            $this->components->error("Couldn't write config/nevela.php. Nothing was changed.");
+
+            return self::FAILURE;
+        }
         $this->components->info('Wrote config/nevela.php. Change what you need there.');
         $this->line('  A setting with a .env variable, such as SOCIAL_AUTH_ENABLED or NEVELA_REGISTRATION, is still read from .env.');
 
