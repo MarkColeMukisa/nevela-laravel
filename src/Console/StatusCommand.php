@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Auth\Social;
@@ -70,6 +71,13 @@ final class StatusCommand extends Command
                     $users = ClosedAccounts::open()->count();
                     $closed = ClosedAccounts::closed()->count();
                     $row('Users who can sign in', ($users > 0 ? (string) $users : $bad('none: php nevela user')).($closed > 0 ? " <fg=gray>and {$closed} deleted, kept to restore</>" : ''));
+                    // Someone has to be able to manage the rest. "Is there an admin at all?" in one look.
+                    if ($users > 0 && Access::ready()) {
+                        $admins = Access::administrators()->orderBy('email')->pluck('email')->all();
+                        $row('Administrators', $admins === []
+                            ? $bad('none can sign in: php nevela user --role=ADMIN owner@example.com')
+                            : implode(', ', array_slice($admins, 0, 3)).(count($admins) > 3 ? ' <fg=gray>and '.(count($admins) - 3).' more</>' : ''));
+                    }
                 } catch (Throwable) {
                     $row('Users who can sign in', $bad('the users table is missing: php nevela migrate'));
                 }

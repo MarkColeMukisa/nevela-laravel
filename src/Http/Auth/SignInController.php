@@ -252,12 +252,14 @@ final class SignInController
         if (! $user) {
             return $this->refuse('INVALID_TOKEN', 'That sign-in link has expired or was already used. Ask for a new one.', 401);
         }
-        // Opening a link sent to the address proves the address.
-        if ($user->email_verified_at === null) {
+        // Opening a link sent to the address proves the address, and stands in for an emailed
+        // second step. One `nevela user --link` printed was never sent there, so it does neither.
+        $handed = ($pending['handed'] ?? false) === true;
+        if (! $handed && $user->email_verified_at === null) {
             $user->forceFill(['email_verified_at' => now()])->save();
         }
 
-        return self::finish($user, $request, byEmail: true);
+        return self::finish($user, $request, byEmail: ! $handed);
     }
 
     /** POST auth/email-code: email a six-digit sign-in code. */

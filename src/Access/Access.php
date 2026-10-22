@@ -133,6 +133,16 @@ final class Access
      */
     public static function otherAdmins(mixed $except = null): int
     {
+        return self::administrators($except)->count();
+    }
+
+    /**
+     * The administrators who can sign in, as otherAdmins() counts them, leaving out `$except`.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
+     */
+    public static function administrators(mixed $except = null)
+    {
         $model = Account::model();
         $instance = new $model;
         $table = $instance->getTable();
@@ -144,11 +154,9 @@ final class Access
         if ($except !== null) {
             $ids = array_values(array_diff($ids, [(string) $except->getAuthIdentifier()]));
         }
-        if ($ids === []) {
-            return 0;
-        }
 
-        return ClosedAccounts::open()->whereIn($key, $ids)->when($hasActive, fn ($query) => $query->where('active', true))->count();
+        // No ids is nobody: whereIn with an empty list matches no row.
+        return ClosedAccounts::open()->whereIn($key, $ids)->when($hasActive, fn ($query) => $query->where('active', true));
     }
 
     /** Forget what has been worked out, after roles or who holds them change. */
