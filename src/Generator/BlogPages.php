@@ -280,6 +280,7 @@ final class BlogPages
     import { notFound } from "next/navigation";
     import { SiteHeader } from "@/components/marketing/site-header";
     import { BODY_IS_HTML, blog, getPost, postDate, siteUrl } from "@/lib/blog";
+    import { site } from "@/lib/site";
 
     type Props = { params: Promise<{ slug: string }> };
 
@@ -302,8 +303,24 @@ final class BlogPages
       const post = await getPost((await params).slug);
       if (!post) notFound();
 
+      // What the post is, for search engines (schema.org): a title, a date, a picture, who published it.
+      const url = `${siteUrl()}${blog.path}/${post.slug}`;
+      const article = {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        headline: post.title,
+        description: post.excerpt || undefined,
+        datePublished: post.publishedAt ?? undefined,
+        image: post.imageLarge ? new URL(post.imageLarge, siteUrl()).toString() : undefined,
+        url,
+        mainEntityOfPage: url,
+        publisher: { "@type": "Organization", name: site.name, url: siteUrl() },
+      };
+
       return (
         <>
+          {/* A "<" in a title can't end the script early. */}
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(article).replace(/</g, "\\u003c") }} />
           <SiteHeader />
           <main className="mx-auto max-w-3xl px-6 py-16">
             <Link href={blog.path} className="text-sm text-foreground-muted hover:text-foreground">
