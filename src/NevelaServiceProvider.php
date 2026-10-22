@@ -12,6 +12,7 @@ use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -23,6 +24,7 @@ use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Console\AdoptCommand;
 use Nevela\Laravel\Console\BlogCommand;
+use Nevela\Laravel\Console\DeployCheckCommand;
 use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\DigestCommand;
 use Nevela\Laravel\Console\DisposableCommand;
@@ -85,7 +87,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -97,6 +99,8 @@ final class NevelaServiceProvider extends ServiceProvider
                 $schedule->command(DigestCommand::class)->hourly()->withoutOverlapping();
                 // Sign-ins that have ended, and access tokens long expired.
                 $schedule->command(PruneSessionsCommand::class)->dailyAt('03:50')->withoutOverlapping();
+                // A sign of life, so `nevela deploy:check` can tell the scheduler is running.
+                $schedule->call(fn () => Cache::forever(DeployCheckCommand::HEARTBEAT, time()))->everyFiveMinutes()->name('nevela:heartbeat');
             });
         }
 

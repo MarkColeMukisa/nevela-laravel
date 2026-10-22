@@ -159,6 +159,25 @@ final class Access
         return ClosedAccounts::open()->whereIn($key, $ids)->when($hasActive, fn ($query) => $query->where('active', true));
     }
 
+    /**
+     * The addresses of the administrators who can sign in, for telling people who they are.
+     * When no single role makes anyone one, roles that only together come to everything do:
+     * they aren't counted as the last way in (otherAdmins), but they are one.
+     *
+     * @return list<string>
+     */
+    public static function administratorEmails(): array
+    {
+        $emails = self::administrators()->orderBy('email')->pluck('email')->all();
+        if ($emails !== []) {
+            return $emails;
+        }
+        $several = DB::table('nevela_role_user')->select('user_id')->groupBy('user_id')->havingRaw('count(*) > 1')->limit(500)->pluck('user_id')->all();
+        $key = (new (Account::model()))->getKeyName();
+
+        return ClosedAccounts::open()->whereIn($key, $several)->get()->filter(fn ($user) => self::isAdmin($user))->pluck('email')->sort()->values()->all();
+    }
+
     /** Forget what has been worked out, after roles or who holds them change. */
     public static function forget(): void
     {

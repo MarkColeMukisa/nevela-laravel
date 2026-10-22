@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
-use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Forms\FormGuard;
@@ -74,14 +73,7 @@ final class StatusCommand extends Command
                     $row('Users who can sign in', ($users > 0 ? (string) $users : $bad('none: php nevela user')).($closed > 0 ? " <fg=gray>and {$closed} deleted, kept to restore</>" : ''));
                     // Someone has to be able to manage the rest. "Is there an admin at all?" in one look.
                     if ($users > 0 && Access::ready()) {
-                        $admins = Access::administrators()->orderBy('email')->pluck('email')->all();
-                        if ($admins === []) {
-                            // Roles that only together come to everything make an administrator
-                            // too. They aren't counted as the last way in, but they are one.
-                            $several = DB::table('nevela_role_user')->select('user_id')->groupBy('user_id')->havingRaw('count(*) > 1')->limit(500)->pluck('user_id')->all();
-                            $key = (new (Account::model()))->getKeyName();
-                            $admins = ClosedAccounts::open()->whereIn($key, $several)->get()->filter(fn ($user) => Access::isAdmin($user))->pluck('email')->sort()->values()->all();
-                        }
+                        $admins = Access::administratorEmails();
                         $row('Administrators', $admins === []
                             ? $bad('none can sign in: php nevela user --role=ADMIN owner@example.com')
                             : implode(', ', array_slice($admins, 0, 3)).(count($admins) > 3 ? ' <fg=gray>and '.(count($admins) - 3).' more</>' : ''));
@@ -202,6 +194,9 @@ final class StatusCommand extends Command
                 $row('API', $bad("{$url} is answered by ".($who === 'nevela' ? 'another Nevela app' : 'another program').', not this app'));
                 $row('', '<fg=gray>start with php nevela dev, which picks a free port and tells the dashboard</>');
             }
+        }
+        if (app()->isProduction()) {
+            $row('On a server', '<fg=gray>php artisan nevela:deploy:check also checks the scheduler, the queue worker, mail and the dashboard</>');
         }
         $this->newLine();
 
