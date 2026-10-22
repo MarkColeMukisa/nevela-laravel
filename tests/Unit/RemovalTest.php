@@ -68,6 +68,13 @@ final class RemovalTest extends TestCase
         }
         // The table's history stays: the data is never touched here.
         $this->assertSame([$this->path('api/database/migrations/2026_10_22_000000_create_gadgets_table.php')], $plan->paths(Removal::MIGRATION));
+        // So do the migrations added since: the trash, and a public form's confirmation.
+        $confirm = (new ResourceGenerator)->confirmMigrationFile($gadget, '2026_10_22_000001');
+        $trash = (new ResourceGenerator)->trashMigrationFile($gadget, '2026_10_22_000002');
+        (new Writer($this->roots))->write([$confirm, $trash]);
+        $migrations = $this->plan($gadget, [$gadget])->paths(Removal::MIGRATION);
+        $this->assertContains($this->path('api/'.$confirm->path), $migrations);
+        $this->assertContains($this->path('api/'.$trash->path), $migrations);
         $this->assertSame([], $plan->blockers);
     }
 
@@ -101,6 +108,14 @@ final class RemovalTest extends TestCase
         $deleted = $this->plan($gadget, [$gadget])->paths(Removal::DELETE);
         $this->assertContains($model, $deleted);
         $this->assertContains($loading, $deleted);
+
+        // Any other number in a skeleton is the app's choice, and keeps it the app's.
+        file_put_contents($loading, str_replace('actions={0}', 'actions={2}', (string) file_get_contents($loading)));
+        $edit = $this->path('web/app/dashboard/gadgets/[id]/loading.tsx');
+        file_put_contents($edit, str_replace('<PageHeaderSkeleton />', '<PageHeaderSkeleton actions={3} />', (string) file_get_contents($edit)));
+        $yours = $this->plan($gadget, [$gadget])->paths(Removal::YOURS);
+        $this->assertContains($loading, $yours);
+        $this->assertContains($edit, $yours);
     }
 
     public function test_an_adopted_model_keeps_its_own_code_and_loses_only_nevelas_block(): void

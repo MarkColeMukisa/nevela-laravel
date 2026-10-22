@@ -69,12 +69,18 @@ final class RemoveResourceCommand extends Command
         }
 
         // --- done ---
+        // A file Windows has open, or one the process may not write, stays: said at the end.
+        $stuck = [];
         $gone = [...$plan->paths(Removal::DELETE), ...($withYours ? $plan->paths(Removal::YOURS) : [])];
         foreach ($gone as $path) {
-            @unlink($path);
+            if (! @unlink($path) && is_file($path)) {
+                $stuck[] = $path;
+            }
         }
         foreach ($plan->paths(Removal::UNBLOCK) as $path) {
-            file_put_contents($path, Removal::withoutBlock((string) file_get_contents($path)));
+            if (@file_put_contents($path, Removal::withoutBlock((string) file_get_contents($path))) === false) {
+                $stuck[] = $path;
+            }
         }
         // The folders its pages and actions were in, once there is nothing left in them.
         if (isset($roots['web'])) {
@@ -95,6 +101,15 @@ final class RemoveResourceCommand extends Command
         $this->newLine();
         $this->components->info("Removed {$resource->name}.".($roles > 0 ? " Its permissions came out of {$roles} ".($roles === 1 ? 'role' : 'roles').'.' : '').' Regenerating the rest:');
         $status = GenerateCommand::generate($this, $rest, $rest, false);
+
+        if ($stuck !== []) {
+            $this->newLine();
+            $this->components->error('These couldn\'t be changed, perhaps because something has them open. Close it, and remove them yourself:');
+            foreach ($stuck as $path) {
+                $this->line('  '.$this->relative($path));
+            }
+            $status = self::FAILURE;
+        }
 
         if ($plan->mentions !== []) {
             $this->newLine();

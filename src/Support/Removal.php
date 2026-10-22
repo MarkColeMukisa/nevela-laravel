@@ -56,12 +56,14 @@ final class Removal
             }
             $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $file->path);
             if (is_file($absolute)) {
-                $files[] = ['path' => $absolute, 'action' => self::judge($file, (string) file_get_contents($absolute), $resource)];
+                // One that can't be read (another program has it to itself) can't be judged: it is left.
+                $current = @file_get_contents($absolute);
+                $files[] = ['path' => $absolute, 'action' => $current === false ? self::YOURS : self::judge($file, $current, $resource)];
             }
         }
         if (isset($roots[GeneratedFile::TARGET_API])) {
             $migrations = rtrim($roots[GeneratedFile::TARGET_API], '/\\').DIRECTORY_SEPARATOR.'database'.DIRECTORY_SEPARATOR.'migrations'.DIRECTORY_SEPARATOR;
-            foreach (["*_create_{$resource->table}_table.php", "*_add_trash_to_{$resource->table}_table.php", "*_add_confirm_to_{$resource->table}_table.php"] as $pattern) {
+            foreach (["*_create_{$resource->table}_table.php", "*_add_trash_to_{$resource->table}_table.php", "*_add_confirmation_to_{$resource->table}_table.php"] as $pattern) {
                 foreach (glob($migrations.$pattern) ?: [] as $migration) {
                     $files[] = ['path' => $migration, 'action' => self::MIGRATION];
                 }
@@ -101,8 +103,9 @@ final class Removal
                 return self::DELETE;
             }
             // A loading skeleton counts the fields there were when it was written: one made
-            // before the resource grew is still Nevela's, with other numbers in it.
-            $counts = fn (string $contents) => preg_replace('/\d+/', '#', $contents);
+            // before the resource grew is still Nevela's, with other counts in it. Only the
+            // counts Nevela writes: any other number changed makes it the app's.
+            $counts = fn (string $contents) => preg_replace('/\b((?:fields|columns|rows)=\{)\d+(\})/', '$1#$2', $contents);
 
             return str_ends_with($file->path, 'loading.tsx') && $counts($current) === $counts($file->contents) ? self::DELETE : self::YOURS;
         }
