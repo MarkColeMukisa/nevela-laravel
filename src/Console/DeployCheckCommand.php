@@ -118,12 +118,19 @@ final class DeployCheckCommand extends Command
     private function queue(): void
     {
         $connection = (string) config('queue.default');
-        if ($connection === 'sync') {
-            $this->note('Queue', 'sync: queued mail (form notices, confirmations) is sent while the visitor waits. It works; a worker is better');
+        $driver = (string) config("queue.connections.{$connection}.driver", $connection);
+        // These run a job without a worker. A deferred one runs after the request, or this
+        // command, has finished, so waiting for it here would only ever see nothing.
+        if (in_array($driver, ['sync', 'deferred', 'background'], true)) {
+            $this->note('Queue', match ($driver) {
+                'sync' => "{$connection}: queued mail (form notices, confirmations) is sent while the visitor waits. It works; a worker is better",
+                'deferred' => "{$connection}: queued mail is sent after each answer, by the same process. It needs no worker; a worker is sturdier",
+                default => "{$connection}: each job runs in a process of its own, and needs no worker",
+            });
 
             return;
         }
-        if ($connection === 'null' || (string) config("queue.connections.{$connection}.driver") === 'null') {
+        if ($driver === 'null') {
             $this->check('Queue', false, '', "{$connection} throws every job away: queued mail is never sent. Set QUEUE_CONNECTION=database or redis, and run a worker");
 
             return;
