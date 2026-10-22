@@ -158,9 +158,20 @@ final class RemovalTest extends TestCase
         (new Writer($this->roots))->write((new ResourceGenerator)->forResource($holder, '2026_10_22_000001', [$gadget, $holder]));
         (new Writer($this->roots))->write([new \Nevela\Laravel\Generator\GeneratedFile('api', 'app/Models/Shelf.php', (new ResourceGenerator)->model($shelf, [$shelf]))]);
 
+        // What reads its public section, as the blog's lib/blog.ts reads posts, and a form that posts to it.
+        mkdir($this->path('web/lib'), 0775, true);
+        file_put_contents($this->path('web/lib/catalogue.ts'), "const { body } = await laravelPublic(`gadgets?sort=-createdAt`, { tags: [resourceTag(\"Gadget\")] });\n");
+        mkdir($this->path('web/components'), 0775, true);
+        file_put_contents($this->path('web/components/order-form.tsx'), "await fetch(\"/api/public/gadgets\", { method: \"POST\" });\n");
+        // An example in a comment is not code that breaks: lib/laravel.ts shows one for "posts".
+        file_put_contents($this->path('web/lib/laravel.ts'), "/**\n * const { body } = await laravelPublic(\"gadgets?sort=-publishedAt\");\n */\nexport const API_URL = \"\";\n");
+
         $mentions = $this->plan($gadget, [$gadget, $shelf])->mentions;
         $this->assertContains($this->path('api/app/Http/Controllers/Shop/WindowController.php'), $mentions);
         $this->assertContains($this->path('web/app/dashboard/home.tsx'), $mentions);
+        $this->assertContains($this->path('web/lib/catalogue.ts'), $mentions);
+        $this->assertContains($this->path('web/components/order-form.tsx'), $mentions);
+        $this->assertNotContains($this->path('web/lib/laravel.ts'), $mentions);
         $this->assertNotContains($this->path('api/app/Models/Gadget.php'), $mentions, 'its own files are going anyway');
         $this->assertNotContains($this->path('api/app/Models/Shelf.php'), $mentions);
     }

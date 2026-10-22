@@ -154,7 +154,8 @@ final class Removal
         $slug = preg_quote($resource->slug, '/');
         $looks = [
             GeneratedFile::TARGET_API => [['app', 'routes', 'database/seeders', 'database/factories', 'tests', 'config'], '/\.php$/', "/App\\\\Models\\\\{$name}\\b|\\b{$name}::|\\bnew {$name}\\b|\\b{$name} \\$|\\b{$name}Policy\\b/"],
-            GeneratedFile::TARGET_WEB => [['app', 'components', 'lib'], '/\.(ts|tsx)$/', "/{$kebab}\\.resource\\b|\\/dashboard\\/{$slug}\\b/"],
+            // Its dashboard, and what reads or posts to its public section: the blog's lib/blog.ts, a site's form.
+            GeneratedFile::TARGET_WEB => [['app', 'components', 'lib'], '/\.(ts|tsx)$/', "/{$kebab}\\.resource\\b|\\/dashboard\\/{$slug}\\b|laravelPublic\\(\\s*[`'\"]{$slug}\\b|\\/api\\/public\\/{$slug}\\b|resourceTag\\(\\s*['\"]{$name}['\"]/"],
         ];
         // Regenerated without it straight after: not the app's to fix.
         $regenerated = ['routes/nevela.php', 'routes/nevela-public.php', 'resources/index.ts'];
@@ -178,8 +179,10 @@ final class Removal
                     if (! preg_match($extension, $path) || in_array($path, $leaving, true) || in_array($relative, $regenerated, true) || str_contains($relative, 'node_modules/')) {
                         continue;
                     }
-                    // What a generated block says is regenerated: another resource's hasMany goes with it.
-                    if (preg_match($pattern, self::withoutBlock((string) file_get_contents($path))) === 1) {
+                    // What a generated block says is regenerated: another resource's hasMany goes
+                    // with it. And a comment that shows an example isn't code that breaks.
+                    $code = preg_replace('#^\s*(//|/\*|\*).*$#m', '', self::withoutBlock((string) file_get_contents($path)));
+                    if (preg_match($pattern, (string) $code) === 1) {
                         $found[] = $path;
                     }
                 }

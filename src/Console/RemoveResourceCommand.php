@@ -113,7 +113,7 @@ final class RemoveResourceCommand extends Command
 
         if ($plan->mentions !== []) {
             $this->newLine();
-            $this->components->warn("Your own code still mentions {$resource->name}. Change it, or the app won't build:");
+            $this->components->warn("Your own code still uses {$resource->name}. Change it, or it breaks: a build fails, or a page that reads it does:");
             foreach ($plan->mentions as $path) {
                 $this->line('  '.$this->relative($path));
             }
@@ -160,7 +160,7 @@ final class RemoveResourceCommand extends Command
         $this->line('    regenerate the routes, the dashboard\'s menu and the relations of the resources it points at');
         $this->line("    take {$d->table}.* out of every role");
         if ($plan->mentions !== []) {
-            $list('Still mentioned in', $plan->mentions, 'your own code: change it, or the app won\'t build');
+            $list('Still mentioned in', $plan->mentions, 'your own code, which uses it: change it, or it breaks');
         }
     }
 
