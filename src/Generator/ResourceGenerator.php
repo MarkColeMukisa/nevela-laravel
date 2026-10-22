@@ -306,7 +306,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check'];
+        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check', 'resource:remove'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -333,6 +333,7 @@ final class ResourceGenerator
               php nevela resource Product --fields="name:string, price:money" --seed
                                                add a resource, create its table, fill it
               php nevela adopt posts           make a resource of a table you already have
+              php nevela resource:remove Product   take a resource out again (shows what it would do; --force does it)
               php nevela blog                  give the site a blog: posts in the dashboard, /blog to read them
               php nevela generate              regenerate after editing a descriptor
               php nevela seed Product          fill a resource with records
