@@ -181,7 +181,7 @@ final class Removal
                     }
                     // What a generated block says is regenerated: another resource's hasMany goes
                     // with it. And a comment that shows an example isn't code that breaks.
-                    $code = preg_replace('#^\s*(//|/\*|\*).*$#m', '', self::withoutBlock((string) file_get_contents($path)));
+                    $code = preg_replace(['#/\*.*?\*/#s', '#^\s*//.*$#m'], '', self::withoutBlock((string) file_get_contents($path)));
                     if (preg_match($pattern, (string) $code) === 1) {
                         $found[] = $path;
                     }

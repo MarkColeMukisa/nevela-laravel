@@ -165,6 +165,8 @@ final class RemovalTest extends TestCase
         file_put_contents($this->path('web/components/order-form.tsx'), "await fetch(\"/api/public/gadgets\", { method: \"POST\" });\n");
         // An example in a comment is not code that breaks: lib/laravel.ts shows one for "posts".
         file_put_contents($this->path('web/lib/laravel.ts'), "/**\n * const { body } = await laravelPublic(\"gadgets?sort=-publishedAt\");\n */\nexport const API_URL = \"\";\n");
+        // A block comment's lines needn't start with a star, and a line comment can follow code.
+        file_put_contents($this->path('web/lib/notes.ts'), "/*\nlaravelPublic(\"gadgets\");\n*/\n// fetch(\"/api/public/gadgets\")\nexport const notes = 1;\n");
 
         $mentions = $this->plan($gadget, [$gadget, $shelf])->mentions;
         $this->assertContains($this->path('api/app/Http/Controllers/Shop/WindowController.php'), $mentions);
@@ -172,6 +174,7 @@ final class RemovalTest extends TestCase
         $this->assertContains($this->path('web/lib/catalogue.ts'), $mentions);
         $this->assertContains($this->path('web/components/order-form.tsx'), $mentions);
         $this->assertNotContains($this->path('web/lib/laravel.ts'), $mentions);
+        $this->assertNotContains($this->path('web/lib/notes.ts'), $mentions);
         $this->assertNotContains($this->path('api/app/Models/Gadget.php'), $mentions, 'its own files are going anyway');
         $this->assertNotContains($this->path('api/app/Models/Shelf.php'), $mentions);
     }
