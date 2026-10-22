@@ -123,7 +123,10 @@ final class UserCommand extends Command
     {
         $user = Account::findByEmail($email);
         if (! $user) {
-            $this->components->error("No account has the email {$email}. To make one: nevela user --email={$email}");
+            // An account removed for good leaves its address blocked, and nothing can be made with it.
+            $this->components->error(ClosedAccounts::standing($email) === 'blocked'
+                ? "{$email} belonged to an account that was removed for good, and is blocked. It can't be used again."
+                : "No account has the email {$email}. To make one: nevela user --email={$email}");
 
             return self::FAILURE;
         }
@@ -137,6 +140,14 @@ final class UserCommand extends Command
             $this->components->error('A password on the command line stays in your shell\'s history. Use --reset, and it is asked for, or --reset --password-stdin.');
 
             return self::FAILURE;
+        }
+        // These make a new account. Taken quietly here, a rename would look as if it had worked.
+        foreach (['name', 'email'] as $option) {
+            if ($this->option($option) !== null) {
+                $this->components->error("--{$option} is for making an account, and doesn't change one that exists. Change it on the dashboard's Users screen.");
+
+                return self::FAILURE;
+            }
         }
 
         $reset = $this->option('reset') || $this->option('password-stdin');
@@ -157,6 +168,14 @@ final class UserCommand extends Command
         }
         if ($link && ! config('nevela.auth.magic_link', true)) {
             $this->components->error('Sign-in links are switched off in this app (auth.magic_link). Give the account a password instead: --reset');
+
+            return self::FAILURE;
+        }
+        // The link is kept in the cache until it is opened, by the web server, in another
+        // process. A cache that lives in this process only would lose it as this command ends.
+        $store = (string) config('cache.default');
+        if ($link && in_array(config("cache.stores.{$store}.driver"), ['array', 'null'], true)) {
+            $this->components->error("This app's cache ({$store}) is kept by one process only, so the web server would never find a link made here. Use a shared cache store (CACHE_STORE=database, redis or file), or give the account a password: --reset");
 
             return self::FAILURE;
         }
