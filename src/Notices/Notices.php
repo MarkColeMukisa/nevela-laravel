@@ -181,8 +181,12 @@ final class Notices
             'updated_at' => $now,
         ];
         if ($notice->group !== null) {
-            $open = DB::table(self::TABLE)->where('user_id', $userId)->where('group_key', $notice->group)->whereNull('read_at')->first();
-            if ($open !== null) {
+            // Locked while it is counted: two arriving at once must not both write the same count.
+            $grown = DB::transaction(function () use ($userId, $notice, $fields) {
+                $open = DB::table(self::TABLE)->where('user_id', $userId)->where('group_key', $notice->group)->whereNull('read_at')->lockForUpdate()->first();
+                if ($open === null) {
+                    return false;
+                }
                 $count = (int) $open->count + 1;
                 DB::table(self::TABLE)->where('id', $open->id)->update([
                     ...$fields,
@@ -191,6 +195,9 @@ final class Notices
                     'url' => $notice->manyUrl ?? $notice->url,
                 ]);
 
+                return true;
+            });
+            if ($grown) {
                 return;
             }
         }
