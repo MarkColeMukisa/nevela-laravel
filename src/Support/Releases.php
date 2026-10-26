@@ -2,7 +2,9 @@
 
 namespace Nevela\Laravel\Support;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Nevela\Laravel\Notices\Conditions;
 use Throwable;
 
 /** What Packagist knows about nevela/laravel. */
@@ -22,7 +24,17 @@ final class Releases
             return self::$latest = null;
         }
 
-        return self::$latest = self::newest(array_map(fn ($release) => (string) ($release['version'] ?? ''), $releases));
+        self::$latest = self::newest(array_map(fn ($release) => (string) ($release['version'] ?? ''), $releases));
+        // Remembered for the dashboard's bell, which never asks Packagist itself.
+        if (self::$latest !== null) {
+            try {
+                Cache::put(Conditions::LATEST, self::$latest, now()->addDays(3));
+            } catch (Throwable) {
+                // No cache: the bell just won't say.
+            }
+        }
+
+        return self::$latest;
     }
 
     /**

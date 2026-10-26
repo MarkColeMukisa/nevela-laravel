@@ -11,6 +11,7 @@ use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Http\Auth\Answers;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Key;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -85,6 +86,7 @@ final class DeletedAccountsController
             return $refused;
         }
         ClosedAccounts::restore($user);
+        Announce::toSelf($user, 'Your account was restored', 'It has everything it had when it was closed.', url: '/dashboard/account');
         AuthMail::send($user->email, 'Your '.AuthMail::app().' account is open again', ['Your account has been restored, with everything it had.', 'Sign in the way you did before: your password is the one you last used.']);
 
         return response()->json(UsersController::present(collect([$user->refresh()]), $request->user())[0]);

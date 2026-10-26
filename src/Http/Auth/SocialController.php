@@ -14,6 +14,7 @@ use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Auth\Web;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\SchemaFacts;
 use Throwable;
@@ -279,6 +280,7 @@ final class SocialController
         if (is_string($role) && $role !== '') {
             Access::grant($user, $role);
         }
+        Announce::accountCreated($user);
 
         return $user;
     }

@@ -14,6 +14,7 @@ use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Upload;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\PublicAccess;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -146,6 +147,10 @@ final class PublicController
         if ($address !== null) {
             Confirmation::send($descriptor, $record->getKey(), $address, $request);
         }
+        // An address still to be proved is nobody yet: those are told of once it is.
+        if ($public->confirm === null) {
+            Announce::formReceived($descriptor, $record);
+        }
 
         // What they may read of what they made, or nothing where nothing may be read. A
         // form with checks, or an address to prove, says nothing either way: the answer to
@@ -190,6 +195,7 @@ final class PublicController
         }
         if ($record->getAttribute('confirmed_at') === null) {
             $record->forceFill(['confirmed_at' => now()])->save();
+            Announce::formConfirmed($descriptor, $record);
         }
 
         return response()->json(['confirmed' => true]);

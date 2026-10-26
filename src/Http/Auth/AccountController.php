@@ -19,6 +19,7 @@ use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Models\Upload;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Rules\UploadKey;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
@@ -72,6 +73,7 @@ final class AccountController
         if (is_string($role) && $role !== '') {
             Access::grant($user, $role);
         }
+        Announce::accountCreated($user);
         self::sendVerification($user, $request);
 
         if (config('nevela.auth.require_email_verification', false)) {
@@ -194,6 +196,7 @@ final class AccountController
             Account::revokeTokens($user, $user->currentAccessToken()?->getKey());
         }
         AuthMail::send($user->email, 'Your '.AuthMail::app().' password was changed', ['The password for your account was just changed.', "If that wasn't you, reset it now and check the devices signed in to your account."]);
+        Announce::toSelf($user, 'Your password was changed', "If that wasn't you, reset it now and check the devices signed in to your account.", url: '/dashboard/account/sessions');
 
         return response()->json(['changed' => true]);
     }
@@ -224,6 +227,7 @@ final class AccountController
         // a reset is what someone does when they think another person has got in.
         $user->forceFill(['password' => Hash::make($input['newPassword']), 'email_verified_at' => $user->email_verified_at ?? now()])->save();
         Account::revokeTokens($user);
+        Announce::toSelf($user, 'Your password was reset', 'Every device was signed out. If that wasn\'t you, reset it again and turn on two-step sign-in.', url: '/dashboard/account/sessions');
 
         return response()->json(['reset' => true]);
     }
@@ -251,6 +255,7 @@ final class AccountController
         }
 
         ClosedAccounts::close($user, $user);
+        Announce::accountClosed($user);
         AuthMail::send($user->email, 'Your '.AuthMail::app().' account was closed', ['You closed your account, and have been signed out everywhere.', 'To have it back, ask an administrator: it can be restored with everything it had.']);
 
         return response()->json(['closed' => true]);

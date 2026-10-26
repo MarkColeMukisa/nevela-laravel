@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Nevela\Laravel\Forms\Confirmation;
 use Nevela\Laravel\Forms\PublicMail;
 use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Trash\Trash;
 
 final class TrashCommand extends Command
@@ -38,6 +39,7 @@ final class TrashCommand extends Command
         }
 
         $removed = Trash::purgeExpired();
+        Announce::trashEmptied($removed, $days);
         foreach ($removed as $resource => $count) {
             $this->components->twoColumnDetail($resource, number_format($count).' removed');
         }

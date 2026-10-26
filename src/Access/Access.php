@@ -160,6 +160,28 @@ final class Access
     }
 
     /**
+     * Everyone who may do something and can sign in: who is told when it happens. Before
+     * the roles tables exist everyone may do everything, so it is everyone.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
+     */
+    public static function holders(string $permission)
+    {
+        $instance = new (Account::model());
+        $query = ClosedAccounts::open()->when(SchemaFacts::hasColumn($instance->getTable(), 'active'), fn ($query) => $query->where('active', true));
+        if (! self::ready()) {
+            return $query;
+        }
+        // A permission is held when one grant covers it, so each role can be asked alone.
+        $roles = Role::query()->get()->filter(fn (Role $role) => Permissions::granted($role->grants, $permission))->pluck('id')->all();
+        // As ids, not a subquery: the roles table keeps them as text, and Postgres won't
+        // compare text with a numeric key.
+        $ids = DB::table('nevela_role_user')->whereIn('role_id', $roles)->distinct()->pluck('user_id')->all();
+
+        return $query->whereIn($instance->getKeyName(), $ids);
+    }
+
+    /**
      * The addresses of the administrators who can sign in, for telling people who they are.
      * When no single role makes anyone one, roles that only together come to everything do:
      * they aren't counted as the last way in (otherAdmins), but they are one.

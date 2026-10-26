@@ -19,6 +19,7 @@ use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Models\Role;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\SchemaFacts;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -189,8 +190,17 @@ final class UsersController
         if ($attributes !== []) {
             $user->forceFill($attributes)->save();
         }
+        $before = $roles !== null && ! $self ? Access::rolesOf($user)->pluck('name')->sort()->values()->all() : null;
         if ($roles !== null) {
             Access::assign($user, $roles->pluck('id')->all());
+        }
+        $after = $roles?->pluck('name')->sort()->values()->all();
+        if ($before !== null && $before !== $after) {
+            Announce::toSelf($user, match (count($after)) {
+                0 => 'You no longer have a role',
+                1 => "Your role is now {$after[0]}",
+                default => 'Your roles are now '.implode(', ', $after),
+            }, 'An administrator changed what you may do.', url: '/dashboard');
         }
 
         // A new password or a switched-off account ends every session it had. Their own
@@ -200,6 +210,7 @@ final class UsersController
         }
         if (isset($input['password']) && ! $self) {
             AuthMail::send($user->email, 'Your '.AuthMail::app().' password was changed', ['An administrator set a new password for your account.', "If you weren't expecting this, ask them about it before signing in."]);
+            Announce::toSelf($user, 'An administrator set a new password for you', "If you weren't expecting this, ask them about it.", 'warning', '/dashboard/account/password');
         }
         Access::forget();
 

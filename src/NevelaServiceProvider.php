@@ -11,6 +11,7 @@ use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
 use Illuminate\Http\Request;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\Permissions;
@@ -55,7 +57,11 @@ use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
+use Nevela\Laravel\Http\NotificationsController;
 use Nevela\Laravel\Media\Uploads;
+use Nevela\Laravel\Notices\Conditions;
+use Nevela\Laravel\Notices\Notice;
+use Nevela\Laravel\Notices\Notices;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
 
@@ -102,6 +108,9 @@ final class NevelaServiceProvider extends ServiceProvider
                 $schedule->command(PruneSessionsCommand::class)->dailyAt('03:50')->withoutOverlapping();
                 // A sign of life, so `nevela deploy:check` can tell the scheduler is running.
                 $schedule->call(fn () => Cache::forever(DeployCheckCommand::HEARTBEAT, time()))->everyFiveMinutes()->name('nevela:heartbeat');
+                // The bell's notices, once kept long enough, and whether a newer Nevela is out.
+                $schedule->call(fn () => Notices::prune())->dailyAt('03:55')->name('nevela:notifications:prune');
+                $schedule->call(fn () => Conditions::lookUpRelease())->dailyAt('04:10')->name('nevela:releases');
             });
         }
 
@@ -116,6 +125,22 @@ final class NevelaServiceProvider extends ServiceProvider
         // end: a request in between may have found something the next migration removes.
         // `optimize:clear` forgets it too, for a table or column removed some other way.
         Event::listen([MigrationsStarted::class, MigrationsEnded::class], fn () => SchemaFacts::forget());
+        // The bell's "migrations haven't been run" goes once they have.
+        Event::listen(MigrationsEnded::class, fn () => Conditions::forget());
+
+        // A job that failed for good is something only an administrator can look into.
+        // One row per kind of job while unread, however often it fails.
+        Event::listen(JobFailed::class, function (JobFailed $event) {
+            $name = class_basename($event->job->resolveName());
+            Notices::toAdmins(new Notice(
+                "A background job failed: {$name}",
+                body: Str::limit(trim(strtok($event->exception->getMessage(), "\n") ?: $event->exception::class), 300),
+                tone: 'warning',
+                kind: 'job.failed',
+                group: 'job.failed:'.$event->job->resolveName(),
+                many: fn (int $count) => "{$name} failed {$count} times",
+            ));
+        });
         Event::listen(CommandStarting::class, function (CommandStarting $event) {
             if ($event->command === 'optimize:clear') {
                 SchemaFacts::forget();
@@ -275,6 +300,10 @@ final class NevelaServiceProvider extends ServiceProvider
             ]))->name('profiles');
 
             // The trash: deleted records, to restore or to remove for good.
+            // The bell: everyone has one, whatever their roles.
+            Route::get('_nevela/notifications', [NotificationsController::class, 'index'])->name('notifications.index');
+            Route::post('_nevela/notifications/read', [NotificationsController::class, 'read'])->name('notifications.read');
+
             Route::get('_nevela/trash', [TrashController::class, 'index'])->name('trash.index');
             Route::get('_nevela/trash/_status', [TrashController::class, 'status'])->name('trash.status');
             Route::get('_nevela/trash/{slug}', [TrashController::class, 'show'])->name('trash.show');

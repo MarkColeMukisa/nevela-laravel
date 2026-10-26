@@ -14,6 +14,7 @@ use Nevela\Laravel\Auth\Passkeys;
 use Nevela\Laravel\Auth\Totp;
 use Nevela\Laravel\Models\Passkey;
 use Nevela\Laravel\Models\TwoFactor;
+use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Key;
 use RuntimeException;
 
@@ -50,6 +51,7 @@ final class SecurityController
 
         if ($method === 'email') {
             $second->fill(['backup_codes' => $hashes, 'enabled_at' => $second->enabled_at ?? now()])->save();
+            Announce::toSelf($user, 'Two-step sign-in is on', 'Signing in now also takes a code emailed to you.');
 
             return response()->json(['enabled' => true, 'backupCodes' => $codes]);
         }
@@ -79,6 +81,7 @@ final class SecurityController
             return $this->refuse('INVALID_TWO_FACTOR_CODE', "That code isn't right. Check it and try again.", 422);
         }
         $second->fill(['totp_confirmed_at' => now(), 'enabled_at' => $second->enabled_at ?? now()])->save();
+        Announce::toSelf($request->user(), 'Two-step sign-in is on', 'Signing in now also takes a code from your authenticator app.');
 
         return response()->json(['enabled' => true, 'user' => Account::describe($request->user())]);
     }
@@ -91,6 +94,7 @@ final class SecurityController
         }
         TwoFactor::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->delete();
         AuthMail::send($request->user()->email, 'Two-factor was turned off for your '.AuthMail::app().' account', ['Two-factor sign-in was just turned off for your account.', "If that wasn't you, change your password now."]);
+        Announce::toSelf($request->user(), 'Two-step sign-in was turned off', "If that wasn't you, change your password now.", 'warning');
 
         return response()->json(['enabled' => false]);
     }
@@ -155,6 +159,7 @@ final class SecurityController
         } catch (RuntimeException $e) {
             return $this->refuse('PASSKEY_FAILED', $e->getMessage(), 422);
         }
+        Announce::toSelf($request->user(), 'A passkey was added', $passkey->name !== null && $passkey->name !== '' ? "\"{$passkey->name}\" can now sign in to your account." : 'It can now sign in to your account.');
 
         return response()->json(self::describe($passkey), 201);
     }
@@ -175,8 +180,8 @@ final class SecurityController
     /** DELETE auth/passkeys/{id} */
     public function removePasskey(Request $request, string $id): Response
     {
-        if (Key::fits(Passkey::class, $id)) {
-            Passkey::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->where('id', $id)->delete();
+        if (Key::fits(Passkey::class, $id) && Passkey::query()->where('user_id', (string) $request->user()->getAuthIdentifier())->where('id', $id)->delete() > 0) {
+            Announce::toSelf($request->user(), 'A passkey was removed', 'It can no longer sign in to your account.');
         }
 
         return response()->noContent();
