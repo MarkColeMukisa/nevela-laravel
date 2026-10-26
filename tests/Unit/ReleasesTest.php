@@ -58,4 +58,15 @@ final class ReleasesTest extends TestCase
         $this->assertSame('', UpdateCommand::rootConstraint('{"require": {}}'));
         $this->assertFalse(UpdateCommand::isPlainCaret(''));
     }
+
+    public function test_an_update_that_only_reached_a_newer_patch_still_falls_short(): void
+    {
+        // "^0.5" took 0.5.1 to 0.5.3 while 0.19.1 is out: the range still needs widening.
+        $this->assertTrue(UpdateCommand::fellShort('0.5.3', '0.19.1'));
+        $this->assertTrue(UpdateCommand::fellShort('0.5.1', '0.19.1'));
+        $this->assertTrue(UpdateCommand::fellShort('0.19.0', '0.19.1'));
+        $this->assertFalse(UpdateCommand::fellShort('0.19.1', '0.19.1'));
+        // A release Packagist hadn't listed yet when it was asked.
+        $this->assertFalse(UpdateCommand::fellShort('0.19.2', '0.19.1'));
+    }
 }
