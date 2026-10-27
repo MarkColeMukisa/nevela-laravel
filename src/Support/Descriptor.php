@@ -23,6 +23,7 @@ final class Descriptor
      * @param  PublicAccess|null  $public  What of it anyone may read or create without signing in. Nothing, when null.
      * @param  string|null  $publish  The date-and-time field that says when a record is published: empty is a draft, a time to come is scheduled
      * @param  string|null  $blog  Where on the site its public records are a blog, e.g. "/blog". The pages are written by `nevela:blog`.
+     * @param  string|null  $items  The resource its lines are, e.g. "OrderItem": edited in this one's form and saved with it. That resource belongs to this one.
      */
     public function __construct(
         public readonly string $name,
@@ -40,6 +41,7 @@ final class Descriptor
         public readonly ?PublicAccess $public = null,
         public readonly ?string $publish = null,
         public readonly ?string $blog = null,
+        public readonly ?string $items = null,
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
@@ -74,6 +76,9 @@ final class Descriptor
         }
         if ($publish !== null && (! isset($fields[$publish]) || $fields[$publish]->kind !== 'datetime' || $fields[$publish]->required)) {
             throw new InvalidArgumentException("{$name}: \"publish\" names the field that says when a record is published. It has to be an optional datetime: {$publish}:datetime?");
+        }
+        if ($items !== null && (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $items) || $items === $name)) {
+            throw new InvalidArgumentException("{$name}: \"items\" names the resource its lines are, such as \"OrderItem\": another resource, in PascalCase.");
         }
         if ($blog !== null) {
             if (! preg_match('#^/[a-z0-9][a-z0-9/-]*$#', $blog)) {
@@ -149,6 +154,7 @@ final class Descriptor
             isset($data['public']) ? PublicAccess::fromArray((array) $data['public']) : null,
             $data['publish'] ?? null,
             $data['blog'] ?? null,
+            $data['items'] ?? null,
         );
     }
 
@@ -179,6 +185,7 @@ final class Descriptor
             'titleField' => $this->titleField,
             'publish' => $this->publish,
             'blog' => $this->blog,
+            'items' => $this->items,
             'fields' => array_map(fn (Field $f) => $f->toArray(), $this->fields),
             'actions' => $this->actions ? array_map(fn (Action $a) => $a->toArray(), $this->actions) : null,
             'public' => $this->public?->toArray(),

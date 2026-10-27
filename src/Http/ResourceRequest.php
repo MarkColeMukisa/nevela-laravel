@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Http;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator as Validation;
@@ -28,8 +29,27 @@ abstract class ResourceRequest extends FormRequest
     /** Keys Flare may echo back that are never writable. */
     protected const READ_ONLY = ['id', 'createdAt', 'updatedAt'];
 
+    /**
+     * The lines that were sent and passed, for saveItems(): each one's values by column,
+     * and the id of the line it changes, or null for a new one. Null when none were sent.
+     *
+     * @var array{values: list<array<string, mixed>>, ids: list<string|null>}|null
+     */
+    private ?array $checkedItems = null;
+
     /** @return array<string, mixed> */
     abstract public function rules(): array;
+
+    /**
+     * The resource this one's lines are, when it has some: an order's items. A generated
+     * request with lines says which, and they are sent as "items".
+     *
+     * @return array{request: class-string<self>, model: class-string<Model>, field: string, column: string}|null
+     */
+    protected function lineItems(): ?array
+    {
+        return null;
+    }
 
     /** @return array<string, string> field => column */
     abstract protected function columns(): array;
@@ -175,6 +195,10 @@ abstract class ResourceRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             $known = array_keys($this->columns());
+            if ($this->lineItems() !== null) {
+                $known[] = 'items';
+                $this->checkItems($validator);
+            }
             // A file field is sent back with its details beside it (imageFile for image);
             // a client that echoes a record shouldn't be refused for it.
             $computed = array_map(fn (string $field) => $field.'File', $known);
@@ -185,6 +209,108 @@ abstract class ResourceRequest extends FormRequest
             }
             self::explainTrashed($validator, $validator->getData());
         });
+    }
+
+    /**
+     * The lines sent with the record, each checked by the rules for creating one of them,
+     * less the field that points back here: that is filled in when they are saved.
+     *
+     * A line sent with an id changes that line, which has to be one of this record's. The
+     * list is the record's lines whole: saveItems() removes the ones left out of it.
+     */
+    private function checkItems(Validator $validator): void
+    {
+        $lines = $this->lineItems();
+        $data = $this->json()->all() ?: $this->request->all();
+        if ($lines === null || ! array_key_exists('items', $data)) {
+            return; // Not sent: the lines stay as they are.
+        }
+        $rows = $data['items'];
+        if (! is_array($rows) || ! array_is_list($rows)) {
+            $validator->errors()->add('items', 'The lines are sent as a list.');
+
+            return;
+        }
+        $most = max(1, (int) config('nevela.bulk_max', 500));
+        if (count($rows) > $most) {
+            $validator->errors()->add('items', 'That is '.number_format(count($rows))." lines. At most {$most} can be saved at once.");
+
+            return;
+        }
+
+        // The lines the record has now. A new record has none, so no line may name one.
+        $parent = collect($this->route()?->parameters() ?? [])->first(fn ($value) => $value instanceof Model);
+        $model = $lines['model'];
+        $existing = $parent instanceof Model
+            ? $model::query()->where($lines['column'], $parent->getKey())->pluck((new $model)->getKeyName())->map(fn ($id) => (string) $id)->all()
+            : [];
+
+        $wrong = false;
+        $ids = [];
+        foreach ($rows as $index => $row) {
+            $id = is_array($row) && isset($row['id']) && is_scalar($row['id']) ? (string) $row['id'] : null;
+            if ($id !== null && ! in_array($id, $existing, true)) {
+                $validator->errors()->add("items.{$index}.id", 'This is not one of its lines. Leave the id out to add a new one.');
+                $wrong = true;
+            }
+            $ids[] = $id;
+        }
+        $checked = (new $lines['request'])->many($rows, $lines['field']);
+        foreach ($checked['problems'] as $problem) {
+            foreach ($problem['issues'] as $issue) {
+                $validator->errors()->add('items.'.($problem['row'] - 1).($issue['path'] === '' ? '' : '.'.$issue['path']), $issue['message']);
+            }
+        }
+        if (! $wrong && $checked['problems'] === []) {
+            $this->checkedItems = ['values' => $checked['values'], 'ids' => $ids];
+        }
+    }
+
+    /**
+     * Save the lines that were sent with the record, once the record itself is saved: in
+     * the same transaction, which the generated controller opens. Lines sent with an id
+     * are changed, the others added, and the record's lines left out of the list removed
+     * for good. They were part of the record, not records anyone will look for in the trash.
+     *
+     * Then, if the record's model has an `itemsSaved()` method, it is called: the place to
+     * work out a total from the lines and store it.
+     */
+    public function saveItems(Model $parent): void
+    {
+        $lines = $this->lineItems();
+        if ($lines === null || $this->checkedItems === null) {
+            return;
+        }
+        ['model' => $model, 'column' => $column] = $lines;
+        $owned = fn () => $model::query()->where($column, $parent->getKey());
+
+        $kept = [];
+        $changed = false;
+        foreach ($this->checkedItems['values'] as $index => $values) {
+            $values[$column] = $parent->getKey();
+            $id = $this->checkedItems['ids'][$index] ?? null;
+            $line = $id === null ? null : $owned()->whereKey($id)->first();
+            if ($line === null) {
+                $line = $model::create($values);
+                $changed = true;
+            } else {
+                $line->update($values);
+                $changed = $changed || $line->wasChanged();
+            }
+            $kept[] = $line->getKey();
+        }
+        foreach ($owned()->whereKeyNot($kept)->get() as $line) {
+            method_exists($line, 'forceDelete') ? $line->forceDelete() : $line->delete();
+            $changed = true;
+        }
+
+        // A change to its lines is a change to the record, and is shown as one.
+        if ($changed && ! $parent->wasRecentlyCreated) {
+            $parent->touch();
+        }
+        if (method_exists($parent, 'itemsSaved')) {
+            $parent->itemsSaved();
+        }
     }
 
     /**
@@ -292,14 +418,18 @@ abstract class ResourceRequest extends FormRequest
      * the second, but only after the first was written and with no row number to show.
      *
      * @param  list<mixed>  $rows
+     * @param  string|null  $owner  For lines: the field that points at the record they are lines of. It is filled in when they are saved, so it is neither asked for nor taken.
      * @return array{values: list<array<string, mixed>>, problems: list<array{row: int, issues: list<array{path: string, message: string}>}>}
      */
-    public function many(array $rows): array
+    public function many(array $rows, ?string $owner = null): array
     {
         $rules = self::withoutTrashed($this->rules());
         $columns = $this->columns();
         $defaults = $this->defaults();
         $known = array_keys($columns);
+        if ($owner !== null) {
+            unset($rules[$owner], $columns[$owner], $defaults[$owner]);
+        }
         $computed = array_map(fn (string $field) => $field.'File', $known);
         $unique = array_keys(array_filter($rules, fn ($rule) => is_array($rule) && array_filter($rule, fn ($one) => $one instanceof Unique) !== []));
 

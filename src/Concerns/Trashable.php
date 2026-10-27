@@ -61,6 +61,29 @@ trait Trashable
             }
         });
 
+        // Its lines go with it: to the trash with it, or for good, with those already there.
+        static::deleting(function (self $model) {
+            $lines = Nevela::linesOf(class_basename($model));
+            if ($lines === null) {
+                return;
+            }
+            $query = $model->isForceDeleting() ? $lines['model']::withTrashed() : $lines['model']::query();
+            foreach ($query->where($lines['column'], $model->getKey())->get() as $line) {
+                $model->isForceDeleting() ? $line->forceDelete() : $line->delete();
+            }
+        });
+
+        // And come back with it.
+        static::restored(function (self $model) {
+            $lines = Nevela::linesOf(class_basename($model));
+            if ($lines === null) {
+                return;
+            }
+            foreach ($lines['model']::onlyTrashed()->where($lines['column'], $model->getKey())->get() as $line) {
+                $line->restore();
+            }
+        });
+
         // A private file goes when its record goes for good. In the trash the record still
         // exists, and so does its file, unreachable, for the day it is restored.
         static::deleted(function (self $model) {

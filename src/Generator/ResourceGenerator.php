@@ -141,6 +141,28 @@ final class ResourceGenerator
         return $children;
     }
 
+    /**
+     * A resource's lines: the child its descriptor names in "items", with the field that
+     * points back at it and the relation it is reached by (an Order's `orderItems`). Null
+     * when it has none, or names one that doesn't belong to it.
+     *
+     * @param  list<Descriptor>  $all
+     * @return array{resource: Descriptor, field: Field, name: string}|null
+     */
+    public function lineItems(Descriptor $d, array $all): ?array
+    {
+        if ($d->items === null) {
+            return null;
+        }
+        foreach ($this->children($d, $all) as $child) {
+            if ($child['resource']->name === $d->items) {
+                return $child;
+            }
+        }
+
+        return null;
+    }
+
     /** @param list<Descriptor> $all */
     private function tableOf(string $name, Descriptor $d, array $all): string
     {
@@ -411,6 +433,10 @@ final class ResourceGenerator
             if ($d->blog !== null) {
                 $extras[$d->name]['blog'] = $d->blog;
             }
+            // Its lines: the resource they are, and their field that points back at it.
+            if (($lines = $this->lineItems($d, $all)) !== null) {
+                $extras[$d->name]['items'] = ['resource' => $lines['resource']->name, 'field' => $lines['field']->name];
+            }
             // What its public form checks, and the address it has proved.
             if ($d->public?->protect !== null || $d->public?->confirm !== null) {
                 $extras[$d->name]['form'] = array_filter(['protect' => $d->public->toArray()['create']['protect'] ?? null, 'confirm' => $d->public->confirm], fn ($v) => $v !== null);
@@ -609,12 +635,15 @@ final class ResourceGenerator
         PHP;
             }
         }
+        $lines = $this->lineItems($d, $all);
         foreach ($this->children($d, $all) as $child) {
+            // Its lines, in the order they were added: their ids are made in that order.
+            $order = $child === $lines ? "->orderBy('id')" : '';
             $relations[] = <<<PHP
 
             public function {$child['name']}(): \Illuminate\Database\Eloquent\Relations\HasMany
             {
-                return \$this->hasMany({$child['resource']->name}::class, '{$child['field']->column()}');
+                return \$this->hasMany({$child['resource']->name}::class, '{$child['field']->column()}'){$order};
             }
         PHP;
         }
@@ -948,6 +977,16 @@ final class ResourceGenerator
                 return [{$rich}];
             }
         PHP;
+        $lines = $this->lineItems($d, $all);
+        $linesBlock = $lines === null ? '' : <<<PHP
+
+
+            /** Its lines, sent as "items": {$this->lower($lines['resource']->pluralLabel)}, checked by their own rules and saved with it. */
+            protected function lineItems(): ?array
+            {
+                return ['request' => {$lines['resource']->name}Request::class, 'model' => \App\Models\\{$lines['resource']->name}::class, 'field' => '{$lines['field']->name}', 'column' => '{$lines['field']->column()}'];
+            }
+        PHP;
         $m = self::M;
         $e = self::E;
 
@@ -989,7 +1028,7 @@ final class ResourceGenerator
             protected function columns(): array
             {
                 return [{$columnMap}];
-            }{$richBlock}{$defaultsBlock}{$madeBlock}
+            }{$richBlock}{$defaultsBlock}{$madeBlock}{$linesBlock}
             {$e}
         }
 
@@ -1061,6 +1100,10 @@ final class ResourceGenerator
                     : "            '{$f->name}File' => \\Nevela\\Laravel\\Nevela::file(\$this->{$f->column()}),";
             }
         }
+        if (($items = $this->lineItems($d, $all)) !== null) {
+            // A record's own page, and what a save answers, have them. A list leaves them out.
+            $lines[] = "            'items' => \$this->whenLoaded('{$items['name']}', fn () => {$items['resource']->name}Resource::collection(\$this->{$items['name']})->resolve(\$request)),";
+        }
         if ($d->public?->confirm !== null) {
             // Not a field: when the address was proved, for the dashboard to say "Not confirmed" until it is.
             $lines[] = "            'confirmedAt' => \$this->confirmed_at?->toJSON(),";
@@ -1103,10 +1146,11 @@ final class ResourceGenerator
     public function controller(Descriptor $d, array $all = []): string
     {
         $var = $d->variable();
+        $lines = $this->lineItems($d, $all);
         $guards = [];
         foreach ($this->children($d, $all) as $child) {
-            if (! $child['field']->required) {
-                continue; // the database clears an optional link itself
+            if (! $child['field']->required || $child === $lines) {
+                continue; // the database clears an optional link itself, and lines go with what they are lines of
             }
             $one = strtolower($child['resource']->label);
             $many = strtolower($child['resource']->pluralLabel);
@@ -1121,6 +1165,28 @@ final class ResourceGenerator
         }
         $guardBlock = $guards ? "\n".implode("\n", array_map(fn (string $g) => rtrim($g), $guards)) : '';
         $destroyReturn = $guards ? 'Response|JsonResponse' : 'Response';
+        // With lines, a save is the record and its lines together or neither, and one record
+        // is answered with its lines.
+        $store = "\${$var} = {$d->name}::create(\$request->values());";
+        $update = "\${$var}->update(\$request->values());";
+        $load = '';
+        if ($lines !== null) {
+            $store = <<<PHP
+            \${$var} = \\Illuminate\\Support\\Facades\\DB::transaction(function () use (\$request) {
+                        \${$var} = {$d->name}::create(\$request->values());
+                        \$request->saveItems(\${$var});
+
+                        return \${$var};
+                    });
+            PHP;
+            $update = <<<PHP
+            \\Illuminate\\Support\\Facades\\DB::transaction(function () use (\$request, \${$var}) {
+                        \${$var}->update(\$request->values());
+                        \$request->saveItems(\${$var});
+                    });
+            PHP;
+            $load = "->load('{$lines['name']}')";
+        }
         $m = self::M;
         $e = self::E;
 
@@ -1169,9 +1235,9 @@ final class ResourceGenerator
 
             public function store({$d->name}Request \$request): JsonResponse
             {
-                \${$var} = {$d->name}::create(\$request->values());
+                {$store}
 
-                return (new {$d->name}Resource(\${$var}->refresh()))
+                return (new {$d->name}Resource(\${$var}->refresh(){$load}))
                     ->response()
                     ->setStatusCode(201)
                     ->header('Location', \$request->url().'/'.\${$var}->getKey());
@@ -1188,14 +1254,14 @@ final class ResourceGenerator
             {
                 Gate::authorize('view', \${$var});
 
-                return new {$d->name}Resource(\${$var});
+                return new {$d->name}Resource(\${$var}{$load});
             }
 
             public function update({$d->name}Request \$request, {$d->name} \${$var}): {$d->name}Resource
             {
-                \${$var}->update(\$request->values());
+                {$update}
 
-                return new {$d->name}Resource(\${$var}->refresh());
+                return new {$d->name}Resource(\${$var}->refresh(){$load});
             }
 
             public function destroy({$d->name} \${$var}): {$destroyReturn}

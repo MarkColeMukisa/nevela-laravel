@@ -9,6 +9,7 @@ use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Generator\Writer;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Naming;
 
 final class GenerateCommand extends Command
 {
@@ -148,10 +149,31 @@ final class GenerateCommand extends Command
                 $queue[$field->target] ??= $byName[$field->target];
             }
         }
+        // Lines are a resource that belongs to this one, and they have no lines of their own.
+        foreach ($queue as $descriptor) {
+            if ($descriptor->items === null) {
+                continue;
+            }
+            $lines = $generator->lineItems($descriptor, $all);
+            if ($lines === null) {
+                $field = Naming::camel($descriptor->name);
+                $command->components->error("{$descriptor->name}'s items are {$descriptor->items}, which ".(isset($byName[$descriptor->items]) ? "doesn't belong to {$descriptor->name}. Give it a field {$field}:belongsTo({$descriptor->name})." : "doesn't exist yet. Create it: php artisan nevela:resource {$descriptor->items} --fields=\"{$field}:belongsTo({$descriptor->name}), …\""));
+
+                return self::FAILURE;
+            }
+            if ($lines['resource']->items !== null) {
+                $command->components->error("{$descriptor->items} is {$descriptor->name}'s items, so it can't have items of its own.");
+
+                return self::FAILURE;
+            }
+        }
 
         $files = [];
-        foreach ($queue as $descriptor) {
-            array_push($files, ...$generator->forResource($descriptor, null, $all));
+        // A second apart, in the order given: made together, an order's table is created
+        // before the table of its lines, which points at it.
+        $now = time();
+        foreach (array_values($queue) as $index => $descriptor) {
+            array_push($files, ...$generator->forResource($descriptor, date('Y_m_d_His', $now + $index), $all));
             // A table made before there was a trash gets a migration that gives it one. A new
             // resource's own migration, written by the line above, already has the column.
             $made = array_map(fn (string $file) => (string) file_get_contents($file), glob(database_path("migrations/*_create_{$descriptor->table}_table.php")) ?: []);

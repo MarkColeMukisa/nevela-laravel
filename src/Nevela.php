@@ -27,6 +27,9 @@ final class Nevela
     /** @var array<string, Descriptor> */
     private static array $descriptors = [];
 
+    /** @var list<string>|null The resources that are another one's lines, once asked. */
+    private static ?array $lineResources = null;
+
     /**
      * A short id for this installation, from where it is on disk. It gives nothing away,
      * and it differs between two apps on one machine, which is what it is for: telling
@@ -58,6 +61,37 @@ final class Nevela
         return self::$descriptors[$name] = Descriptor::fromJson((string) file_get_contents($path));
     }
 
+    /**
+     * A resource's lines: the model they are and the column that points back at it, when
+     * its descriptor names some in "items" and that resource belongs to it.
+     *
+     * @return array{model: class-string<\Illuminate\Database\Eloquent\Model>, column: string}|null
+     */
+    public static function linesOf(string $name): ?array
+    {
+        $items = self::find($name)?->items;
+        $lines = $items === null ? null : self::find($items);
+        $model = "App\\Models\\{$items}";
+        if ($lines === null || ! class_exists($model)) {
+            return null;
+        }
+        foreach ($lines->fields as $field) {
+            if ($field->kind === 'belongsTo' && $field->target === $name) {
+                return ['model' => $model, 'column' => $field->column()];
+            }
+        }
+
+        return null;
+    }
+
+    /** Whether a resource is another one's lines: reached through that one, not on its own. */
+    public static function isLines(string $name): bool
+    {
+        self::$lineResources ??= array_values(array_filter(array_map(fn (Descriptor $d) => $d->items, self::all())));
+
+        return in_array($name, self::$lineResources, true);
+    }
+
     private static function path(string $name): string
     {
         return rtrim(config('nevela.descriptors_path'), '/\\').DIRECTORY_SEPARATOR.Naming::kebab($name).'.json';
@@ -79,6 +113,7 @@ final class Nevela
     public static function forget(): void
     {
         self::$descriptors = [];
+        self::$lineResources = null;
         Access\Permissions::forget();
     }
 

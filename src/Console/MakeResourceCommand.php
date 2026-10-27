@@ -16,6 +16,7 @@ final class MakeResourceCommand extends Command
         {--icon= : Lucide icon name for the dashboard, e.g. package}
         {--group= : Sidebar group in the dashboard}
         {--id=uuid : What a record\'s id is: uuid, or int for the numbered ids of $table->id()}
+        {--items= : Lines edited inside its form and saved with it, as a resource of their own: "OrderItem: product:belongsTo(Product), quantity:int, price:money"}
         {--force : Overwrite an existing descriptor}
         {--migrate : Run the new migration straight away}
         {--seed= : Fill the new resource with records too (25, or the number you give). Runs the migration first}';
@@ -32,6 +33,10 @@ final class MakeResourceCommand extends Command
                 $this->option('group'),
                 (string) $this->option('id'),
             );
+            $lines = $this->option('items') === null ? null : self::lines($descriptor, (string) $this->option('items'));
+            if ($lines !== null) {
+                $descriptor = Descriptor::fromArray(['items' => $lines->name] + $descriptor->toArray());
+            }
         } catch (InvalidArgumentException $e) {
             $this->components->error($e->getMessage());
 
@@ -39,28 +44,33 @@ final class MakeResourceCommand extends Command
         }
 
         $dir = rtrim(config('nevela.descriptors_path'), '/\\');
-        $path = $dir.DIRECTORY_SEPARATOR.Naming::kebab($descriptor->name).'.json';
-        if (is_file($path) && ! $this->option('force')) {
-            $this->components->error("{$descriptor->name} already has a descriptor. Edit it and run: php artisan nevela:generate {$descriptor->name}");
-
-            return self::FAILURE;
-        }
-        // Checked before anything is written: a relation needs the resource it points at.
-        foreach ($descriptor->fields as $field) {
-            if ($field->kind === 'belongsTo' && $field->target !== $descriptor->name && ! is_file($dir.DIRECTORY_SEPARATOR.Naming::kebab((string) $field->target).'.json')) {
-                $this->components->error("{$field->name} belongs to {$field->target}, which doesn't exist yet. Create it first: php artisan nevela:resource {$field->target} --fields=\"name:string\"");
+        $described = $lines === null ? [$descriptor] : [$descriptor, $lines];
+        foreach ($described as $one) {
+            if (is_file($dir.DIRECTORY_SEPARATOR.Naming::kebab($one->name).'.json') && ! $this->option('force')) {
+                $this->components->error("{$one->name} already has a descriptor. Edit it and run: php artisan nevela:generate {$one->name}");
 
                 return self::FAILURE;
+            }
+            // Checked before anything is written: a relation needs the resource it points at.
+            foreach ($one->fields as $field) {
+                if ($field->kind === 'belongsTo' && $field->target !== $one->name && $field->target !== $descriptor->name && ! is_file($dir.DIRECTORY_SEPARATOR.Naming::kebab((string) $field->target).'.json')) {
+                    $this->components->error("{$field->name} belongs to {$field->target}, which doesn't exist yet. Create it first: php artisan nevela:resource {$field->target} --fields=\"name:string\"");
+
+                    return self::FAILURE;
+                }
             }
         }
         if (! is_dir($dir)) {
             mkdir($dir, 0775, true);
         }
-        file_put_contents($path, $descriptor->toJson());
-        $this->components->info("Described {$descriptor->name} in ".str_replace(base_path().DIRECTORY_SEPARATOR, '', $path));
+        foreach ($described as $one) {
+            $path = $dir.DIRECTORY_SEPARATOR.Naming::kebab($one->name).'.json';
+            file_put_contents($path, $one->toJson());
+            $this->components->info("Described {$one->name} in ".str_replace(base_path().DIRECTORY_SEPARATOR, '', $path));
+        }
 
         Nevela::forget();
-        $status = GenerateCommand::generate($this, [$descriptor], Nevela::all(), false);
+        $status = GenerateCommand::generate($this, $described, Nevela::all(), false);
 
         // "--seed" on its own and "--seed=100" both count; without a number it is 25.
         $seed = $this->input->hasParameterOption('--seed') || $this->option('seed') !== null;
@@ -70,7 +80,12 @@ final class MakeResourceCommand extends Command
             $status = $this->call('migrate');
         }
         if ($status === self::SUCCESS && $seed) {
-            $status = $this->call('nevela:seed', ['name' => $descriptor->name, '--count' => $this->option('seed') ?: 25]);
+            $count = (int) ($this->option('seed') ?: 25);
+            $status = $this->call('nevela:seed', ['name' => $descriptor->name, '--count' => $count]);
+            // Three lines each, on average: some have more, some none.
+            if ($status === self::SUCCESS && $lines !== null) {
+                $status = $this->call('nevela:seed', ['name' => $lines->name, '--count' => $count * 3]);
+            }
         }
 
         $this->newLine();
@@ -80,6 +95,28 @@ final class MakeResourceCommand extends Command
         $this->line("  API:  GET|POST /{$this->prefix()}{$descriptor->slug} · GET|PUT|PATCH|DELETE /{$this->prefix()}{$descriptor->slug}/{id} · GET /{$this->prefix()}{$descriptor->slug}/_stats");
 
         return $status;
+    }
+
+    /**
+     * The lines `--items` describes: "OrderItem: product:belongsTo(Product), quantity:int".
+     * The name comes first, then their fields. Grit's "InvoiceItem:description:string,qty:int"
+     * reads the same. They are given the field that points at what they are lines of,
+     * unless one of theirs already does.
+     */
+    public static function lines(Descriptor $of, string $spec): Descriptor
+    {
+        [$name, $fields] = array_map('trim', explode(':', $spec, 2) + [1 => '']);
+        if ($name === '' || $fields === '') {
+            throw new InvalidArgumentException('--items is the lines\' name and then their fields: --items="'.$of->name.'Item: product:belongsTo(Product), quantity:int, price:money".');
+        }
+        $lines = Descriptor::fromSpec($name, $fields);
+        foreach ($lines->fields as $field) {
+            if ($field->kind === 'belongsTo' && $field->target === $of->name) {
+                return $lines;
+            }
+        }
+
+        return Descriptor::fromSpec($name, $fields.', '.Naming::camel($of->name).':belongsTo('.$of->name.')');
     }
 
     private function prefix(): string

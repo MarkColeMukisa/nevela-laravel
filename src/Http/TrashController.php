@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Http;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Trash\Trash;
@@ -50,7 +51,8 @@ final class TrashController
 
         $resources = [];
         foreach (Trash::resources() as ['descriptor' => $descriptor, 'model' => $model]) {
-            if (! Trash::maySee($model)) {
+            // Lines are in the trash with what they are lines of, and come back with it.
+            if (! Trash::maySee($model) || Nevela::isLines($descriptor->name)) {
                 continue;
             }
             $resources[] = [
