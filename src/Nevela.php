@@ -40,15 +40,27 @@ final class Nevela
     /** A resource's descriptor, from config('nevela.descriptors_path')/<kebab-name>.json. */
     public static function resource(string $name): Descriptor
     {
+        return self::find($name)
+            ?? throw new InvalidArgumentException("No Nevela descriptor for {$name} at ".self::path($name).'.');
+    }
+
+    /** A resource's descriptor, or null when it has none. Read once, then remembered. */
+    public static function find(string $name): ?Descriptor
+    {
         if (isset(self::$descriptors[$name])) {
             return self::$descriptors[$name];
         }
-        $path = rtrim(config('nevela.descriptors_path'), '/\\').DIRECTORY_SEPARATOR.Naming::kebab($name).'.json';
+        $path = self::path($name);
         if (! is_file($path)) {
-            throw new InvalidArgumentException("No Nevela descriptor for {$name} at {$path}.");
+            return null;
         }
 
         return self::$descriptors[$name] = Descriptor::fromJson((string) file_get_contents($path));
+    }
+
+    private static function path(string $name): string
+    {
+        return rtrim(config('nevela.descriptors_path'), '/\\').DIRECTORY_SEPARATOR.Naming::kebab($name).'.json';
     }
 
     /** @return list<Descriptor> */

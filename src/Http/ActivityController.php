@@ -24,6 +24,10 @@ final class ActivityController
             'page' => ['nullable', 'integer', 'min:1'],
             'perPage' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
+        // Not "nothing yet": nothing can be kept until the table is there.
+        if (! Activity::ready()) {
+            return response()->json(['error' => 'The activity log needs a migration that has not been run: php nevela migrate', 'code' => 'MIGRATION_NEEDED'], 409);
+        }
 
         return response()->json(Activity::for(
             $request->user(),

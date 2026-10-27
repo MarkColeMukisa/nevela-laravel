@@ -106,8 +106,13 @@ final class Activity
                 $who = (string) $entry['user']->getAuthIdentifier();
                 $groups["{$who}|{$entry['action']}|{$entry['descriptor']->name}"][] = $entry;
             }
+            // Each on its own: one that fails mustn't lose the rest.
             foreach ($groups as $entries) {
-                self::write($entries);
+                try {
+                    self::write($entries);
+                } catch (Throwable $e) {
+                    report($e);
+                }
             }
         } catch (Throwable $e) {
             report($e);
@@ -131,9 +136,10 @@ final class Activity
     public static function for(mixed $viewer, array $filters = [], int $page = 1, int $perPage = 25): array
     {
         $visible = array_values(array_filter(Nevela::all(), fn (Descriptor $d) => Access::allows($viewer, "{$d->table}.view")));
-        $byName = [];
+        $byName = $mayDelete = [];
         foreach ($visible as $descriptor) {
             $byName[$descriptor->name] = $descriptor;
+            $mayDelete[$descriptor->name] = Access::allows($viewer, "{$descriptor->table}.delete");
         }
         if (! self::ready() || $byName === []) {
             return ['data' => [], 'meta' => ['page' => 1, 'perPage' => $perPage, 'total' => 0, 'totalPages' => 0]];
@@ -152,7 +158,7 @@ final class Activity
         $names = $model::query()->whereIn($key, $rows->pluck('user_id')->filter()->unique()->values()->all())->pluck('name', $key)->all();
 
         return [
-            'data' => $rows->map(function (object $row) use ($byName, $names) {
+            'data' => $rows->map(function (object $row) use ($byName, $names, $mayDelete) {
                 $descriptor = $byName[$row->resource];
                 $ids = json_decode((string) $row->record_ids, true) ?: [];
                 $count = (int) $row->count;
@@ -167,7 +173,7 @@ final class Activity
                     'count' => $count,
                     'title' => $count === 1 ? $row->label : null,
                     'recordId' => $count === 1 ? ($ids[0] ?? null) : null,
-                    'url' => self::url($descriptor, $row->action, $count === 1 ? ($ids[0] ?? null) : null),
+                    'url' => self::url($descriptor, $row->action, $count === 1 ? ($ids[0] ?? null) : null, $mayDelete[$descriptor->name]),
                     'user' => $row->user_id === null ? null : ['id' => $row->user_id, 'name' => $names[$row->user_id] ?? null],
                     'at' => Carbon::parse($row->updated_at)->toIso8601String(),
                     'startedAt' => Carbon::parse($row->created_at)->toIso8601String(),
@@ -183,12 +189,16 @@ final class Activity
         return self::ready() ? DB::table(self::TABLE)->where('updated_at', '<', now()->subDays(self::KEEP_DAYS))->delete() : 0;
     }
 
-    /** Where it can be seen: the record, the trash it went to, or the list. */
-    public static function url(Descriptor $descriptor, string $action, ?string $id): ?string
+    /**
+     * Where it can be seen: the record, the trash it went to, or the list. The trash is for
+     * those who may delete that resource; anyone else is sent to the list.
+     */
+    public static function url(Descriptor $descriptor, string $action, ?string $id, bool $mayDelete = true): ?string
     {
         return match (true) {
             $action === 'purged' => null,
-            $action === 'deleted' => '/dashboard/trash',
+            $action === 'deleted' && $mayDelete => "/dashboard/trash?in={$descriptor->slug}",
+            $action === 'deleted' => "/dashboard/{$descriptor->slug}",
             $id !== null => "/dashboard/{$descriptor->slug}/{$id}",
             default => "/dashboard/{$descriptor->slug}",
         };
@@ -203,19 +213,16 @@ final class Activity
         return is_scalar($value) ? Str::limit(trim(strip_tags((string) $value)), 80) : '';
     }
 
+    /** The resource a model is, by its name: one file looked for, once, however many records are saved. */
     private static function descriptorOf(Model $model): ?Descriptor
     {
         $class = $model::class;
         if (! str_starts_with($class, 'App\\Models\\')) {
             return null;
         }
-        foreach (Nevela::all() as $descriptor) {
-            if ("App\\Models\\{$descriptor->name}" === $class) {
-                return $descriptor;
-            }
-        }
+        $descriptor = Nevela::find(class_basename($class));
 
-        return null;
+        return $descriptor !== null && "App\\Models\\{$descriptor->name}" === $class ? $descriptor : null;
     }
 
     /**

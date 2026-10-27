@@ -4,7 +4,9 @@ namespace Nevela\Laravel\Notices;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Activity\Activity;
+use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Support\Descriptor;
 
 /**
@@ -118,15 +120,33 @@ final class Announce
         $verb = ['created' => 'created', 'deleted' => 'deleted', 'restored' => 'restored'][$action];
         $one = "{$who} {$verb} ".(preg_match('/^[aeiou]/i', $label) ? 'an' : 'a')." {$label}".($title !== '' ? ": {$title}" : '');
 
-        Notices::toPermission("{$descriptor->table}.view", new Notice(
+        $notice = fn (bool $mayDelete) => new Notice(
             $count === 1 ? $one : "{$who} {$verb} ".number_format($count)." {$plural}",
-            url: Activity::url($descriptor, $action, $id),
+            url: Activity::url($descriptor, $action, $id, $mayDelete),
             kind: "record.{$action}",
             group: "record.{$action}:{$descriptor->name}:".$user->getAuthIdentifier(),
             many: fn (int $n) => "{$who} {$verb} ".number_format($n)." {$plural}",
-            manyUrl: Activity::url($descriptor, $action, null),
+            manyUrl: Activity::url($descriptor, $action, null, $mayDelete),
             count: $count,
-        ), except: $user);
+        );
+        if ($action !== 'deleted') {
+            Notices::toPermission("{$descriptor->table}.view", $notice(true), except: $user);
+
+            return;
+        }
+        // A deletion leads to the trash, for those who may use it, and to the list for the rest.
+        try {
+            $key = (new (Account::model()))->getKeyName();
+            $deleters = Access::holders("{$descriptor->table}.delete")->whereKeyNot($user->getAuthIdentifier());
+            $ids = (clone $deleters)->limit(Notices::MOST_RECIPIENTS)->pluck($key)->all();
+            $viewers = Access::holders("{$descriptor->table}.view")->whereKeyNot($user->getAuthIdentifier())->whereNotIn($key, $ids);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return;
+        }
+        Notices::send($deleters, $notice(true));
+        Notices::send($viewers, $notice(false));
     }
 
     /** What a list would call the record, short: its title, or nothing when it has only an id. */
