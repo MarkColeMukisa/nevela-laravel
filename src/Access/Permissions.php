@@ -50,7 +50,7 @@ final class Permissions
         }
 
         self::$own = [];
-        $taken = ['users' => true, 'roles' => true];
+        $taken = ['users' => true, 'roles' => true, 'activity' => true];
         $modules = [[
             'key' => 'access',
             'name' => 'Access',
@@ -60,6 +60,8 @@ final class Permissions
                 'features' => [
                     ['key' => 'users', 'name' => 'Users', 'actions' => self::ACTIONS],
                     ['key' => 'roles', 'name' => 'Roles and permissions', 'actions' => self::ACTIONS],
+                    // Who did what to the records they may see (Activity\Activity). Only to read.
+                    ['key' => 'activity', 'name' => 'Activity', 'actions' => ['view']],
                 ],
             ]],
         ]];

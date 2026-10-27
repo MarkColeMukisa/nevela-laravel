@@ -21,6 +21,7 @@ final class Notice
      * @param  string|null  $group  Notices with the same group are one while unread, with a count.
      * @param  (Closure(int): string)|null  $many  The title once there are several of the group.
      * @param  string|null  $manyUrl  Where several lead: the list rather than the latest record.
+     * @param  int  $count  How many things this one notice stands for: 20 records deleted at once.
      */
     public function __construct(
         public readonly string $title,
@@ -31,5 +32,6 @@ final class Notice
         public readonly ?string $group = null,
         public readonly ?Closure $many = null,
         public readonly ?string $manyUrl = null,
+        public readonly int $count = 1,
     ) {}
 }

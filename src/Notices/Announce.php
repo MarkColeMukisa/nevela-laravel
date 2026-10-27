@@ -4,6 +4,7 @@ namespace Nevela\Laravel\Notices;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use Nevela\Laravel\Activity\Activity;
 use Nevela\Laravel\Support\Descriptor;
 
 /**
@@ -105,12 +106,32 @@ final class Announce
         ));
     }
 
+    /**
+     * Someone created, deleted or restored records (see Activity): told to everyone else who
+     * may see them. One line per person and kind while unread: "Ada deleted 20 products".
+     */
+    public static function recordsChanged(mixed $user, string $action, Descriptor $descriptor, int $count, ?string $id, string $title): void
+    {
+        $who = trim((string) ($user->name ?? '')) ?: 'Someone';
+        $label = mb_strtolower($descriptor->label);
+        $plural = mb_strtolower($descriptor->pluralLabel);
+        $verb = ['created' => 'created', 'deleted' => 'deleted', 'restored' => 'restored'][$action];
+        $one = "{$who} {$verb} ".(preg_match('/^[aeiou]/i', $label) ? 'an' : 'a')." {$label}".($title !== '' ? ": {$title}" : '');
+
+        Notices::toPermission("{$descriptor->table}.view", new Notice(
+            $count === 1 ? $one : "{$who} {$verb} ".number_format($count)." {$plural}",
+            url: Activity::url($descriptor, $action, $id),
+            kind: "record.{$action}",
+            group: "record.{$action}:{$descriptor->name}:".$user->getAuthIdentifier(),
+            many: fn (int $n) => "{$who} {$verb} ".number_format($n)." {$plural}",
+            manyUrl: Activity::url($descriptor, $action, null),
+            count: $count,
+        ), except: $user);
+    }
+
     /** What a list would call the record, short: its title, or nothing when it has only an id. */
     private static function titleOf(Descriptor $descriptor, Model $record): string
     {
-        $field = $descriptor->fields[$descriptor->title()] ?? null;
-        $value = $field !== null ? $record->getAttribute($field->column()) : null;
-
-        return is_scalar($value) ? Str::limit(trim(strip_tags((string) $value)), 80) : '';
+        return Activity::labelOf($descriptor, $record);
     }
 }

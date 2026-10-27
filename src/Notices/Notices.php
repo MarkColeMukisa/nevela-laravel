@@ -175,6 +175,7 @@ final class Notices
     private static function write(string $userId, Notice $notice): void
     {
         $now = now();
+        $added = max(1, $notice->count);
         $fields = [
             'body' => $notice->body === null ? null : Str::limit($notice->body, 497),
             'tone' => $notice->tone === 'warning' ? 'warning' : 'info',
@@ -182,12 +183,12 @@ final class Notices
         ];
         if ($notice->group !== null) {
             // Locked while it is counted: two arriving at once must not both write the same count.
-            $grown = DB::transaction(function () use ($userId, $notice, $fields) {
+            $grown = DB::transaction(function () use ($userId, $notice, $fields, $added) {
                 $open = DB::table(self::TABLE)->where('user_id', $userId)->where('group_key', $notice->group)->whereNull('read_at')->lockForUpdate()->first();
                 if ($open === null) {
                     return false;
                 }
-                $count = (int) $open->count + 1;
+                $count = (int) $open->count + $added;
                 DB::table(self::TABLE)->where('id', $open->id)->update([
                     ...$fields,
                     'count' => $count,
@@ -208,9 +209,9 @@ final class Notices
             'user_id' => $userId,
             'kind' => Str::limit($notice->kind, 64, ''),
             'group_key' => $notice->group === null ? null : Str::limit($notice->group, 191, ''),
-            'count' => 1,
-            'title' => Str::limit($notice->title, 252),
-            'url' => $notice->url,
+            'count' => $added,
+            'title' => Str::limit($added > 1 && $notice->many !== null ? ($notice->many)($added) : $notice->title, 252),
+            'url' => $added > 1 ? ($notice->manyUrl ?? $notice->url) : $notice->url,
             'created_at' => $now,
         ]);
     }

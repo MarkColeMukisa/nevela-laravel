@@ -7,6 +7,7 @@ use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
@@ -22,6 +23,7 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Activity\Activity;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Console\AdoptCommand;
@@ -55,6 +57,7 @@ use Nevela\Laravel\Http\Auth\SocialController;
 use Nevela\Laravel\Http\PublicThrottle;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
+use Nevela\Laravel\Http\ActivityController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Http\NotificationsController;
@@ -109,7 +112,7 @@ final class NevelaServiceProvider extends ServiceProvider
                 // A sign of life, so `nevela deploy:check` can tell the scheduler is running.
                 $schedule->call(fn () => Cache::forever(DeployCheckCommand::HEARTBEAT, time()))->everyFiveMinutes()->name('nevela:heartbeat');
                 // The bell's notices, once kept long enough, and whether a newer Nevela is out.
-                $schedule->call(fn () => Notices::prune())->dailyAt('03:55')->name('nevela:notifications:prune');
+                $schedule->call(fn () => Notices::prune() + Activity::prune())->dailyAt('03:55')->name('nevela:notifications:prune');
                 $schedule->call(fn () => Conditions::lookUpRelease())->dailyAt('04:10')->name('nevela:releases');
             });
         }
@@ -127,6 +130,17 @@ final class NevelaServiceProvider extends ServiceProvider
         Event::listen([MigrationsStarted::class, MigrationsEnded::class], fn () => SchemaFacts::forget());
         // The bell's "migrations haven't been run" goes once they have.
         Event::listen(MigrationsEnded::class, fn () => Conditions::forget());
+
+        // The activity log: every write to a resource's records by someone signed in, from
+        // Eloquent's own events, written once the response has gone (Activity\Activity).
+        foreach (['created', 'updated', 'deleted', 'restored'] as $action) {
+            Event::listen("eloquent.{$action}: *", function (string $event, array $payload) use ($action) {
+                if (($payload[0] ?? null) instanceof Model) {
+                    Activity::noted($action, $payload[0]);
+                }
+            });
+        }
+        $this->app->terminating(fn () => Activity::flush());
 
         // A job that failed for good is something only an administrator can look into.
         // One row per kind of job while unread, however often it fails.
@@ -179,6 +193,8 @@ final class NevelaServiceProvider extends ServiceProvider
      */
     public static function newRequest(): void
     {
+        // Anything the last one did that wasn't written when it ended.
+        Activity::flush();
         Access::forget();
         Uploads::forget();
         SchemaFacts::refresh();
@@ -303,6 +319,7 @@ final class NevelaServiceProvider extends ServiceProvider
             // The bell: everyone has one, whatever their roles.
             Route::get('_nevela/notifications', [NotificationsController::class, 'index'])->name('notifications.index');
             Route::post('_nevela/notifications/read', [NotificationsController::class, 'read'])->name('notifications.read');
+            Route::get('_nevela/activity', [ActivityController::class, 'index'])->name('activity.index');
 
             Route::get('_nevela/trash', [TrashController::class, 'index'])->name('trash.index');
             Route::get('_nevela/trash/_status', [TrashController::class, 'status'])->name('trash.status');
