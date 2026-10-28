@@ -117,14 +117,17 @@ final class Fake
         }
 
         // Any other slug made from a field reads as that field does: Quiet Backpack is
-        // quiet-backpack. Numbered when it has to be unique and what it is made from doesn't make it so.
+        // quiet-backpack. Numbered when it has to be unique and what it is made from doesn't make
+        // it so, and cut to fit its column, number and all.
         foreach ($resource->fields as $field) {
             $source = $field->from === null ? null : ($resource->fields[$field->from] ?? null);
-            if ($field->format !== 'slug' || $source === null || ($isGroup && $field->name === 'slug') || ! isset($row[$field->column()]) || ! is_string($row[$source->column()] ?? null)) {
+            if ($field->format !== 'slug' || $source === null || ($isGroup && $field->name === 'slug' && $field->from === 'name') || ! isset($row[$field->column()]) || ! is_string($row[$source->column()] ?? null)) {
                 continue;
             }
             $words = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($row[$source->column()])), '-');
-            $row[$field->column()] = ($words === '' ? 'item' : $words).($field->unique && ! $source->unique ? "-{$number}" : '');
+            $suffix = $field->unique && ! $source->unique ? "-{$number}" : '';
+            $room = max(1, ($field->maxLength ?? 255) - strlen($suffix));
+            $row[$field->column()] = rtrim(substr($words === '' ? 'item' : $words, 0, $room), '-').$suffix;
         }
 
         return $row;
