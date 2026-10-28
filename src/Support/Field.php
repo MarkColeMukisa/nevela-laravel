@@ -44,9 +44,10 @@ final class Field
      * @param  int|null  $maxLength  string and text: the most characters it holds, where that isn't the usual 255 or 65,535
      * @param  bool  $private  file: kept where the web server doesn't reach, and handed only to someone who may view the record
      * @param  string|int|float|bool|null  $default  What the field is when a create leaves it out. Also the column's default.
-     * @param  string|null  $from  slug: the field it is made from when a create leaves it empty, e.g. "title"
+     * @param  string|null  $from  slug: the field it is made from when a create leaves it empty, e.g. "title". Any other: a relation's field it is copied from, e.g. "productId.price"
      * @param  array<string, string>  $optionLabels  enum: what each value is called where people read it. The value is what is stored.
      * @param  string|null  $currency  money: an ISO 4217 code, "UGX". The app's (nevela.currency) unless set.
+     * @param  string|null  $auto  string: the prefix of the number Laravel gives each new record, e.g. "INV" for INV-0001
      * @param  bool|string|null  $list  Its column in the dashboard's table: true shown, "hidden" off until someone turns it on, false left out. Null leaves it to listing().
      */
     public function __construct(
@@ -67,6 +68,7 @@ final class Field
         public readonly array $optionLabels = [],
         public readonly ?string $currency = null,
         public readonly bool|string|null $list = null,
+        public readonly ?string $auto = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -139,7 +141,26 @@ final class Field
                 throw new InvalidArgumentException("\"{$name}\" is unique, so only one record could ever have its default.");
             }
         }
-        if ($from !== null) {
+        if ($auto !== null) {
+            if ($kind !== 'string' || $format !== null) {
+                throw new InvalidArgumentException("\"{$name}\" can't be numbered: that is for a string, such as {$name}:auto(INV).");
+            }
+            if (! preg_match('/^[A-Za-z][A-Za-z0-9]{0,9}$/', $auto)) {
+                throw new InvalidArgumentException("The prefix of \"{$name}\" is letters and digits, starting with a letter, at most 10: {$name}:auto(INV).");
+            }
+            if (! $unique) {
+                throw new InvalidArgumentException("\"{$name}\" is numbered, so no two records share a number: it has to be unique.");
+            }
+        }
+        if ($from !== null && str_contains($from, '.')) {
+            // price:money(product.price): copied from the product the record points at.
+            if (! preg_match('/^[a-z][A-Za-z0-9]*Id\.[a-z][A-Za-z0-9]*$/', $from)) {
+                throw new InvalidArgumentException("\"{$name}\" is copied from a field of a record it points at, written relation.field: {$name}:money(product.price).");
+            }
+            if (in_array($kind, ['file', 'belongsTo'], true) || $unique || $auto !== null) {
+                throw new InvalidArgumentException("\"{$name}\" can't be copied from another record: a copy is a plain value, and not unique.");
+            }
+        } elseif ($from !== null) {
             if ($kind !== 'string' || $format !== 'slug') {
                 throw new InvalidArgumentException("\"{$name}\" can't be made from another field: that is for a slug ({$name}:slug({$from})).");
             }
@@ -210,6 +231,8 @@ final class Field
 
             return self::fromArray($field->name, ['default' => $value] + $field->toArray());
         }
+        // Grit's number:string:auto:INV is number:auto(INV).
+        $written = (string) preg_replace('/^([^:]+):string:auto(?::([^:?!]*))?([?!]{0,2})$/', '$1:auto($2)$3', trim($written));
         $token = self::normalise($written);
         if (! preg_match('/^([A-Za-z][A-Za-z0-9_]*):([A-Za-z_]+)(?:\(([^)]*)\))?([?!]{0,2})$/', $token, $m)) {
             throw new InvalidArgumentException("Invalid field \"{$written}\". Expected name:type, e.g. price:money, status:enum(draft|live)?, image:image or category:belongsTo(Category).");
@@ -248,10 +271,23 @@ final class Field
 
             return new self($name, 'file', null, $required, $unique, accept: $accept ?: ['any'], private: count($accept) !== count($list));
         }
+        if ($type === 'auto') {
+            if ($args === '') {
+                throw new InvalidArgumentException("\"{$name}\" is numbered with a prefix of your choosing: {$name}:auto(INV) makes INV-0001, INV-0002 and on.");
+            }
+
+            return new self($name, 'string', null, true, true, auto: $args);
+        }
         if (! isset(self::ALIASES[$type])) {
             throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
         }
         [$kind, $format] = self::ALIASES[$type];
+        // price:money(product.price): copied from the record it points at.
+        if (preg_match('/^([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_]*)$/', $args, $copy)) {
+            $relation = Naming::camel($copy[1]);
+
+            return new self($name, $kind, $format, $required, $unique, from: (str_ends_with($relation, 'Id') ? $relation : $relation.'Id').'.'.Naming::camel($copy[2]));
+        }
         // slug:slug(title)!: made from the title when a create leaves it empty.
         if ($format === 'slug' && $args !== '' && ! ctype_digit($args)) {
             return new self($name, $kind, $format, $required, $unique, from: Naming::camel($args));
@@ -294,7 +330,7 @@ final class Field
             (string) ($data['kind'] ?? ''),
             $data['format'] ?? null,
             (bool) ($data['required'] ?? true),
-            (bool) ($data['unique'] ?? false),
+            (bool) ($data['unique'] ?? isset($data['auto'])),
             array_values($data['options'] ?? []),
             $data['label'] ?? null,
             $data['target'] ?? null,
@@ -307,6 +343,7 @@ final class Field
             array_map('strval', (array) ($data['optionLabels'] ?? [])),
             $data['currency'] ?? null,
             $data['list'] ?? null,
+            $data['auto'] ?? null,
         );
     }
 
@@ -326,6 +363,7 @@ final class Field
             'private' => $this->private ?: null,
             'default' => $this->default,
             'from' => $this->from,
+            'auto' => $this->auto,
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,

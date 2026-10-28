@@ -86,6 +86,18 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Fields copied from a record this one points at (an order item's price, from its
+     * product). The model makes the copy; what is sent for one is left out. A generated
+     * request with any says which.
+     *
+     * @return list<string>
+     */
+    protected function copied(): array
+    {
+        return [];
+    }
+
+    /**
      * Fill what a create left empty and can be made, and keep a later save from emptying
      * it: once made, a slug is an address, and an address doesn't move.
      *
@@ -96,6 +108,9 @@ abstract class ResourceRequest extends FormRequest
     private function make(array $values, bool $creating, array &$taken = []): array
     {
         $columns = $this->columns();
+        foreach ($this->copied() as $field) {
+            unset($values[$columns[$field] ?? $field]);
+        }
         foreach ($this->made() as $definition) {
             $column = $definition['column'];
             $empty = ! isset($values[$column]) || $values[$column] === '';

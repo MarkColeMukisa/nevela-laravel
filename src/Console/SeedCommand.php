@@ -149,6 +149,13 @@ final class SeedCommand extends Command
                     throw new InvalidArgumentException("Every {$resource->label} needs a {$target->label}, and there are none yet. Seed them first: php artisan nevela:seed {$target->name}");
                 }
                 $pools[$field->name] = $ids;
+                // A field copied from this one's record (an item's price, from its product) is that record's.
+                foreach ($resource->fields as $copy) {
+                    if ($copy->from !== null && str_starts_with($copy->from, "{$field->name}.") && $ids !== []) {
+                        $source = Str::snake(substr($copy->from, strlen($field->name) + 1));
+                        $pools["{$copy->name}@"] = DB::table($target->table)->whereIn('id', $ids)->pluck($source, 'id')->map(fn ($value) => (string) $value)->all();
+                    }
+                }
             } elseif ($field->kind === 'file') {
                 $pools[$field->name] = $field->isImage() ? Uploads::placeholders($resource, $field) : [];
                 if ($pools[$field->name] === [] && $field->required) {
@@ -178,7 +185,15 @@ final class SeedCommand extends Command
                 $created = date('Y-m-d H:i:s', $now - mt_rand(0, 60 * 86400));
                 // An integer id is the database's to give.
                 $id = $resource->idType === 'int' ? [] : ['id' => (string) Str::uuid7()];
-                $rows[] = $id + Fake::row($resource, $offset + $i + 1, $pools) + ['created_at' => $created, 'updated_at' => $created];
+                $row = Fake::row($resource, $offset + $i + 1, $pools);
+                foreach ($resource->fields as $copy) {
+                    $copies = $pools["{$copy->name}@"] ?? null;
+                    $key = $copies === null ? null : $row[$resource->fields[explode('.', (string) $copy->from)[0]]->column()] ?? null;
+                    if ($key !== null && isset($copies[$key])) {
+                        $row[$copy->column()] = $copies[$key];
+                    }
+                }
+                $rows[] = $id + $row + ['created_at' => $created, 'updated_at' => $created];
             }
             DB::table($resource->table)->insert($rows);
             $bar->advance(count($rows));

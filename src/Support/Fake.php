@@ -180,6 +180,9 @@ final class Fake
     {
         $name = strtolower($field->name);
 
+        if ($field->auto !== null) {
+            return Numbering::format($field->auto, $number);
+        }
         $value = match (true) {
             // Always numbered: two people called Ada Okafor must not share an address.
             $field->format === 'email' || str_contains($name, 'email') => strtolower("{$first}.{$last}{$number}@example.com"),

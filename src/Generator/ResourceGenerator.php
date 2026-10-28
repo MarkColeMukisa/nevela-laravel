@@ -6,6 +6,7 @@ use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Naming;
+use Nevela\Laravel\Support\Numbering;
 use Nevela\Laravel\Support\PublicAccess;
 
 /**
@@ -712,6 +713,37 @@ final class ResourceGenerator
             // $record->optionLabel('status'): what its value is called, in the dashboard's words.
             use \Nevela\Laravel\Concerns\OptionLabels;
         PHP;
+        $numbered = implode(', ', array_map(fn (Field $f) => "'{$f->column()}' => '{$f->auto}'", array_filter($d->fields, fn (Field $f) => $f->auto !== null)));
+        $confirmable .= $numbered === '' ? '' : <<<PHP
+
+            // Numbered by Laravel when made without one: {$this->numberExample($d)}.
+            use \Nevela\Laravel\Concerns\Numbered;
+
+            protected function numbered(): array
+            {
+                return [{$numbered}];
+            }
+        PHP;
+        $copies = [];
+        foreach ($d->fields as $f) {
+            if ($f->from === null || ! str_contains($f->from, '.')) {
+                continue;
+            }
+            [$relation, $source] = explode('.', $f->from);
+            $key = $d->fields[$relation];
+            $copies[] = "'{$f->column()}' => ['{$key->column()}', {$key->target}::class, '".Naming::snake($source)."']";
+        }
+        $copiesList = implode(', ', $copies);
+        $confirmable .= $copies === [] ? '' : <<<PHP
+
+            // Copied from the record it points at when it is made, and when it is pointed at another.
+            use \Nevela\Laravel\Concerns\Copies;
+
+            protected function copied(): array
+            {
+                return [{$copiesList}];
+            }
+        PHP;
         $m = self::M;
         $e = self::E;
 
@@ -744,6 +776,14 @@ final class ResourceGenerator
         }
 
         PHP;
+    }
+
+    /** "INV-0001, INV-0002": what a numbered field of the resource's is given. */
+    private function numberExample(Descriptor $d): string
+    {
+        $prefix = (string) array_values(array_filter(array_map(fn (Field $f) => $f->auto, $d->fields)))[0];
+
+        return Numbering::format($prefix, 1).', '.Numbering::format($prefix, 2);
     }
 
     /** @param list<Descriptor> $all */
@@ -955,8 +995,9 @@ final class ResourceGenerator
         PHP;
         $made = implode(', ', array_map(
             fn (Field $f) => "'{$f->name}' => ['from' => '{$f->from}', 'table' => '{$d->table}', 'column' => '{$f->column()}']",
-            array_filter($d->fields, fn (Field $f) => $f->from !== null),
+            array_filter($d->fields, fn (Field $f) => $f->from !== null && ! str_contains($f->from, '.')),
         ));
+        $copied = implode(', ', array_map(fn (Field $f) => "'{$f->name}'", array_filter($d->fields, fn (Field $f) => $f->from !== null && str_contains($f->from, '.'))));
         $madeBlock = $made === '' ? '' : <<<PHP
 
 
@@ -964,6 +1005,15 @@ final class ResourceGenerator
             protected function made(): array
             {
                 return [{$made}];
+            }
+        PHP;
+        $madeBlock .= $copied === '' ? '' : <<<PHP
+
+
+            /** Fields copied from a record it points at, by the model. What is sent for them is left out. */
+            protected function copied(): array
+            {
+                return [{$copied}];
             }
         PHP;
         // Only where there is one: a resource without rich text has the request it always had.
@@ -1041,8 +1091,8 @@ final class ResourceGenerator
      */
     private function rules(Descriptor $d, Field $f, array $all = []): array
     {
-        // A slug that is made from another field may be left empty: the request fills it in.
-        $rules = [$f->required && $f->from === null ? "'required'" : "'nullable'"];
+        // A slug made from another field, a number and a copy may be left empty: they are filled in.
+        $rules = [$f->required && $f->from === null && $f->auto === null ? "'required'" : "'nullable'"];
         // With a default, leaving it out is saying "the usual". Sent, it is checked like any other.
         if ($f->default !== null) {
             array_unshift($rules, "'sometimes'");
@@ -1368,13 +1418,14 @@ final class ResourceGenerator
         foreach ($d->fields as $f) {
             $options = array_filter([
                 // (A slug made from another field is optional in the form: left empty, Laravel makes it.)
-                'required' => $f->required && $f->from === null ? null : 'false',
+                'required' => $f->required && $f->from === null && $f->auto === null ? null : 'false',
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
                 'currency' => ($currency = $this->currencyOf($f)) !== null ? $j($currency) : null,
                 'optionLabels' => $f->optionLabels !== [] ? $j($f->optionLabels) : null,
                 'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
+                'placeholder' => $f->auto !== null ? $j("Left empty: the next {$f->auto}- number") : null,
                 'default' => $f->default !== null ? $j($f->default) : null,
                 // What the migration does when the parent goes: an optional link is cleared.
                 'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
@@ -1391,6 +1442,9 @@ final class ResourceGenerator
             }
             if ($f->from !== null) {
                 $parts[] = '...({ from: '.$j($f->from).' } as {})';
+            }
+            if ($f->auto !== null) {
+                $parts[] = '...({ auto: '.$j($f->auto).' } as {})';
             }
             if (in_array($f->listing(), ['shown', 'hidden'], true)) {
                 // Decided, not left to the dashboard: shown whatever else there is, or off until turned on.

@@ -70,6 +70,14 @@ final class Descriptor
         }
         $public?->check($name, $fields);
         foreach ($fields as $field) {
+            if ($field->from !== null && str_contains($field->from, '.')) {
+                $relation = explode('.', $field->from)[0];
+                if (! isset($fields[$relation]) || $fields[$relation]->kind !== 'belongsTo') {
+                    throw new InvalidArgumentException("{$name}: \"{$field->name}\" is copied from \"{$field->from}\", and \"{$relation}\" has to be a relation of {$name}, such as {$relation}:belongsTo(…).");
+                }
+
+                continue;
+            }
             if ($field->from !== null && (! isset($fields[$field->from]) || ! in_array($fields[$field->from]->kind, ['string', 'text'], true))) {
                 throw new InvalidArgumentException("{$name}: \"{$field->name}\" is made from \"{$field->from}\", which has to be a string field of {$name}.");
             }

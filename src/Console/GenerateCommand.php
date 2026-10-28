@@ -148,6 +148,20 @@ final class GenerateCommand extends Command
                 }
                 $queue[$field->target] ??= $byName[$field->target];
             }
+            // price copied from product.price: the product has a price, of the same kind.
+            foreach ($descriptor->fields as $field) {
+                if ($field->from === null || ! str_contains($field->from, '.')) {
+                    continue;
+                }
+                [$relation, $source] = explode('.', $field->from);
+                $target = $byName[$descriptor->fields[$relation]->target];
+                $from = $target->fields[$source] ?? null;
+                if ($from === null || $from->kind !== $field->kind) {
+                    $command->components->error("{$descriptor->name}.{$field->name} is copied from {$target->name}.{$source}, ".($from === null ? "which {$target->name} doesn't have." : "which is a {$from->kind} and not a {$field->kind}."));
+
+                    return self::FAILURE;
+                }
+            }
         }
         // Lines are a resource that belongs to this one, and they have no lines of their own.
         foreach ($queue as $descriptor) {
