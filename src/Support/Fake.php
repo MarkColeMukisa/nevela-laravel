@@ -116,6 +116,17 @@ final class Fake
             }
         }
 
+        // Any other slug made from a field reads as that field does: Quiet Backpack is
+        // quiet-backpack. Numbered when it has to be unique and what it is made from doesn't make it so.
+        foreach ($resource->fields as $field) {
+            $source = $field->from === null ? null : ($resource->fields[$field->from] ?? null);
+            if ($field->format !== 'slug' || $source === null || ($isGroup && $field->name === 'slug') || ! isset($row[$field->column()]) || ! is_string($row[$source->column()] ?? null)) {
+                continue;
+            }
+            $words = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($row[$source->column()])), '-');
+            $row[$field->column()] = ($words === '' ? 'item' : $words).($field->unique && ! $source->unique ? "-{$number}" : '');
+        }
+
         return $row;
     }
 
