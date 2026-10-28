@@ -185,8 +185,19 @@ final class RelationsAndFilesTest extends TestCase
         // Nothing to draw from: left empty, not invented.
         $this->assertNull(Fake::row(Descriptor::fromSpec('Product', 'name:string, image:image'), 1)['image']);
 
-        // A category is named like one, with a slug to match.
+        // A category is named like one, with a slug to match. Numbered only once the names run out.
         $category = Fake::row($this->category(), 2);
-        $this->assertSame(['Outdoor', 'outdoor-2'], [$category['name'], $category['slug']]);
+        $this->assertSame(['Outdoor', 'outdoor'], [$category['name'], $category['slug']]);
+        $later = Fake::row($this->category(), 18);
+        $this->assertSame(['Outdoor', 'outdoor-18'], [$later['name'], $later['slug']]); // only the slug is unique here
+
+        // And a company like a company, each one different until the names run out.
+        $companies = Descriptor::fromSpec('Company', 'name:string!');
+        $this->assertSame('Acme Ltd', Fake::row($companies, 1)['name']);
+        $this->assertSame('Globex Ltd', Fake::row($companies, 2)['name']);
+        $this->assertSame('Acme Inc', Fake::row($companies, 21)['name']);
+        $names = array_map(fn (int $n) => Fake::row($companies, $n)['name'], range(1, 120));
+        $this->assertCount(120, array_unique($names));
+        $this->assertSame('Acme Ltd 121', Fake::row($companies, 121)['name']);
     }
 }

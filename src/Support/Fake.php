@@ -23,7 +23,10 @@ final class Fake
     /** What a shop files things under: names for a Category, Collection, Department or Tag. */
     private const GROUPS = ['Kitchen', 'Outdoor', 'Office', 'Lighting', 'Audio', 'Travel', 'Home', 'Garden', 'Fitness', 'Accessories', 'Stationery', 'Bedroom', 'Toys', 'Tools', 'Beauty', 'Pets'];
 
-    private const COMPANIES = ['Acme', 'Globex', 'Initech', 'Northwind', 'Brightline', 'Vandelay', 'Umbrella', 'Hooli', 'Stark', 'Wayne'];
+    private const COMPANIES = ['Acme', 'Globex', 'Initech', 'Northwind', 'Brightline', 'Vandelay', 'Umbrella', 'Hooli', 'Stark', 'Wayne', 'Bluewave', 'Kestrel', 'Lakeside', 'Meridian', 'Oakridge', 'Pinecrest', 'Redstone', 'Silverline', 'Summit', 'Tidewater'];
+
+    /** How a company's name ends: Acme Ltd, Acme Group. */
+    private const COMPANY_ENDINGS = ['Ltd', 'Inc', 'Group', 'Labs', '& Co', 'Partners'];
 
     private const CITIES = ['Kampala', 'Nairobi', 'Lagos', 'Accra', 'London', 'Berlin', 'Toronto', 'Tokyo', 'Lisbon', 'Austin', 'Mumbai', 'Sydney'];
 
@@ -76,6 +79,7 @@ final class Fake
         $last = self::pick(self::LAST);
         $isPerson = isset($resource->fields['email']) || isset($resource->fields['firstName']);
         $isGroup = (bool) preg_match('/(Category|Collection|Department|Tag|Genre|Brand)$/', $resource->name);
+        $isCompany = (bool) preg_match('/(Company|Organi[sz]ation|Business|Supplier|Vendor|Partner|Agency|Firm|Client|Employer)$/', $resource->name);
 
         $row = [];
         foreach ($resource->fields as $field) {
@@ -95,14 +99,20 @@ final class Fake
             $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson);
         }
 
-        // A category is called Kitchen, not Compact Lamp, and its slug follows its name.
+        // A category is called Kitchen and a company Acme Ltd, not Compact Lamp. Each is walked
+        // in order, so a unique name needs its number only once the list has run out.
         $name = $resource->fields['name'] ?? null;
+        if ($isCompany && $name !== null && $name->kind === 'string' && $name->format === null) {
+            $index = $number - 1;
+            $company = self::COMPANIES[$index % count(self::COMPANIES)].' '.self::COMPANY_ENDINGS[intdiv($index, count(self::COMPANIES)) % count(self::COMPANY_ENDINGS)];
+            $row['name'] = $name->unique && $number > count(self::COMPANIES) * count(self::COMPANY_ENDINGS) ? "{$company} {$number}" : $company;
+        }
         if ($isGroup && $name !== null && $name->kind === 'string' && $name->format === null) {
             $group = self::GROUPS[($number - 1) % count(self::GROUPS)];
-            $row['name'] = $name->unique ? "{$group} {$number}" : $group;
+            $row['name'] = $name->unique && $number > count(self::GROUPS) ? "{$group} {$number}" : $group;
             $slug = $resource->fields['slug'] ?? null;
             if ($slug !== null && $slug->format === 'slug' && isset($row['slug'])) {
-                $row['slug'] = strtolower($group).($slug->unique ? "-{$number}" : '');
+                $row['slug'] = strtolower($group).($slug->unique && $number > count(self::GROUPS) ? "-{$number}" : '');
             }
         }
 

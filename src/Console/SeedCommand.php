@@ -93,8 +93,9 @@ final class SeedCommand extends Command
             for ($attempt = 1; ; $attempt++) {
                 // Unique fields are numbered from a block of MAX_COUNT picked per run (a run is at
                 // most that long). Two runs only meet if they pick the same block; then the insert
-                // fails, the transaction rolls back and another block is picked.
-                $offset = $fresh && $attempt === 1 ? 0 : mt_rand(0, self::BLOCKS - 1) * self::MAX_COUNT;
+                // fails, the transaction rolls back and another block is picked. An empty table
+                // has nothing to meet, so it starts at 1: ada.okafor12@example.com, not 1705000012.
+                $offset = ($fresh || $existing === 0) && $attempt === 1 ? 0 : mt_rand(0, self::BLOCKS - 1) * self::MAX_COUNT;
                 $bar->start();
                 try {
                     $removed = DB::transaction(fn () => $this->fill($resource, $count, $chunk, $offset, $fresh, $bar, $pools));
