@@ -14,9 +14,10 @@ use Nevela\Laravel\Nevela;
  * A role holds grants, and a grant may be a pattern:
  *
  *   *                  everything
- *   products.*         every action on products
+ *   products.*         creating, viewing, editing and deleting products
  *   *.view             viewing everything
- *   @resources.*       every action on every resource, including ones added later
+ *   @resources.*       the same for every resource, including ones added later. A
+ *                      resource's own actions (contacts.mark_customer) are given by name
  *   @resources.view    viewing every resource
  *
  * The model, the names and the matching rules are Grit's (internal/authz), so a role means
