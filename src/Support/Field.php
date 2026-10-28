@@ -47,6 +47,7 @@ final class Field
      * @param  string|null  $from  slug: the field it is made from when a create leaves it empty, e.g. "title"
      * @param  array<string, string>  $optionLabels  enum: what each value is called where people read it. The value is what is stored.
      * @param  string|null  $currency  money: an ISO 4217 code, "UGX". The app's (nevela.currency) unless set.
+     * @param  bool|string|null  $list  Its column in the dashboard's table: true shown, "hidden" off until someone turns it on, false left out. Null leaves it to listing().
      */
     public function __construct(
         public readonly string $name,
@@ -65,6 +66,7 @@ final class Field
         public readonly ?string $from = null,
         public readonly array $optionLabels = [],
         public readonly ?string $currency = null,
+        public readonly bool|string|null $list = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -109,6 +111,9 @@ final class Field
             if (! self::isCurrency($currency)) {
                 throw new InvalidArgumentException("\"{$currency}\" on \"{$name}\" is not a currency. Use its three-letter ISO 4217 code, in capitals: UGX, USD, EUR.");
             }
+        }
+        if ($list !== null && ! is_bool($list) && $list !== 'hidden') {
+            throw new InvalidArgumentException("\"list\" on \"{$name}\" is true (a column in the table), \"hidden\" (a column that starts off) or false (no column).");
         }
         if ($kind === 'belongsTo') {
             if ($target === null || ! preg_match('/^[A-Z][A-Za-z0-9]*$/', $target)) {
@@ -301,6 +306,7 @@ final class Field
             $data['from'] ?? null,
             array_map('strval', (array) ($data['optionLabels'] ?? [])),
             $data['currency'] ?? null,
+            $data['list'] ?? null,
         );
     }
 
@@ -323,7 +329,27 @@ final class Field
             'required' => $this->required ? null : false,
             'unique' => $this->unique ?: null,
             'label' => $this->label,
+            'list' => $this->list,
         ], fn ($v) => $v !== null);
+    }
+
+    /**
+     * Its column in the dashboard's table: "shown", "hidden" (in the Columns menu, off until
+     * turned on) or "none". Long text and files that aren't pictures start hidden, since a
+     * paragraph in a row stretches the table; anything else is left to the dashboard, which
+     * shows the first few. "auto" is that.
+     */
+    public function listing(): string
+    {
+        return match (true) {
+            $this->list === true => 'shown',
+            $this->list === false => 'none',
+            $this->list === 'hidden' => 'hidden',
+            $this->kind === 'text',
+            $this->kind === 'string' && $this->format === null && $this->maxLength !== null && $this->maxLength > 255,
+            $this->kind === 'file' && (! $this->isImage() || $this->private) => 'hidden',
+            default => 'auto',
+        };
     }
 
     public function column(): string

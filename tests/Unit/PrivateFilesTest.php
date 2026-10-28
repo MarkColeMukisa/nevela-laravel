@@ -67,9 +67,9 @@ final class PrivateFilesTest extends TestCase
         $this->assertStringContainsString("'cv' => ['nullable', 'string', 'max:512', new \\Nevela\\Laravel\\Rules\\UploadKey('Candidate', 'cv')],", $generator->request($candidate));
 
         $typescript = $generator->typescript($candidate);
-        $this->assertStringContainsString('cv: field.file(["pdf","document"], { required: false, ...({ private: true } as {}) }),', $typescript);
-        $this->assertStringContainsString('photo: field.file(["any"], { ...({ private: true } as {}) }),', $typescript);
-        $this->assertStringContainsString('brochure: field.file(["pdf"], { required: false }),', $typescript);
+        $this->assertStringContainsString('cv: field.file(["pdf","document"], { required: false, list: true, ...({ private: true } as {}), ...({ column: "hidden" } as {}) }),', $typescript);
+        $this->assertStringContainsString('photo: field.file(["any"], { list: true, ...({ private: true } as {}), ...({ column: "hidden" } as {}) }),', $typescript);
+        $this->assertStringContainsString('brochure: field.file(["pdf"], { required: false, list: true, ...({ column: "hidden" } as {}) }),', $typescript);
         $this->assertStringContainsString('portrait: field.file(["image"], { required: false, list: true }),', $typescript);
 
         // A resource with no private file has the API resource it always had.

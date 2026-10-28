@@ -120,9 +120,9 @@ final class RichTextTest extends TestCase
 
         // And the dashboard is told, in a way Flare's types let through.
         $typescript = $generator->typescript($post);
-        $this->assertStringContainsString('body: field.text({ ...({ rich: true } as {}) }),', $typescript);
-        $this->assertStringContainsString('summary: field.text({ required: false, maxLength: 20000, ...({ rich: true } as {}) }),', $typescript);
-        $this->assertStringContainsString('notes: field.text({ required: false }),', $typescript);
+        $this->assertStringContainsString('body: field.text({ list: true, ...({ column: "hidden" } as {}), ...({ rich: true } as {}) }),', $typescript);
+        $this->assertStringContainsString('summary: field.text({ required: false, maxLength: 20000, list: true, ...({ column: "hidden" } as {}), ...({ rich: true } as {}) }),', $typescript);
+        $this->assertStringContainsString('notes: field.text({ required: false, list: true, ...({ column: "hidden" } as {}) }),', $typescript);
 
         // A resource without one has the request it always had.
         $this->assertStringNotContainsString('rich()', $generator->request(Descriptor::fromSpec('Note', 'body:text')));

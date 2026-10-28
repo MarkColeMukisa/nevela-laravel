@@ -1378,8 +1378,12 @@ final class ResourceGenerator
                 'default' => $f->default !== null ? $j($f->default) : null,
                 // What the migration does when the parent goes: an optional link is cleared.
                 'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
-                // A picture is worth a column in the table; other files are not, and a private one has no thumbnail to show.
-                'list' => $f->isImage() && ! $f->private ? 'true' : null,
+                // In the table or not. A picture is worth a column; Flare leaves files out, so it is said.
+                'list' => match ($f->listing()) {
+                    'none' => 'false',
+                    'auto' => $f->kind === 'file' ? 'true' : null,
+                    default => 'true',
+                },
             ]);
             $parts = array_map(fn ($k, $v) => "{$k}: {$v}", array_keys($options), $options);
             if ($f->private) {
@@ -1387,6 +1391,10 @@ final class ResourceGenerator
             }
             if ($f->from !== null) {
                 $parts[] = '...({ from: '.$j($f->from).' } as {})';
+            }
+            if (in_array($f->listing(), ['shown', 'hidden'], true)) {
+                // Decided, not left to the dashboard: shown whatever else there is, or off until turned on.
+                $parts[] = '...({ column: '.$j($f->listing()).' } as {})';
             }
             if ($f->isRich()) {
                 // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.

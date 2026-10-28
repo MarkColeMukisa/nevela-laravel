@@ -173,8 +173,8 @@ final class IntegerIdsTest extends TestCase
         // The dashboard checks the same length before it sends anything.
         $typescript = $generator->typescript($post);
         $this->assertStringContainsString('title: field.string(),', $typescript);
-        $this->assertStringContainsString('excerpt: field.string({ required: false, maxLength: 500 }),', $typescript);
-        $this->assertStringContainsString('body: field.text({ maxLength: 100000 }),', $typescript);
+        $this->assertStringContainsString('excerpt: field.string({ required: false, maxLength: 500, list: true, ...({ column: "hidden" } as {}) }),', $typescript);
+        $this->assertStringContainsString('body: field.text({ maxLength: 100000, list: true, ...({ column: "hidden" } as {}) }),', $typescript);
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("can't have a length");

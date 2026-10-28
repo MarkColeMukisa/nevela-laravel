@@ -128,7 +128,7 @@ final class RelationsAndFilesTest extends TestCase
 
         $this->assertStringContainsString('categoryId: field.belongsTo("Category"),', $generator->typescript($this->product(), $all));
         $this->assertStringContainsString('image: field.file(["image"], { required: false, list: true }),', $generator->typescript($this->product(), $all));
-        $this->assertStringContainsString('manual: field.file(["pdf","document"], { required: false }),', $generator->typescript($this->product(), $all));
+        $this->assertStringContainsString('manual: field.file(["pdf","document"], { required: false, list: true, ...({ column: "hidden" } as {}) }),', $generator->typescript($this->product(), $all));
         $this->assertStringContainsString('products: field.hasMany("Product", { foreignKey: "categoryId" }),', $generator->typescript($this->category(), $all));
 
         // Without the other resources nothing is assumed about them.
