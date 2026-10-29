@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Tests\Unit;
 
 use InvalidArgumentException;
+use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Support\Descriptor;
 use PHPUnit\Framework\TestCase;
@@ -87,5 +88,18 @@ final class UniqueTogetherTest extends TestCase
         $this->assertStringContainsString("\$table->dropUnique(['student_id', 'course_id']);", $later->contents);
         $this->assertStringContainsString('Some enrolments have the student and course of another', $later->contents);
         $this->assertStringNotContainsString('together()', $generator->request(Descriptor::fromSpec('Course', 'title:string')), 'a request without one is as it was');
+    }
+
+    public function test_a_table_made_without_the_index_is_given_it_once(): void
+    {
+        $generator = new ResourceGenerator;
+        $enrolment = $this->enrolment();
+        $index = $generator->uniqueIndex($enrolment, ['studentId', 'courseId']);
+        $before = $generator->migration(Descriptor::fromArray(['unique' => []] + $enrolment->toArray()), $this->all());
+
+        $this->assertFalse(GenerateCommand::needsUniqueMigration([], $index), 'a new resource: its own migration has the index');
+        $this->assertFalse(GenerateCommand::needsUniqueMigration([$generator->migration($enrolment, $this->all())], $index));
+        $this->assertTrue(GenerateCommand::needsUniqueMigration([$before], $index));
+        $this->assertTrue(GenerateCommand::needsUniqueMigration([], $index, adopted: true), 'a table that was there before Nevela');
     }
 }

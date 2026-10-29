@@ -46,6 +46,22 @@ final class GenerateCommand extends Command
     }
 
     /**
+     * Whether fields made unique together need the migration that adds their index: when
+     * the table was made without it, or was there before Nevela. A new resource's own
+     * migration has it.
+     *
+     * @param  list<string>  $createMigrations  The contents of the table's own migration(s); none for a resource that is new
+     */
+    public static function needsUniqueMigration(array $createMigrations, string $index, bool $adopted = false): bool
+    {
+        if ($createMigrations === []) {
+            return $adopted;
+        }
+
+        return ! str_contains(implode("\n", $createMigrations), $index);
+    }
+
+    /**
      * Whether a resource whose form proves an address needs the migration that adds the
      * column for it: when its table was made without one. A new resource's own migration
      * has it.
@@ -207,8 +223,8 @@ final class GenerateCommand extends Command
                 $files[] = $generator->confirmMigrationFile($descriptor);
             }
             // And for fields made unique together once the table was there.
-            foreach ($made !== [] && ! $descriptor->adopted ? $descriptor->unique : [] as $set) {
-                if (! str_contains(implode("\n", $made), $generator->uniqueIndex($descriptor, $set))) {
+            foreach ($descriptor->unique as $set) {
+                if (self::needsUniqueMigration($made, $generator->uniqueIndex($descriptor, $set), $descriptor->adopted)) {
                     $files[] = $generator->uniqueMigrationFile($descriptor, $set);
                 }
             }

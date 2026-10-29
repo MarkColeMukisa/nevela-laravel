@@ -149,8 +149,8 @@ final class Announce
         try {
             $key = (new (Account::model()))->getKeyName();
             $deleters = Access::holders("{$descriptor->table}.delete")->whereKeyNot($user->getAuthIdentifier());
-            $ids = (clone $deleters)->limit(Notices::MOST_RECIPIENTS)->pluck($key)->all();
-            $viewers = Access::holders("{$descriptor->table}.view")->whereKeyNot($user->getAuthIdentifier())->whereNotIn($key, $ids);
+            $told = (clone $deleters)->limit(Notices::MOST_RECIPIENTS)->pluck($key)->all();
+            $viewers = Access::holders("{$descriptor->table}.view")->whereKeyNot($user->getAuthIdentifier())->whereNotIn($key, $told);
         } catch (\Throwable $e) {
             report($e);
 
