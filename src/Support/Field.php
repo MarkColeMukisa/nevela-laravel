@@ -123,6 +123,15 @@ final class Field
             if (! Phone::known($country)) {
                 throw new InvalidArgumentException("\"{$country}\" on \"{$name}\" is not a country Nevela knows the numbers of. Use one of: ".implode(', ', array_keys(Phone::COUNTRIES)).", or tel alone for any country's.");
             }
+            // +256772123456 is how every number is kept, so the column has to hold one.
+            $kept = 1 + strlen(Phone::COUNTRIES[$country]['code']) + Phone::COUNTRIES[$country]['digits'];
+            if ($maxLength !== null && $maxLength < $kept) {
+                throw new InvalidArgumentException("\"{$name}\" can't have a length of {$maxLength}: its numbers are kept as {$kept} characters, such as ".Phone::normalise(Phone::COUNTRIES[$country]['example'], $country).'.');
+            }
+            // A default is saved without passing a request, so it is written the way numbers are kept.
+            if ($default !== null && (! is_string($default) || Phone::normalise($default, $country) !== $default)) {
+                throw new InvalidArgumentException("The default of \"{$name}\" has to be a number of that country as it is kept, such as ".Phone::normalise(Phone::COUNTRIES[$country]['example'], $country).'.');
+            }
         }
         if ($list !== null && ! is_bool($list) && $list !== 'hidden') {
             throw new InvalidArgumentException("\"list\" on \"{$name}\" is true (a column in the table), \"hidden\" (a column that starts off) or false (no column).");

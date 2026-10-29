@@ -70,6 +70,27 @@ final class PhoneTest extends TestCase
         Field::fromArray('email', ['kind' => 'string', 'format' => 'email', 'country' => 'UG']);
     }
 
+    public function test_its_length_and_default_fit_a_number_as_it_is_kept(): void
+    {
+        $phone = ['kind' => 'string', 'format' => 'tel', 'country' => 'UG'];
+        $this->assertSame(13, Field::fromArray('phone', $phone + ['maxLength' => 13])->maxLength);
+        $this->assertSame('+256772123456', Field::fromArray('phone', $phone + ['default' => '+256772123456'])->default);
+
+        $refused = [
+            'too short to hold one' => [['maxLength' => 12], 'its numbers are kept as 13 characters, such as +256772123456.'],
+            'written the local way' => [['default' => '0772 123456'], 'has to be a number of that country as it is kept, such as +256772123456.'],
+            'another country' => [['default' => '+254712345678'], 'has to be a number of that country as it is kept'],
+        ];
+        foreach ($refused as $case => [$extra, $message]) {
+            try {
+                Field::fromArray('phone', $phone + $extra);
+                $this->fail("{$case} was taken");
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString($message, $e->getMessage(), $case);
+            }
+        }
+    }
+
     public function test_what_is_said_of_a_number_that_isn_t_one(): void
     {
         $this->assertSame('Enter a Ugandan number, such as 0772 123456 or +256 772 123456.', Phone::message('UG'));
