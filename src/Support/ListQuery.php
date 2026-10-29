@@ -134,7 +134,7 @@ final class ListQuery
     private static function coerce(Field $field, mixed $value): string|int|float|bool|null|Issue
     {
         if ($value === null || $value === '' || $value === 'null') {
-            return $field->required ? new Issue('This field is never empty.') : null;
+            return $field->alwaysRequired() ? new Issue('This field is never empty.') : null;
         }
         $value = (string) $value;
 

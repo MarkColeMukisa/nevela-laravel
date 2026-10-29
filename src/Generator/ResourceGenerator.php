@@ -818,7 +818,7 @@ final class ResourceGenerator
                 $f->format === 'url' => "\$table->string('{$c}', 2048)",
                 default => "\$table->string('{$c}')",
             };
-            if (! $f->required) {
+            if (! $f->alwaysRequired()) {
                 $line .= '->nullable()';
             }
             if ($f->default !== null && $f->kind !== 'text') {
@@ -1048,6 +1048,19 @@ final class ResourceGenerator
         return "There is already {$article} {$label} with this ".substr($this->togetherWords($d, $set), strlen('the ')).'.';
     }
 
+    /** What is said of a conditional field left empty where it applies: "Needed when the kind is Recurring." */
+    private function whenMessage(Descriptor $d, Field $f): string
+    {
+        $on = $d->fields[array_key_first($f->when)];
+        $values = $f->when[$on->name];
+        if ($on->kind === 'boolean') {
+            // "Needed when billed is on."
+            return "Needed when {$this->lower($on->label())} is ".($values === [true] ? 'on' : ($values === [false] ? 'off' : 'on or off')).'.';
+        }
+
+        return "Needed when the {$this->lower($on->label())} is ".implode(' or ', array_map(fn ($value) => $on->optionLabel((string) $value), $values)).'.';
+    }
+
     /** The file `confirmMigration()` goes in. Written once for a table, whatever its date. */
     public function confirmMigrationFile(Descriptor $d, ?string $timestamp = null): GeneratedFile
     {
@@ -1144,6 +1157,20 @@ final class ResourceGenerator
                 return [{$together}];
             }
         PHP;
+        $conditions = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => ["
+            ."'on' => '".array_key_first($f->when)."', "
+            ."'values' => [".implode(', ', array_map(fn ($value) => var_export($value, true), $f->when[array_key_first($f->when)])).'], '
+            ."'required' => ".($f->required ? 'true' : 'false').', '
+            ."'message' => ".var_export($this->whenMessage($d, $f), true).']', array_filter($d->fields, fn (Field $f) => $f->conditional())));
+        $madeBlock .= $conditions === '' ? '' : <<<PHP
+
+
+            /** Fields that apply for some values of another only. Elsewhere they are emptied; where they apply, a required one is needed. */
+            protected function conditions(): array
+            {
+                return [{$conditions}];
+            }
+        PHP;
         $lines = $this->lineItems($d, $all);
         $linesBlock = $lines === null ? '' : <<<PHP
 
@@ -1209,7 +1236,7 @@ final class ResourceGenerator
     private function rules(Descriptor $d, Field $f, array $all = []): array
     {
         // A slug made from another field, a number and a copy may be left empty: they are filled in.
-        $rules = [$f->required && $f->from === null && $f->auto === null ? "'required'" : "'nullable'"];
+        $rules = [$f->alwaysRequired() && $f->from === null && $f->auto === null ? "'required'" : "'nullable'"];
         // With a default, leaving it out is saying "the usual". Sent, it is checked like any other.
         if ($f->default !== null) {
             array_unshift($rules, "'sometimes'");
@@ -1536,7 +1563,7 @@ final class ResourceGenerator
         foreach ($d->fields as $f) {
             $options = array_filter([
                 // (A slug made from another field is optional in the form: left empty, Laravel makes it.)
-                'required' => $f->required && $f->from === null && $f->auto === null ? null : 'false',
+                'required' => $f->alwaysRequired() && $f->from === null && $f->auto === null ? null : 'false',
                 'unique' => $f->unique ? 'true' : null,
                 'label' => $f->label ? $j($f->label) : null,
                 'format' => in_array($f->format, ['money', 'percent', 'rating'], true) ? $j($f->format) : null,
@@ -1567,6 +1594,11 @@ final class ResourceGenerator
             if ($f->country !== null) {
                 // The dashboard's phone field stays on that country rather than offering every one.
                 $parts[] = '...({ country: '.$j($f->country).' } as {})';
+            }
+            if ($f->conditional()) {
+                // Shown in the form only where it applies, and required there if it is required at all.
+                $on = (string) array_key_first($f->when);
+                $parts[] = '...({ when: '.$j(['field' => $on, 'values' => $f->when[$on], 'required' => $f->required]).' } as {})';
             }
             if (in_array($f->listing(), ['shown', 'hidden'], true)) {
                 // Decided, not left to the dashboard: shown whatever else there is, or off until turned on.

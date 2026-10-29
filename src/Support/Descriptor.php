@@ -83,6 +83,22 @@ final class Descriptor
             if ($field->from !== null && (! isset($fields[$field->from]) || ! in_array($fields[$field->from]->kind, ['string', 'text'], true))) {
                 throw new InvalidArgumentException("{$name}: \"{$field->name}\" is made from \"{$field->from}\", which has to be a string field of {$name}.");
             }
+            foreach ($field->when as $on => $values) {
+                $other = $fields[$on] ?? null;
+                if ($other === null || ! in_array($other->kind, ['enum', 'boolean'], true)) {
+                    throw new InvalidArgumentException("{$name}: \"{$field->name}\" applies for some values of \"{$on}\", which has to be an enum or a yes/no field of {$name}.");
+                }
+                if ($other->conditional()) {
+                    throw new InvalidArgumentException("{$name}: \"{$field->name}\" applies for some values of \"{$on}\", which only sometimes applies itself. Make it depend on the field \"{$on}\" depends on.");
+                }
+                foreach ($values as $value) {
+                    $fits = $other->kind === 'boolean' ? is_bool($value) : is_string($value) && in_array($value, $other->options, true);
+                    if (! $fits) {
+                        $shown = is_bool($value) ? var_export($value, true) : $value;
+                        throw new InvalidArgumentException("{$name}: \"{$field->name}\" applies when \"{$on}\" is {$shown}, which it can't be. Use ".($other->kind === 'boolean' ? 'true or false' : 'one of: '.implode(', ', $other->options)).'.');
+                    }
+                }
+            }
         }
         if ($publish !== null && (! isset($fields[$publish]) || $fields[$publish]->kind !== 'datetime' || $fields[$publish]->required)) {
             throw new InvalidArgumentException("{$name}: \"publish\" names the field that says when a record is published. It has to be an optional datetime: {$publish}:datetime?");

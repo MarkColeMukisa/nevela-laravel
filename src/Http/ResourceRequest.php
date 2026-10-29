@@ -11,6 +11,7 @@ use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
 use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Html;
 use Nevela\Laravel\Support\Phone;
 use Nevela\Laravel\Support\SchemaFacts;
@@ -124,6 +125,83 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Fields that apply for some values of another only: a billing cycle, for a recurring
+     * project. A generated request with any says which, for what, and what to say.
+     *
+     * @return array<string, array{on: string, values: list<string|bool>, required: bool, message: string}>
+     */
+    protected function conditions(): array
+    {
+        return [];
+    }
+
+    /**
+     * Whether each conditional field applies, by field. What it depends on is the value
+     * sent for it, or, left out of a change, the record's own.
+     *
+     * @param  array<string, mixed>  $data  by field
+     * @return array<string, bool>
+     */
+    private function applying(array $data, ?Model $record = null): array
+    {
+        $columns = $this->columns();
+        $applies = [];
+        foreach ($this->conditions() as $field => $condition) {
+            $on = $condition['on'];
+            $value = array_key_exists($on, $data) ? $data[$on] : ($record !== null ? $record->getAttribute($columns[$on]) : ($this->defaults()[$on] ?? null));
+            $applies[$field] = Field::holds($value, $condition['values']);
+        }
+
+        return $applies;
+    }
+
+    /**
+     * What is said of the required fields left empty where they apply, by field. One the
+     * change leaves out keeps the record's own value.
+     *
+     * @param  array<string, mixed>  $data  by field
+     * @param  list<string>  $skip  Fields refused for something else already
+     * @return array<string, string>
+     */
+    private function unmet(array $data, ?Model $record = null, array $skip = []): array
+    {
+        $columns = $this->columns();
+        $conditions = $this->conditions();
+        $found = [];
+        foreach ($this->applying($data, $record) as $field => $applies) {
+            if (! $applies || ! $conditions[$field]['required'] || in_array($field, $skip, true)) {
+                continue;
+            }
+            $value = array_key_exists($field, $data) ? $data[$field] : $record?->getAttribute($columns[$field]);
+            if ($value === null || $value === '') {
+                $found[$field] = $conditions[$field]['message'];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The values to save with the fields that don't apply emptied: a project made one-off
+     * loses its billing cycle, whether or not the change sent one.
+     *
+     * @param  array<string, mixed>  $values  by column
+     * @param  array<string, mixed>  $data  by field
+     * @return array<string, mixed>
+     */
+    private function emptied(array $values, array $data, ?Model $record = null): array
+    {
+        $columns = $this->columns();
+        foreach ($this->applying($data, $record) as $field => $applies) {
+            if (! $applies) {
+                $values[$columns[$field]] = null;
+            }
+        }
+
+        return $values;
+    }
+
+    /**
      * What `together()` refuses of these values, by the field it is said on: the first of
      * its set. A set with a field still empty isn't checked: two empty values are not the
      * same, to the database either. The trash is looked in too, as the index covers it.
@@ -230,7 +308,7 @@ abstract class ResourceRequest extends FormRequest
             self::explainTrashed($validator, $input);
             array_push($issues, ...FlareErrors::issues($validator->errors()->toArray()));
         }
-        foreach ($issues === [] ? $this->clashes($validator->validated()) : [] as $field => $message) {
+        foreach ($issues === [] ? $this->clashes($validator->validated()) + $this->unmet($validator->validated()) : [] as $field => $message) {
             $issues[] = ['path' => $field, 'message' => $message];
         }
         if ($issues !== []) {
@@ -248,7 +326,7 @@ abstract class ResourceRequest extends FormRequest
             }
         }
 
-        return ['values' => $this->make($values, true), 'issues' => []];
+        return ['values' => $this->make($this->emptied($values, $validated), true), 'issues' => []];
     }
 
     /**
@@ -326,6 +404,9 @@ abstract class ResourceRequest extends FormRequest
             self::explainTrashed($validator, $validator->getData());
             // A field already refused for itself isn't also said to clash.
             foreach ($this->clashes($validator->getData(), $this->record(), array_keys($validator->errors()->messages())) as $field => $message) {
+                $validator->errors()->add($field, $message);
+            }
+            foreach ($this->unmet($validator->getData(), $this->record(), array_keys($validator->errors()->messages())) as $field => $message) {
                 $validator->errors()->add($field, $message);
             }
         });
@@ -639,7 +720,7 @@ abstract class ResourceRequest extends FormRequest
                 }
             }
             if ($issues === []) {
-                foreach ($this->clashes($validator->validated(), null, $owner === null ? [] : [$owner]) as $field => $message) {
+                foreach ($this->clashes($validator->validated(), null, $owner === null ? [] : [$owner]) + $this->unmet($validator->validated()) as $field => $message) {
                     $issues[] = ['path' => $field, 'message' => $message];
                 }
             }
@@ -659,7 +740,7 @@ abstract class ResourceRequest extends FormRequest
                 }
             }
             // Two rows with one title get two slugs: what was made for an earlier row is remembered.
-            $values[] = $this->make($mapped, true, $made);
+            $values[] = $this->make($this->emptied($mapped, $validated), true, $made);
         }
 
         return ['values' => $values, 'problems' => $problems];
@@ -682,6 +763,6 @@ abstract class ResourceRequest extends FormRequest
             }
         }
 
-        return $this->make($values, $this->isMethod('POST'));
+        return $this->make($this->emptied($values, $validated, $this->record()), $this->isMethod('POST'));
     }
 }

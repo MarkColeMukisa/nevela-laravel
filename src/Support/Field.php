@@ -50,6 +50,7 @@ final class Field
      * @param  string|null  $auto  string: the prefix of the number Laravel gives each new record, e.g. "INV" for INV-0001
      * @param  bool|string|null  $list  Its column in the dashboard's table: true shown, "hidden" off until someone turns it on, false left out. Null leaves it to listing().
      * @param  string|null  $country  tel: the country its numbers are of, "UG", kept as +256772123456. Any country's when not set.
+     * @param  array<string, list<string|bool>>  $when  The field it applies for, and the values: ["kind" => ["recurring"]]. Empty when it always does. Where it doesn't, it is empty; where it does, it is required if the field is.
      */
     public function __construct(
         public readonly string $name,
@@ -71,6 +72,7 @@ final class Field
         public readonly bool|string|null $list = null,
         public readonly ?string $auto = null,
         public readonly ?string $country = null,
+        public readonly array $when = [],
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -187,6 +189,25 @@ final class Field
                 throw new InvalidArgumentException("\"{$name}\" is made from a field of the same resource, named as it is there: {$name}:slug(title).");
             }
         }
+        if ($when !== []) {
+            $on = array_key_first($when);
+            $values = $when[$on];
+            if (count($when) > 1 || ! is_string($on) || ! preg_match('/^[a-z][A-Za-z0-9]*$/', $on) || $on === $name) {
+                throw new InvalidArgumentException("\"{$name}\" applies for one other field of the same resource, named as it is there: {$name}:… if kind == recurring.");
+            }
+            if (! is_array($values) || ! array_is_list($values) || $values === [] || array_filter($values, fn ($value) => ! is_bool($value) && (! is_string($value) || $value === '')) !== []) {
+                throw new InvalidArgumentException("\"{$name}\" applies for some values of \"{$on}\": one, or several with | between them, such as if {$on} == recurring|retainer.");
+            }
+            // A required relation is one the seeder, the trash and a delete count on being there.
+            if ($kind === 'belongsTo') {
+                throw new InvalidArgumentException("\"{$name}\" can't apply only sometimes: it is a relation. Make it optional instead: {$name}:belongsTo({$target})?");
+            }
+            // A numbered, made or defaulted field is always filled.
+            if ($auto !== null || $from !== null || $default !== null) {
+                $what = $auto !== null ? 'numbered' : ($from !== null ? 'made or copied from another field' : 'given a default');
+                throw new InvalidArgumentException("\"{$name}\" can't apply only sometimes: it is {$what}, and so always has a value.");
+            }
+        }
         if ($private && $kind !== 'file') {
             throw new InvalidArgumentException("\"{$name}\" can't be private: that is for file fields. Who may see a record's other fields is its policy's to say.");
         }
@@ -222,12 +243,27 @@ final class Field
      *   timeline:enum(asap=As soon as possible|month=Within a month)   what each value is called
      *   slug:slug(title)!                 made from the title when left empty
      *   phone:tel(UG)                     a Ugandan number, kept as +256772123456
+     *   cycle:enum(monthly|annually) if kind == recurring   only for a recurring one, and needed there
      *
      * Grit's and Flare's spellings are understood too: see normalise().
      */
     public static function parse(string $token): self
     {
         $written = trim($token);
+        // cycle:enum(monthly|annually) if kind == recurring: a field that only sometimes applies, in Grit's words.
+        if (preg_match('/^(.*\S)\s+if\s+([A-Za-z][A-Za-z0-9_]*)\s*==?\s*(\S.*)$/', $written, $condition)) {
+            $field = self::parse($condition[1]);
+            $values = array_map(
+                fn (string $value) => match (strtolower($value)) {
+                    'true' => true,
+                    'false' => false,
+                    default => $value,
+                },
+                array_values(array_filter(array_map('trim', explode('|', $condition[3])), fn (string $value) => $value !== '')),
+            );
+
+            return self::fromArray($field->name, ['when' => [Naming::camel($condition[2]) => $values]] + $field->toArray());
+        }
         // status:enum(pending|paid)=pending: what the field is when a create leaves it out.
         $default = null;
         // The default comes after the type, so an "=" inside its brackets (a value's label) isn't it.
@@ -369,6 +405,8 @@ final class Field
             $data['list'] ?? null,
             $data['auto'] ?? null,
             $data['country'] ?? null,
+            // "when": {"kind": "recurring"}, or several values in a list.
+            array_map(fn ($values) => is_array($values) ? array_values($values) : [$values], (array) ($data['when'] ?? [])),
         );
     }
 
@@ -382,6 +420,7 @@ final class Field
             'optionLabels' => $this->optionLabels ?: null,
             'currency' => $this->currency,
             'country' => $this->country,
+            'when' => $this->when === [] ? null : array_map(fn (array $values) => count($values) === 1 ? $values[0] : $values, $this->when),
             'target' => $this->target,
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,
@@ -467,6 +506,38 @@ final class Field
     public function isImage(): bool
     {
         return $this->kind === 'file' && $this->accept === ['image'];
+    }
+
+    /** Whether it applies only for some values of another field: cycle if kind == recurring. */
+    public function conditional(): bool
+    {
+        return $this->when !== [];
+    }
+
+    /** Whether every record has it: required, and not only for some. The column of one that isn't is nullable. */
+    public function alwaysRequired(): bool
+    {
+        return $this->required && $this->when === [];
+    }
+
+    /**
+     * Whether the value of the field a conditional one depends on is one it applies for.
+     * A yes/no comes back from some databases as 1 and 0, and from a form as "true".
+     *
+     * @param  list<string|bool>  $wanted
+     */
+    public static function holds(mixed $value, array $wanted): bool
+    {
+        foreach ($wanted as $one) {
+            $same = is_bool($one)
+                ? $value !== null && $value !== '' && filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) === $one
+                : $value !== null && is_scalar($value) && (string) $value === $one;
+            if ($same) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function sortable(): bool

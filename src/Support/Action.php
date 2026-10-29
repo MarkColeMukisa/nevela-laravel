@@ -62,6 +62,9 @@ final class Action
             if (! in_array($field->kind, self::KINDS, true)) {
                 throw new InvalidArgumentException("Action \"{$name}\" can't ask for \"{$field->name}\": a {$field->kind} isn't something a button asks for. Use: ".implode(', ', self::KINDS).'.');
             }
+            if ($field->conditional()) {
+                throw new InvalidArgumentException("Action \"{$name}\" asks for \"{$field->name}\" only sometimes, which a button's sheet can't do. Ask for it always, as optional: {$field->name}?");
+            }
         }
     }
 

@@ -104,6 +104,14 @@ final class Fake
             }
             $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson);
         }
+        // A one-off project has no billing cycle: a field is empty where it doesn't apply.
+        foreach ($resource->fields as $field) {
+            foreach ($field->when as $on => $values) {
+                if (! Field::holds($row[$resource->fields[$on]->column()] ?? null, $values)) {
+                    $row[$field->column()] = null;
+                }
+            }
+        }
 
         // A category is called Kitchen and a company Acme Ltd, not Compact Lamp. Each is walked
         // in order, so a unique name needs its number only once the list has run out.
