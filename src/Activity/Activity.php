@@ -269,7 +269,7 @@ final class Activity
 
         // Lines are told of through what they are lines of: "Ada created an order", not its three items as well.
         if (in_array($action, self::ANNOUNCED, true) && ! Nevela::isLines($descriptor->name)) {
-            Announce::recordsChanged($user, $action, $descriptor, $added, $added === 1 ? $ids[0] : null, $entries[0]['label']);
+            Announce::recordsChanged($user, $action, $descriptor, $added, $added === 1 ? $ids[0] : null, $entries[0]['label'], $ids);
         }
     }
 }

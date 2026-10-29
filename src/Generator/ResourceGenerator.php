@@ -832,6 +832,10 @@ final class ResourceGenerator
             }
             $columns[] = "            {$line};";
         }
+        foreach ($d->unique as $set) {
+            $columns[] = '            // '.ucfirst($this->togetherWords($d, $set)).' go together once only.';
+            $columns[] = '            '.$this->uniqueIndex($d, $set).';';
+        }
         if ($d->public?->confirm !== null) {
             $columns[] = '            // When the address was proved, by the link emailed to it. Empty until then.';
             $columns[] = "            \$table->timestamp('confirmed_at')->nullable()->index();";
@@ -954,6 +958,96 @@ final class ResourceGenerator
         PHP;
     }
 
+    /**
+     * For fields made unique together after their table was: the index that says so. It is
+     * refused, with how many, while records already there share their values: the
+     * database couldn't make it, and they are for someone to look at, not to lose.
+     *
+     * @param  list<string>  $set
+     */
+    public function uniqueMigration(Descriptor $d, array $set): string
+    {
+        $columns = implode(', ', array_map(fn (string $name) => "'{$d->fields[$name]->column()}'", $set));
+        $words = $this->togetherWords($d, $set);
+        $index = $this->uniqueIndex($d, $set);
+        $plural = $this->lower($d->pluralLabel);
+
+        return <<<PHP
+        <?php
+
+        use Illuminate\Database\Migrations\Migration;
+        use Illuminate\Database\Schema\Blueprint;
+        use Illuminate\Support\Facades\DB;
+        use Illuminate\Support\Facades\Schema;
+
+        // {$d->pluralLabel}: {$words} go together once only. Generated once by Nevela.
+        return new class extends Migration
+        {
+            public function up(): void
+            {
+                // The trash's records count: the index is over every row.
+                \$shared = DB::table('{$d->table}')->select({$columns})->groupBy({$columns})->havingRaw('count(*) > 1')->get()->count();
+                if (\$shared > 0) {
+                    throw new \RuntimeException("Some {$plural} have {$words} of another (".(\$shared === 1 ? 'one group' : "{\$shared} groups")."). Change or delete all but one of each, the trash's too, and migrate again.");
+                }
+                Schema::table('{$d->table}', function (Blueprint \$table) {
+                    {$index};
+                });
+            }
+
+            public function down(): void
+            {
+                Schema::table('{$d->table}', function (Blueprint \$table) {
+                    \$table->dropUnique([{$columns}]);
+                });
+            }
+        };
+
+        PHP;
+    }
+
+    /**
+     * The file `uniqueMigration()` goes in, once for each set, whatever its date.
+     *
+     * @param  list<string>  $set
+     */
+    public function uniqueMigrationFile(Descriptor $d, array $set, ?string $timestamp = null): GeneratedFile
+    {
+        $timestamp ??= date('Y_m_d_His');
+        $name = 'add_unique_'.implode('_', array_map(fn (string $field) => $d->fields[$field]->column(), $set))."_to_{$d->table}_table";
+
+        return new GeneratedFile(GeneratedFile::TARGET_API, "database/migrations/{$timestamp}_{$name}.php", $this->uniqueMigration($d, $set), GeneratedFile::MODE_ONCE, "database/migrations/*_{$name}.php");
+    }
+
+    /**
+     * The line of a migration that makes a set unique: what a table's own migration has,
+     * once the set was there when it was made.
+     *
+     * @param  list<string>  $set
+     */
+    public function uniqueIndex(Descriptor $d, array $set): string
+    {
+        return '$table->unique(['.implode(', ', array_map(fn (string $name) => "'{$d->fields[$name]->column()}'", $set)).'])';
+    }
+
+    /** @param list<string> $set "the student and course" */
+    private function togetherWords(Descriptor $d, array $set): string
+    {
+        $words = array_map(fn (string $name) => $this->lower($d->fields[$name]->label()), $set);
+        $last = array_pop($words);
+
+        return 'the '.($words === [] ? $last : implode(', ', $words)." and {$last}");
+    }
+
+    /** @param list<string> $set "There is already an enrolment with this student and course." */
+    private function togetherMessage(Descriptor $d, array $set): string
+    {
+        $label = $this->lower($d->label);
+        $article = preg_match('/^[aeiou]/i', $label) ? 'an' : 'a';
+
+        return "There is already {$article} {$label} with this ".substr($this->togetherWords($d, $set), strlen('the ')).'.';
+    }
+
     /** The file `confirmMigration()` goes in. Written once for a table, whatever its date. */
     public function confirmMigrationFile(Descriptor $d, ?string $timestamp = null): GeneratedFile
     {
@@ -1025,6 +1119,19 @@ final class ResourceGenerator
             protected function rich(): array
             {
                 return [{$rich}];
+            }
+        PHP;
+        $together = implode(', ', array_map(fn (array $set) => '['
+            ."'fields' => [".implode(', ', array_map(fn (string $name) => "'{$name}'", $set)).'], '
+            ."'table' => '{$d->table}', "
+            ."'message' => ".var_export($this->togetherMessage($d, $set), true).']', $d->unique));
+        $madeBlock .= $together === '' ? '' : <<<PHP
+
+
+            /** Fields whose values go together once only. Checked against the trash too, as the database's index is. */
+            protected function together(): array
+            {
+                return [{$together}];
             }
         PHP;
         $lines = $this->lineItems($d, $all);

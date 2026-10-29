@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\MigrationsEnded;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Foundation\Console\ServeCommand;
+use Illuminate\Auth\Access\Response as GateResponse;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessing;
@@ -25,6 +26,7 @@ use Laravel\Sanctum\Sanctum;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Activity\Activity;
 use Nevela\Laravel\Access\Permissions;
+use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Console\AdoptCommand;
 use Nevela\Laravel\Console\BlogCommand;
@@ -70,6 +72,9 @@ use Nevela\Laravel\Support\SchemaFacts;
 
 final class NevelaServiceProvider extends ServiceProvider
 {
+    /** What a policy is asked about one record. A visibleTo scope that keeps the record from someone answers them first. */
+    private const RECORD_ABILITIES = ['view', 'update', 'delete', 'restore', 'forceDelete'];
+
     public function register(): void
     {
         // Key by key, not Laravel's one level deep: a published config/nevela.php from an
@@ -173,6 +178,11 @@ final class NevelaServiceProvider extends ServiceProvider
         // `@can` all work, in a policy or anywhere else. Any other ability is left to
         // the app's own policies and gates.
         Gate::before(fn ($user, $ability) => is_string($ability) && Permissions::isPermission($ability) ? Access::allows($user, $ability) : null);
+        // A record its model's visibleTo scope keeps from someone isn't theirs to see, change
+        // or delete, whatever the policy says, and isn't there for them: 404, as for no record.
+        Gate::before(fn ($user, $ability, $arguments) => in_array($ability, self::RECORD_ABILITIES, true) && ($arguments[0] ?? null) instanceof Model && ! Visibility::allows($user, $arguments[0])
+            ? GateResponse::denyAsNotFound()
+            : null);
 
         // A token Sanctum finds valid (the expiry of a session's included) is also held to
         // the idle and absolute limits when it belongs to no session. See Auth\Sessions. An

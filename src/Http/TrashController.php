@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Http;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Key;
@@ -61,7 +62,7 @@ final class TrashController
                 'pluralLabel' => $descriptor->pluralLabel,
                 'slug' => $descriptor->slug,
                 'icon' => $descriptor->icon,
-                'count' => $model::onlyTrashed()->count(),
+                'count' => Visibility::narrow($model::onlyTrashed(), request()->user())->count(),
             ];
         }
 
@@ -76,7 +77,7 @@ final class TrashController
         Trash::purgeExpired($model);
 
         $instance = new $model;
-        $page = $model::onlyTrashed()
+        $page = Visibility::narrow($model::onlyTrashed(), $request->user())
             ->orderByDesc($instance->getQualifiedDeletedAtColumn())->orderBy($instance->getQualifiedKeyName())
             ->paginate((int) ($input['perPage'] ?? 25), ['*'], 'page', (int) ($input['page'] ?? 1));
 
@@ -146,7 +147,7 @@ final class TrashController
         $removed = 0;
         $kept = 0;
         $instance = new $model;
-        $model::onlyTrashed()->orderBy($instance->getQualifiedKeyName())->chunkById(200, function ($records) use (&$removed, &$kept) {
+        Visibility::narrow($model::onlyTrashed(), $request->user())->orderBy($instance->getQualifiedKeyName())->chunkById(200, function ($records) use (&$removed, &$kept) {
             foreach ($records as $record) {
                 if (Trash::may('forceDelete', $record) && Trash::purge($record)) {
                     $removed++;
@@ -183,7 +184,8 @@ final class TrashController
             return null;
         }
 
-        return $model::onlyTrashed()->find($id);
+        // One this person can't see isn't there for them.
+        return Visibility::narrow($model::onlyTrashed(), request()->user())->find($id);
     }
 
     private function noun(Descriptor $descriptor): string

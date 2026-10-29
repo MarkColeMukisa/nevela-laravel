@@ -31,6 +31,12 @@ final class SeedCommand extends Command
 
     private const ATTEMPTS = 5;
 
+    /** The most records already there whose values for fields that go together are read, to keep new ones apart from them. */
+    private const MOST_TAKEN = 200_000;
+
+    /** How often a row's fields that go together are drawn again before seeding gives up. */
+    private const REDRAWS = 100;
+
     public function handle(): int
     {
         try {
@@ -84,6 +90,25 @@ final class SeedCommand extends Command
             $pools = $this->pools($resource);
         } catch (InvalidArgumentException $e) {
             $this->components->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+        // An enrolment for each student and course: there are only so many pairs to go round.
+        foreach ($resource->unique as $set) {
+            if (array_filter($set, fn (string $name) => $resource->fields[$name]->kind !== 'belongsTo') !== []) {
+                continue;
+            }
+            $pairs = array_product(array_map(fn (string $name) => count($pools[$name] ?? []), $set));
+            $room = max(0, $pairs - $existing);
+            if ($count > $room) {
+                $words = implode(' and ', array_map(fn (string $name) => mb_strtolower($resource->fields[$name]->label()), $set));
+                $this->components->error("Each {$resource->label} needs its own {$words}, and there are ".number_format($pairs).' of those to go round: room for '.number_format($room)." more {$resource->pluralLabel}, not ".number_format($count).'.');
+
+                return self::FAILURE;
+            }
+        }
+        if ($resource->unique !== [] && $existing > self::MOST_TAKEN) {
+            $this->components->error(number_format($existing)." {$resource->pluralLabel} are there already, more than the seeder looks through to keep fields that go together apart. Seed with --fresh.");
 
             return self::FAILURE;
         }
@@ -178,6 +203,14 @@ final class SeedCommand extends Command
     {
         $removed = $fresh ? DB::table($resource->table)->delete() : 0;
         $now = time();
+        // What the records there already have, for each set of fields that go together, the trash's included.
+        $taken = [];
+        foreach ($resource->unique as $index => $set) {
+            $columns = array_map(fn (string $name) => $resource->fields[$name]->column(), $set);
+            foreach (DB::table($resource->table)->select(['id', ...$columns])->lazyById(1000) as $existing) {
+                $taken[$index][self::mark(array_map(fn (string $column) => $existing->{$column}, $columns))] = true;
+            }
+        }
         for ($done = 0; $done < $count; $done += $chunk) {
             $rows = [];
             for ($i = $done; $i < min($count, $done + $chunk); $i++) {
@@ -186,6 +219,9 @@ final class SeedCommand extends Command
                 // An integer id is the database's to give.
                 $id = $resource->idType === 'int' ? [] : ['id' => (string) Str::uuid7()];
                 $row = Fake::row($resource, $offset + $i + 1, $pools);
+                foreach ($resource->unique as $index => $set) {
+                    $row = $this->apart($resource, $set, $row, $taken[$index], $offset + $i + 1, $pools);
+                }
                 foreach ($resource->fields as $copy) {
                     $copies = $pools["{$copy->name}@"] ?? null;
                     $key = $copies === null ? null : $row[$resource->fields[explode('.', (string) $copy->from)[0]]->column()] ?? null;
@@ -200,5 +236,47 @@ final class SeedCommand extends Command
         }
 
         return $removed;
+    }
+
+    /**
+     * The row, with values for a set of fields that go together that no other record has:
+     * drawn again until they are. A set with a field left empty is apart already.
+     *
+     * @param  list<string>  $set
+     * @param  array<string, mixed>  $row  by column
+     * @param  array<string, true>  $taken  What earlier records have, kept up to date here
+     * @param  array<string, list<string>>  $pools
+     * @return array<string, mixed>
+     */
+    private function apart(Descriptor $resource, array $set, array $row, ?array &$taken, int $number, array $pools): array
+    {
+        $taken ??= [];
+        $columns = array_map(fn (string $name) => $resource->fields[$name]->column(), $set);
+        for ($draw = 0; $draw < self::REDRAWS; $draw++) {
+            $values = array_map(fn (string $column) => $row[$column] ?? null, $columns);
+            if (in_array(null, $values, true)) {
+                return $row;
+            }
+            $mark = self::mark($values);
+            if (! isset($taken[$mark])) {
+                $taken[$mark] = true;
+
+                return $row;
+            }
+            $again = Fake::row($resource, $number, $pools);
+            foreach ($set as $name) {
+                $column = $resource->fields[$name]->column();
+                $row[$column] = $again[$column];
+            }
+        }
+        $words = implode(' and ', array_map(fn (string $name) => mb_strtolower($resource->fields[$name]->label()), $set));
+
+        throw new \RuntimeException("There aren't enough different {$words} to give each of these {$resource->pluralLabel} its own. Seed fewer.");
+    }
+
+    /** @param list<mixed> $values */
+    private static function mark(array $values): string
+    {
+        return implode("\0", array_map(fn ($value) => (string) $value, $values));
     }
 }

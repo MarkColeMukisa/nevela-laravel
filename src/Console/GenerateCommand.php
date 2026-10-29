@@ -180,6 +180,13 @@ final class GenerateCommand extends Command
 
                 return self::FAILURE;
             }
+            // Saving an order's lines changes several at once, and two swapping their products
+            // would clash halfway through: not yet.
+            if ($lines['resource']->unique !== []) {
+                $command->components->error("{$descriptor->items} is {$descriptor->name}'s items, and lines can't have fields unique together yet. Take \"unique\" out of its descriptor.");
+
+                return self::FAILURE;
+            }
         }
 
         $files = [];
@@ -198,6 +205,12 @@ final class GenerateCommand extends Command
             // The same for "confirm" added to a resource whose table is already made.
             if ($descriptor->public?->confirm !== null && self::needsConfirmMigration($made, $descriptor->adopted)) {
                 $files[] = $generator->confirmMigrationFile($descriptor);
+            }
+            // And for fields made unique together once the table was there.
+            foreach ($made !== [] && ! $descriptor->adopted ? $descriptor->unique : [] as $set) {
+                if (! str_contains(implode("\n", $made), $generator->uniqueIndex($descriptor, $set))) {
+                    $files[] = $generator->uniqueMigrationFile($descriptor, $set);
+                }
             }
         }
         $files[] = $generator->routes($all);

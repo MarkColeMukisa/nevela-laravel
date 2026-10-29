@@ -24,6 +24,7 @@ final class Descriptor
      * @param  string|null  $publish  The date-and-time field that says when a record is published: empty is a draft, a time to come is scheduled
      * @param  string|null  $blog  Where on the site its public records are a blog, e.g. "/blog". The pages are written by `nevela:blog`.
      * @param  string|null  $items  The resource its lines are, e.g. "OrderItem": edited in this one's form and saved with it. That resource belongs to this one.
+     * @param  list<list<string>>  $unique  Fields whose values go together once only, by name: [["studentId", "courseId"]] is one enrolment for each student and course
      */
     public function __construct(
         public readonly string $name,
@@ -42,6 +43,7 @@ final class Descriptor
         public readonly ?string $publish = null,
         public readonly ?string $blog = null,
         public readonly ?string $items = null,
+        public readonly array $unique = [],
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
@@ -87,6 +89,20 @@ final class Descriptor
         }
         if ($items !== null && (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $items) || $items === $name)) {
             throw new InvalidArgumentException("{$name}: \"items\" names the resource its lines are, such as \"OrderItem\": another resource, in PascalCase.");
+        }
+        foreach ($unique as $set) {
+            if (! is_array($set) || ! array_is_list($set) || count($set) < 2 || count(array_unique($set)) !== count($set)) {
+                throw new InvalidArgumentException("{$name}: each set in \"unique\" is two or more of its fields, such as [\"studentId\", \"courseId\"]. One field alone is unique with \"unique\": true on the field.");
+            }
+            foreach ($set as $field) {
+                if (! is_string($field) || ! isset($fields[$field])) {
+                    throw new InvalidArgumentException("{$name}: \"unique\" names \"".(is_string($field) ? $field : json_encode($field))."\", which is not one of its fields.");
+                }
+                // A database can't index a long text or say two files are the same.
+                if (in_array($fields[$field]->kind, ['text', 'file'], true)) {
+                    throw new InvalidArgumentException("{$name}: \"{$field}\" is a {$fields[$field]->kind} field, which can't be part of a unique set.");
+                }
+            }
         }
         if ($blog !== null) {
             if (! preg_match('#^/[a-z0-9][a-z0-9/-]*$#', $blog)) {
@@ -163,6 +179,7 @@ final class Descriptor
             $data['publish'] ?? null,
             $data['blog'] ?? null,
             $data['items'] ?? null,
+            array_values((array) ($data['unique'] ?? [])),
         );
     }
 
@@ -195,6 +212,7 @@ final class Descriptor
             'blog' => $this->blog,
             'items' => $this->items,
             'fields' => array_map(fn (Field $f) => $f->toArray(), $this->fields),
+            'unique' => $this->unique ?: null,
             'actions' => $this->actions ? array_map(fn (Action $a) => $a->toArray(), $this->actions) : null,
             'public' => $this->public?->toArray(),
         ], fn ($v) => $v !== null);
@@ -229,6 +247,27 @@ final class Descriptor
     public function only(array $fields): self
     {
         return new self($this->name, array_intersect_key($this->fields, array_flip($fields)), $this->table, $this->slug, $this->label, $this->pluralLabel, $this->icon, $this->group, null, $this->idType, $this->adopted);
+    }
+
+    /**
+     * The fields a set in `--unique` names, as they are called: "student,course" are
+     * studentId and courseId when those are relations, as they are in the descriptor.
+     *
+     * @param  array<string, Field>  $fields
+     * @return list<string>
+     */
+    public static function uniqueSet(array $fields, string $spec): array
+    {
+        $set = [];
+        foreach (array_filter(array_map('trim', explode(',', $spec)), fn (string $name) => $name !== '') as $name) {
+            $set[] = match (true) {
+                isset($fields[$name]) => $name,
+                isset($fields["{$name}Id"]) && $fields["{$name}Id"]->kind === 'belongsTo' => "{$name}Id",
+                default => $name, // refused by the constructor, which says it isn't a field
+            };
+        }
+
+        return $set;
     }
 
     public function variable(): string

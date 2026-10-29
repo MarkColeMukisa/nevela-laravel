@@ -2,9 +2,12 @@
 
 namespace Nevela\Laravel\Notices;
 
+use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Activity\Activity;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Support\Descriptor;
@@ -22,7 +25,7 @@ final class Announce
         $plural = mb_strtolower($descriptor->pluralLabel);
         $name = self::titleOf($descriptor, $record);
 
-        Notices::toPermission("{$descriptor->table}.view", new Notice(
+        self::toViewers("{$descriptor->table}.view", $record::class, [$record->getKey()], fn () => new Notice(
             'New '.$label.($name !== '' ? ": {$name}" : ''),
             url: "/dashboard/{$descriptor->slug}/{$record->getKey()}",
             kind: 'form.received',
@@ -38,7 +41,7 @@ final class Announce
         $name = self::titleOf($descriptor, $record);
         $plural = mb_strtolower($descriptor->pluralLabel);
 
-        Notices::toPermission("{$descriptor->table}.view", new Notice(
+        self::toViewers("{$descriptor->table}.view", $record::class, [$record->getKey()], fn () => new Notice(
             Str::ucfirst(mb_strtolower($descriptor->label)).' confirmed'.($name !== '' ? ": {$name}" : ''),
             url: "/dashboard/{$descriptor->slug}/{$record->getKey()}",
             kind: 'form.confirmed',
@@ -111,8 +114,13 @@ final class Announce
     /**
      * Someone created, deleted or restored records (see Activity): told to everyone else who
      * may see them. One line per person and kind while unread: "Ada deleted 20 products".
+     *
+     * Where the model has a visibleTo scope, each is told of the ones they may see, and
+     * counted as many: a teacher hears of the enrolments in their own courses.
+     *
+     * @param  list<string>  $ids  The records, for working out who may see which
      */
-    public static function recordsChanged(mixed $user, string $action, Descriptor $descriptor, int $count, ?string $id, string $title): void
+    public static function recordsChanged(mixed $user, string $action, Descriptor $descriptor, int $count, ?string $id, string $title, array $ids = []): void
     {
         $who = trim((string) ($user->name ?? '')) ?: 'Someone';
         $label = mb_strtolower($descriptor->label);
@@ -120,17 +128,20 @@ final class Announce
         $verb = ['created' => 'created', 'deleted' => 'deleted', 'restored' => 'restored'][$action];
         $one = "{$who} {$verb} ".(preg_match('/^[aeiou]/i', $label) ? 'an' : 'a')." {$label}".($title !== '' ? ": {$title}" : '');
 
-        $notice = fn (bool $mayDelete) => new Notice(
-            $count === 1 ? $one : "{$who} {$verb} ".number_format($count)." {$plural}",
+        // Told of one of several, they aren't told which one's title was first.
+        $notice = fn (bool $mayDelete, int $seen) => new Notice(
+            $seen === 1 && $count === 1 ? $one : ($seen === 1 ? "{$who} {$verb} ".(preg_match('/^[aeiou]/i', $label) ? 'an' : 'a')." {$label}" : "{$who} {$verb} ".number_format($seen)." {$plural}"),
             url: Activity::url($descriptor, $action, $id, $mayDelete),
             kind: "record.{$action}",
             group: "record.{$action}:{$descriptor->name}:".$user->getAuthIdentifier(),
             many: fn (int $n) => "{$who} {$verb} ".number_format($n)." {$plural}",
             manyUrl: Activity::url($descriptor, $action, null, $mayDelete),
-            count: $count,
+            count: $seen,
         );
+        $model = "App\\Models\\{$descriptor->name}";
+        $ids = $ids !== [] ? $ids : ($id !== null ? [$id] : []);
         if ($action !== 'deleted') {
-            Notices::toPermission("{$descriptor->table}.view", $notice(true), except: $user);
+            self::toViewers("{$descriptor->table}.view", $model, $ids, fn (?int $seen) => $notice(true, $seen ?? $count), $user);
 
             return;
         }
@@ -145,8 +156,58 @@ final class Announce
 
             return;
         }
-        Notices::send($deleters, $notice(true));
-        Notices::send($viewers, $notice(false));
+        self::tell($deleters, $model, $ids, fn (?int $seen) => $notice(true, $seen ?? $count));
+        self::tell($viewers, $model, $ids, fn (?int $seen) => $notice(false, $seen ?? $count));
+    }
+
+    /**
+     * Tell everyone who may do something about these records, apart from whoever did it.
+     *
+     * @param  class-string<Model>  $model
+     * @param  list<mixed>  $ids
+     * @param  Closure(int|null): Notice  $notice  What to tell someone who may see this many of them, or all of them with null
+     */
+    private static function toViewers(string $permission, string $model, array $ids, Closure $notice, mixed $except = null): void
+    {
+        try {
+            $query = Access::holders($permission);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return;
+        }
+        if (is_object($except) && method_exists($except, 'getAuthIdentifier')) {
+            $query->whereKeyNot($except->getAuthIdentifier());
+        }
+        self::tell($query, $model, $ids, $notice);
+    }
+
+    /**
+     * Tell these people, each of what they may see of the records. A model with no
+     * visibleTo scope shows everyone all of them, and they are told together, as before.
+     *
+     * @param  Builder<Model>  $people
+     * @param  class-string<Model>  $model
+     * @param  list<mixed>  $ids
+     * @param  Closure(int|null): Notice  $notice
+     */
+    private static function tell(Builder $people, string $model, array $ids, Closure $notice): void
+    {
+        if ($ids === [] || ! class_exists($model) || ! Visibility::narrows($model)) {
+            Notices::send($people, $notice(null));
+
+            return;
+        }
+        try {
+            foreach ((clone $people)->limit(Notices::MOST_RECIPIENTS)->get() as $person) {
+                $seen = Visibility::count($person, $model, $ids);
+                if ($seen > 0) {
+                    Notices::send($person, $notice($seen));
+                }
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /** What a list would call the record, short: its title, or nothing when it has only an id. */

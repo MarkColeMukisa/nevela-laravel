@@ -17,6 +17,7 @@ final class MakeResourceCommand extends Command
         {--group= : Sidebar group in the dashboard}
         {--id=uuid : What a record\'s id is: uuid, or int for the numbered ids of $table->id()}
         {--items= : Lines edited inside its form and saved with it, as a resource of their own: "OrderItem: product:belongsTo(Product), quantity:int, price:money"}
+        {--unique=* : Fields whose values go together once only: --unique=student,course is one enrolment for each student and course}
         {--force : Overwrite an existing descriptor}
         {--migrate : Run the new migration straight away}
         {--seed= : Fill the new resource with records too (25, or the number you give). Runs the migration first}';
@@ -33,6 +34,10 @@ final class MakeResourceCommand extends Command
                 $this->option('group'),
                 (string) $this->option('id'),
             );
+            $unique = array_map(fn ($set) => Descriptor::uniqueSet($descriptor->fields, (string) $set), (array) $this->option('unique'));
+            if ($unique !== []) {
+                $descriptor = Descriptor::fromArray(['unique' => $unique] + $descriptor->toArray());
+            }
             $lines = $this->option('items') === null ? null : self::lines($descriptor, (string) $this->option('items'));
             if ($lines !== null) {
                 $descriptor = Descriptor::fromArray(['items' => $lines->name] + $descriptor->toArray());

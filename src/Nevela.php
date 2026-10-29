@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Insights;
@@ -124,7 +125,8 @@ final class Nevela
      */
     public static function list(Builder $query, string $name, Request $request, string $resourceClass): JsonResponse
     {
-        return self::listFor($query, self::resource($name), $request, $resourceClass);
+        // Signed in, the list is what this person may see. The public list goes straight to listFor.
+        return self::listFor(Visibility::narrow($query, $request->user()), self::resource($name), $request, $resourceClass);
     }
 
     /**
@@ -249,6 +251,7 @@ final class Nevela
     public static function insights(Builder $query, string $name, Request $request): JsonResponse
     {
         $resource = self::resource($name);
+        Visibility::narrow($query, $request->user());
         $unit = $request->query('unit', 'day');
         if (! is_string($unit) || ! isset(Insights::PERIODS[$unit])) {
             return response()->json(['error' => 'Invalid query.', 'issues' => [['param' => 'unit', 'message' => 'Must be day, week or month.']]], 400);
@@ -395,6 +398,7 @@ final class Nevela
         $now = now();
         $since = $now->copy()->subDays($days);
         $before = $now->copy()->subDays($days * 2);
+        Visibility::narrow($query, $request->user());
         self::proved($query, $resource);
         $base = fn () => (clone $query)->reorder();
 

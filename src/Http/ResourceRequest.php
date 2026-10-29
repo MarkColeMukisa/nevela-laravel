@@ -9,9 +9,12 @@ use Illuminate\Support\Facades\Validator as Validation;
 use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
+use Nevela\Laravel\Access\Visibility;
+use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Html;
 use Nevela\Laravel\Support\SchemaFacts;
 use Nevela\Laravel\Support\Slug;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Base for generated resource requests.
@@ -98,6 +101,70 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Fields whose values go together once only: one enrolment for each student and
+     * course. A generated request with any says which, in what table, and what to say.
+     *
+     * @return list<array{fields: list<string>, table: string, message: string}>
+     */
+    protected function together(): array
+    {
+        return [];
+    }
+
+    /**
+     * What `together()` refuses of these values, by the field it is said on: the first of
+     * its set. A set with a field still empty isn't checked: two empty values are not the
+     * same, to the database either. The trash is looked in too, as the index covers it.
+     *
+     * @param  array<string, mixed>  $values  by field
+     * @param  list<string>  $skip  Sets that name one of these are left out: a line's owner, filled in later
+     * @return array<string, string>
+     */
+    private function clashes(array $values, ?Model $record = null, array $skip = []): array
+    {
+        $columns = $this->columns();
+        $found = [];
+        foreach ($this->together() as $set) {
+            if (array_intersect($set['fields'], $skip) !== []) {
+                continue;
+            }
+            $query = DB::table($set['table']);
+            foreach ($set['fields'] as $field) {
+                // A change that leaves a field out keeps the record's own value for it.
+                $value = array_key_exists($field, $values) ? $values[$field] : $record?->getAttribute($columns[$field]);
+                if ($value === null || $value === '' || ! is_scalar($value)) {
+                    continue 2;
+                }
+                $query->where($columns[$field], $value);
+            }
+            if ($record !== null) {
+                $query->where($record->getKeyName(), '!=', $record->getKey());
+            }
+            $other = $query->first();
+            if ($other === null) {
+                continue;
+            }
+            $found[$set['fields'][0]] = isset($other->deleted_at)
+                ? 'There is one with these in the trash. Restore it, or delete it for good to use them again.'
+                : $set['message'];
+        }
+
+        return $found;
+    }
+
+    /** The record a request changes: the one its address names. Null for a create. */
+    private function record(): ?Model
+    {
+        foreach ($this->route()?->parameters() ?? [] as $parameter) {
+            if ($parameter instanceof Model) {
+                return $parameter;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Fill what a create left empty and can be made, and keep a later save from emptying
      * it: once made, a slug is an address, and an address doesn't move.
      *
@@ -151,6 +218,9 @@ abstract class ResourceRequest extends FormRequest
             self::explainTrashed($validator, $input);
             array_push($issues, ...FlareErrors::issues($validator->errors()->toArray()));
         }
+        foreach ($issues === [] ? $this->clashes($validator->validated()) : [] as $field => $message) {
+            $issues[] = ['path' => $field, 'message' => $message];
+        }
         if ($issues !== []) {
             return ['values' => [], 'issues' => $issues];
         }
@@ -196,9 +266,22 @@ abstract class ResourceRequest extends FormRequest
         return $clean;
     }
 
+    /**
+     * A record someone may not see is not there for them: 404, as for one that never was,
+     * rather than "not allowed", which would say it exists.
+     */
+    protected function failedAuthorization(): void
+    {
+        $record = $this->record();
+        if ($record !== null && ! Visibility::allows($this->user(), $record)) {
+            throw new NotFoundHttpException;
+        }
+        parent::failedAuthorization();
+    }
+
     protected function validationRules()
     {
-        $rules = self::withoutTrashed(parent::validationRules());
+        $rules = self::visibleOnly(self::withoutTrashed(parent::validationRules()));
         if (! $this->isMethod('PATCH')) {
             return $rules;
         }
@@ -223,6 +306,10 @@ abstract class ResourceRequest extends FormRequest
                 }
             }
             self::explainTrashed($validator, $validator->getData());
+            // A field already refused for itself isn't also said to clash.
+            foreach ($this->clashes($validator->getData(), $this->record(), array_keys($validator->errors()->messages())) as $field => $message) {
+                $validator->errors()->add($field, $message);
+            }
         });
     }
 
@@ -374,6 +461,42 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * A relation points at a record the person saving may see. Where the model it points
+     * at has a visibleTo scope, the exists rule takes only those: a teacher can't move an
+     * enrolment into another teacher's course by sending its id. Refused with the rule's
+     * own message, the one for an id that doesn't exist, which gives nothing away.
+     *
+     * @param  array<string, mixed>  $rules
+     * @return array<string, mixed>
+     */
+    private static function visibleOnly(array $rules): array
+    {
+        $user = request()->user();
+        if ($user === null) {
+            return $rules;
+        }
+        $models = [];
+        foreach (Nevela::all() as $descriptor) {
+            $models[$descriptor->table] = "App\\Models\\{$descriptor->name}";
+        }
+        foreach ($rules as $set) {
+            foreach (is_array($set) ? $set : [] as $rule) {
+                if (! $rule instanceof Exists) {
+                    continue;
+                }
+                $model = $models[(string) strtok(substr((string) $rule, strlen('exists:')), ',')] ?? null;
+                if ($model === null || ! class_exists($model) || ! Visibility::narrows($model)) {
+                    continue;
+                }
+                $instance = new $model;
+                $rule->where(fn ($query) => $query->whereIn($instance->getKeyName(), Visibility::narrow($model::query(), $user)->select($instance->getQualifiedKeyName())->toBase()));
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
      * A unique value can be held by a record nobody can see: one in the trash. "Already
      * taken" would send someone looking through a list it isn't in, so say where it is.
      * The same goes for a relation to a record that is in the trash.
@@ -438,7 +561,7 @@ abstract class ResourceRequest extends FormRequest
      */
     public function many(array $rows, ?string $owner = null): array
     {
-        $rules = self::withoutTrashed($this->rules());
+        $rules = self::visibleOnly(self::withoutTrashed($this->rules()));
         $columns = $this->columns();
         $defaults = $this->defaults();
         $known = array_keys($columns);
@@ -482,6 +605,24 @@ abstract class ResourceRequest extends FormRequest
                     $issues[] = ['path' => $field, 'message' => "The same as row {$taken[$mark]}. Each one needs its own."];
                 } else {
                     $taken[$mark] = $number;
+                }
+            }
+            // The same for fields that go together: one row of the batch has them first.
+            foreach ($this->together() as $set) {
+                $together = array_map(fn (string $field) => $row[$field] ?? null, $set['fields']);
+                if (in_array($owner, $set['fields'], true) || array_filter($together, fn ($value) => ! is_scalar($value) || (string) $value === '') !== []) {
+                    continue;
+                }
+                $mark = implode("\0", [...$set['fields'], ...array_map('strval', $together)]);
+                if (isset($taken[$mark])) {
+                    $issues[] = ['path' => $set['fields'][0], 'message' => "The same as row {$taken[$mark]}. Each one needs its own."];
+                } else {
+                    $taken[$mark] = $number;
+                }
+            }
+            if ($issues === []) {
+                foreach ($this->clashes($validator->validated(), null, $owner === null ? [] : [$owner]) as $field => $message) {
+                    $issues[] = ['path' => $field, 'message' => $message];
                 }
             }
             if ($issues !== []) {
