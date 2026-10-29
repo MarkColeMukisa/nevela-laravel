@@ -255,6 +255,15 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * The record whose values stand for what a change leaves out. A replace (PUT) is the
+     * whole record, so what it leaves out is its default or empty, as values() saves it.
+     */
+    private function beforeChange(): ?Model
+    {
+        return $this->isMethod('PUT') ? null : $this->record();
+    }
+
+    /**
      * Fill what a create left empty and can be made, and keep a later save from emptying
      * it: once made, a slug is an address, and an address doesn't move.
      *
@@ -406,7 +415,7 @@ abstract class ResourceRequest extends FormRequest
             foreach ($this->clashes($validator->getData(), $this->record(), array_keys($validator->errors()->messages())) as $field => $message) {
                 $validator->errors()->add($field, $message);
             }
-            foreach ($this->unmet($validator->getData(), $this->record(), array_keys($validator->errors()->messages())) as $field => $message) {
+            foreach ($this->unmet($validator->getData(), $this->beforeChange(), array_keys($validator->errors()->messages())) as $field => $message) {
                 $validator->errors()->add($field, $message);
             }
         });
@@ -763,6 +772,6 @@ abstract class ResourceRequest extends FormRequest
             }
         }
 
-        return $this->make($this->emptied($values, $validated, $this->record()), $this->isMethod('POST'));
+        return $this->make($this->emptied($values, $validated, $this->beforeChange()), $this->isMethod('POST'));
     }
 }

@@ -129,6 +129,19 @@ final class ConditionalFieldsTest extends TestCase
         foreach ([false, 0, '0'] as $no) {
             $this->assertTrue(Field::holds($no, [false]), var_export($no, true));
         }
-        $this->assertFalse(Field::holds(null, [false]));
+        // Left empty, a yes/no is a no: its column's default, and the dashboard's switch, off.
+        $this->assertTrue(Field::holds(null, [false]));
+        $this->assertTrue(Field::holds('', [false]));
+        $this->assertFalse(Field::holds(null, [true]));
+    }
+
+    public function test_a_seeded_field_stays_empty_where_it_doesn_t_apply_whatever_else_fills_it(): void
+    {
+        // A course's code is made from its title after its fields are, and still left empty for a short one.
+        $course = Descriptor::fromSpec('Course', 'title:string, length:enum(term|short), code:string if length == term');
+        foreach (range(1, 40) as $number) {
+            $row = Fake::row($course, $number);
+            $row['length'] === 'term' ? $this->assertNotNull($row['code']) : $this->assertNull($row['code']);
+        }
     }
 }

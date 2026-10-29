@@ -522,7 +522,8 @@ final class Field
 
     /**
      * Whether the value of the field a conditional one depends on is one it applies for.
-     * A yes/no comes back from some databases as 1 and 0, and from a form as "true".
+     * A yes/no comes back from some databases as 1 and 0, and from a form as "true". One
+     * left empty is a no, as its column's default and the dashboard's switch have it.
      *
      * @param  list<string|bool>  $wanted
      */
@@ -530,7 +531,7 @@ final class Field
     {
         foreach ($wanted as $one) {
             $same = is_bool($one)
-                ? $value !== null && $value !== '' && filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) === $one
+                ? filter_var($value === null || $value === '' ? false : $value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) === $one
                 : $value !== null && is_scalar($value) && (string) $value === $one;
             if ($same) {
                 return true;
