@@ -11,6 +11,7 @@ use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Fake;
+use Nevela\Laravel\Support\SchemaFacts;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Throwable;
 
@@ -203,6 +204,9 @@ final class SeedCommand extends Command
     {
         $removed = $fresh ? DB::table($resource->table)->delete() : 0;
         $now = time();
+        // A list whose form proves addresses: a seeded record is confirmed as it is made, as one
+        // added in the dashboard is. Nobody is there to ask.
+        $confirms = $resource->public?->confirm !== null && SchemaFacts::hasColumn($resource->table, 'confirmed_at');
         // What the records there already have, for each set of fields that go together, the trash's included.
         $taken = [];
         foreach ($resource->unique as $index => $set) {
@@ -229,7 +233,7 @@ final class SeedCommand extends Command
                         $row[$copy->column()] = $copies[$key];
                     }
                 }
-                $rows[] = $id + $row + ['created_at' => $created, 'updated_at' => $created];
+                $rows[] = $id + $row + ['created_at' => $created, 'updated_at' => $created] + ($confirms ? ['confirmed_at' => $created] : []);
             }
             DB::table($resource->table)->insert($rows);
             $bar->advance(count($rows));

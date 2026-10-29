@@ -25,6 +25,12 @@ final class Fake
 
     private const COMPANIES = ['Acme', 'Globex', 'Initech', 'Northwind', 'Brightline', 'Vandelay', 'Umbrella', 'Hooli', 'Stark', 'Wayne', 'Bluewave', 'Kestrel', 'Lakeside', 'Meridian', 'Oakridge', 'Pinecrest', 'Redstone', 'Silverline', 'Summit', 'Tidewater'];
 
+    /** What a school teaches: titles for a Course, Class, Module or Lesson. */
+    private const COURSES = ['Biology 101', 'Algebra I', 'World History', 'Introduction to Programming', 'Chemistry 101', 'English Literature', 'Physics 101', 'Human Geography', 'Principles of Economics', 'Statistics', 'Art and Design', 'French for Beginners', 'Data Structures', 'Creative Writing', 'Music Theory', 'Environmental Science'];
+
+    /** What a teacher teaches. */
+    private const SUBJECTS = ['Mathematics', 'Biology', 'Chemistry', 'Physics', 'English', 'History', 'Geography', 'Computer Science', 'Economics', 'Art', 'Music', 'French'];
+
     /** How a company's name ends: Acme Ltd, Acme Group. */
     private const COMPANY_ENDINGS = ['Ltd', 'Inc', 'Group', 'Labs', '& Co', 'Partners'];
 
@@ -116,6 +122,23 @@ final class Fake
             }
         }
 
+        // A course is called Biology 101, with a code to match, BIO-104; a teacher teaches a subject.
+        if (preg_match('/(Course|Class|Module|Lesson)$/', $resource->name)) {
+            $title = $resource->fields['title'] ?? $resource->fields['name'] ?? null;
+            if ($title !== null && $title->kind === 'string' && $title->format === null) {
+                $course = self::COURSES[($number - 1) % count(self::COURSES)];
+                $row[$title->column()] = $title->unique && $number > count(self::COURSES) ? "{$course} {$number}" : $course;
+                $code = $resource->fields['code'] ?? null;
+                if ($code !== null && $code->kind === 'string' && $code->format === null && $code->maxLength === null) {
+                    $row[$code->column()] = strtoupper(substr((string) preg_replace('/[^A-Za-z]/', '', $course), 0, 3)).'-'.(100 + $number);
+                }
+            }
+        }
+        $subject = $resource->fields['subject'] ?? null;
+        if (preg_match('/(Teacher|Tutor|Lecturer|Instructor)$/', $resource->name) && $subject !== null && $subject->kind === 'string' && $subject->format === null && isset($row[$subject->column()])) {
+            $row[$subject->column()] = self::SUBJECTS[($number - 1) % count(self::SUBJECTS)].($subject->unique ? " {$number}" : '');
+        }
+
         // Any other slug made from a field reads as that field does: Quiet Backpack is
         // quiet-backpack. Numbered when it has to be unique and what it is made from doesn't make
         // it so, and cut to fit its column, number and all.
@@ -151,9 +174,12 @@ final class Fake
                 $field->unique => round($number + mt_rand(0, 99) / 100, 2),
                 default => round(mt_rand(199, 49999) / 100, 2),
             },
-            'date' => $field->unique
-                ? gmdate('Y-m-d', self::EPOCH + ($number % self::UNIQUE_DAYS) * 86400)
-                : date('Y-m-d', time() - mt_rand(-30, 365) * 86400),
+            'date' => match (true) {
+                $field->unique => gmdate('Y-m-d', self::EPOCH + ($number % self::UNIQUE_DAYS) * 86400),
+                // Someone born last month is no student: between 16 and 60 years ago.
+                str_contains(strtolower($field->name), 'birth') || strtolower($field->name) === 'dob' => date('Y-m-d', time() - mt_rand(16 * 365, 60 * 365) * 86400),
+                default => date('Y-m-d', time() - mt_rand(-30, 365) * 86400),
+            },
             'datetime' => $field->unique
                 ? gmdate('Y-m-d H:i:s', self::EPOCH + $number)
                 : date('Y-m-d H:i:s', time() - mt_rand(0, 365 * 86400)),

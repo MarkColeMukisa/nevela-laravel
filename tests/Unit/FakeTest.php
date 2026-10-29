@@ -65,4 +65,23 @@ final class FakeTest extends TestCase
         sort($stars);
         $this->assertSame([1, 2, 3, 4, 5], $stars);
     }
+
+    public function test_a_school_reads_like_one(): void
+    {
+        $course = Descriptor::fromSpec('Course', 'title:string, code:string!');
+        $this->assertSame(['title' => 'Biology 101', 'code' => 'BIO-101'], Fake::row($course, 1));
+        $this->assertSame(['title' => 'Algebra I', 'code' => 'ALG-102'], Fake::row($course, 2));
+
+        $teacher = Descriptor::fromSpec('Teacher', 'name:string, email:email!, subject:string');
+        $this->assertSame('Mathematics', Fake::row($teacher, 1)['subject']);
+
+        // Born between 16 and 60 years ago, not last month.
+        $student = Descriptor::fromSpec('Student', 'name:string, dateOfBirth:date');
+        foreach (range(1, 50) as $number) {
+            $age = (time() - strtotime(Fake::row($student, $number)['date_of_birth'])) / (365 * 86400);
+            $this->assertTrue($age >= 15.9 && $age <= 60.1, "{$age} years");
+        }
+        // A message's subject is still a line of words.
+        $this->assertNotContains(Fake::row(Descriptor::fromSpec('Message', 'email:email, subject:string'), 1)['subject'], ['Mathematics']);
+    }
 }
