@@ -102,4 +102,14 @@ final class NumbersAndCopiesTest extends TestCase
         $this->assertSame('INV-0007', Fake::row($order, 7)['number']);
         $this->assertSame('INV-12345', Fake::row($order, 12345)['number']);
     }
+
+    public function test_a_public_form_leaves_out_what_laravel_fills(): void
+    {
+        // A student who signs up is given the next number; nobody types it.
+        $student = Descriptor::fromArray(['public' => ['create' => ['fields' => ['name']]]] + Descriptor::fromSpec('Student', 'name:string, number:auto(STU)')->toArray());
+        $this->assertSame(['name'], $student->public->create);
+
+        $this->expectExceptionMessage('"code" is required and a public create can\'t send it');
+        Descriptor::fromArray(['public' => ['create' => ['fields' => ['name']]]] + Descriptor::fromSpec('Student', 'name:string, code:string')->toArray());
+    }
 }

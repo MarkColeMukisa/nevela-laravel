@@ -198,8 +198,10 @@ final class PublicAccess
         if ($this->create !== null) {
             foreach ($fields as $field) {
                 // Left out of the form, a field needs something to be: nothing, or a default.
-                // (A yes/no column is no unless said otherwise.)
-                if ($field->required && $field->default === null && $field->kind !== 'boolean' && ! in_array($field->name, $this->create, true)) {
+                // (A yes/no column is no unless said otherwise.) A number Laravel gives, or a
+                // value it copies from a related record, is something too.
+                $filled = $field->auto !== null || ($field->from !== null && str_contains($field->from, '.'));
+                if ($field->required && $field->default === null && $field->kind !== 'boolean' && ! $filled && ! in_array($field->name, $this->create, true)) {
                     throw new InvalidArgumentException("{$resource}: \"{$field->name}\" is required and a public create can't send it. List it under create, give it a default, or make it optional.");
                 }
             }
