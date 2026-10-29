@@ -49,6 +49,7 @@ final class Field
      * @param  string|null  $currency  money: an ISO 4217 code, "UGX". The app's (nevela.currency) unless set.
      * @param  string|null  $auto  string: the prefix of the number Laravel gives each new record, e.g. "INV" for INV-0001
      * @param  bool|string|null  $list  Its column in the dashboard's table: true shown, "hidden" off until someone turns it on, false left out. Null leaves it to listing().
+     * @param  string|null  $country  tel: the country its numbers are of, "UG", kept as +256772123456. Any country's when not set.
      */
     public function __construct(
         public readonly string $name,
@@ -69,6 +70,7 @@ final class Field
         public readonly ?string $currency = null,
         public readonly bool|string|null $list = null,
         public readonly ?string $auto = null,
+        public readonly ?string $country = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -112,6 +114,14 @@ final class Field
             }
             if (! self::isCurrency($currency)) {
                 throw new InvalidArgumentException("\"{$currency}\" on \"{$name}\" is not a currency. Use its three-letter ISO 4217 code, in capitals: UGX, USD, EUR.");
+            }
+        }
+        if ($country !== null) {
+            if ($kind !== 'string' || $format !== 'tel') {
+                throw new InvalidArgumentException("\"{$name}\" can't have a country: that is for a phone number ({$name}:tel({$country})).");
+            }
+            if (! Phone::known($country)) {
+                throw new InvalidArgumentException("\"{$country}\" on \"{$name}\" is not a country Nevela knows the numbers of. Use one of: ".implode(', ', array_keys(Phone::COUNTRIES)).", or tel alone for any country's.");
             }
         }
         if ($list !== null && ! is_bool($list) && $list !== 'hidden') {
@@ -202,6 +212,7 @@ final class Field
      *   status:enum(pending|paid)=pending what it is when a create leaves it out
      *   timeline:enum(asap=As soon as possible|month=Within a month)   what each value is called
      *   slug:slug(title)!                 made from the title when left empty
+     *   phone:tel(UG)                     a Ugandan number, kept as +256772123456
      *
      * Grit's and Flare's spellings are understood too: see normalise().
      */
@@ -292,6 +303,10 @@ final class Field
         if ($format === 'slug' && $args !== '' && ! ctype_digit($args)) {
             return new self($name, $kind, $format, $required, $unique, from: Naming::camel($args));
         }
+        // phone:tel(UG): one country's numbers. (tel(20) is a length, as for any string.)
+        if ($format === 'tel' && $args !== '' && ! ctype_digit($args)) {
+            return new self($name, $kind, $format, $required, $unique, country: strtoupper($args));
+        }
         // excerpt:string(500): a length of its own.
         $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
 
@@ -344,6 +359,7 @@ final class Field
             $data['currency'] ?? null,
             $data['list'] ?? null,
             $data['auto'] ?? null,
+            $data['country'] ?? null,
         );
     }
 
@@ -356,6 +372,7 @@ final class Field
             'options' => $this->options ?: null,
             'optionLabels' => $this->optionLabels ?: null,
             'currency' => $this->currency,
+            'country' => $this->country,
             'target' => $this->target,
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,

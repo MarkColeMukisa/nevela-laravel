@@ -213,6 +213,8 @@ final class Fake
             // Always numbered: two people called Ada Okafor must not share an address.
             $field->format === 'email' || str_contains($name, 'email') => strtolower("{$first}.{$last}{$number}@example.com"),
             $field->format === 'url' || str_contains($name, 'website') || str_ends_with($name, 'url') => 'https://example.com/'.strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
+            // Seeded straight into the table, so already in the one form a country's number is kept in.
+            $field->country !== null => Phone::fake($field->country, $number, $field->unique),
             $field->format === 'tel' || str_contains($name, 'phone') => $field->unique
                 ? '+256 7'.str_pad((string) $number, 10, '0', STR_PAD_LEFT)
                 : sprintf('+256 7%02d %03d %03d', mt_rand(0, 99), mt_rand(0, 999), mt_rand(0, 999)),

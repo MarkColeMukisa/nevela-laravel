@@ -1121,6 +1121,16 @@ final class ResourceGenerator
                 return [{$rich}];
             }
         PHP;
+        $phones = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => '{$f->country}'", array_filter($d->fields, fn (Field $f) => $f->country !== null)));
+        $richBlock .= $phones === '' ? '' : <<<PHP
+
+
+            /** Phone fields held to one country. A number is put in the form it is kept in, +256772123456, before it is checked. */
+            protected function phones(): array
+            {
+                return [{$phones}];
+            }
+        PHP;
         $together = implode(', ', array_map(fn (array $set) => '['
             ."'fields' => [".implode(', ', array_map(fn (string $name) => "'{$name}'", $set)).'], '
             ."'table' => '{$d->table}', "
@@ -1212,6 +1222,7 @@ final class ResourceGenerator
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", $max(255)],
             $f->format === 'url' => ["'url'", $max(2048)],
+            $f->format === 'tel' && $f->country !== null => ["'string'", $max(32), "new \\Nevela\\Laravel\\Rules\\Phone('{$f->country}')"],
             $f->format === 'tel' => ["'string'", $max(32)],
             $f->format === 'slug' => ["'string'", "'alpha_dash'", $max(255)],
             $f->format === 'color' => ["'string'", "'regex:/^#[0-9a-fA-F]{6}$/'"],
@@ -1552,6 +1563,10 @@ final class ResourceGenerator
             }
             if ($f->auto !== null) {
                 $parts[] = '...({ auto: '.$j($f->auto).' } as {})';
+            }
+            if ($f->country !== null) {
+                // The dashboard's phone field stays on that country rather than offering every one.
+                $parts[] = '...({ country: '.$j($f->country).' } as {})';
             }
             if (in_array($f->listing(), ['shown', 'hidden'], true)) {
                 // Decided, not left to the dashboard: shown whatever else there is, or off until turned on.

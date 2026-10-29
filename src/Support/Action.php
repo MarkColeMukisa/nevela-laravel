@@ -147,6 +147,7 @@ final class Action
             $rules[$field->name] = [$field->required ? 'required' : 'nullable', ...match (true) {
                 $field->format === 'email' => ['email', 'max:'.($field->maxLength ?? 255)],
                 $field->format === 'url' => ['url', 'max:'.($field->maxLength ?? 2048)],
+                $field->format === 'tel' && $field->country !== null => ['string', 'max:'.($field->maxLength ?? 32), new \Nevela\Laravel\Rules\Phone($field->country)],
                 $field->format === 'tel' => ['string', 'max:'.($field->maxLength ?? 32)],
                 $field->format === 'slug' => ['string', 'alpha_dash', 'max:'.($field->maxLength ?? 255)],
                 $field->format === 'color' => ['string', 'regex:/^#[0-9a-fA-F]{6}$/'],

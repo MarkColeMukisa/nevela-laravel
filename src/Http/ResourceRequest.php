@@ -12,6 +12,7 @@ use Illuminate\Validation\Validator;
 use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Html;
+use Nevela\Laravel\Support\Phone;
 use Nevela\Laravel\Support\SchemaFacts;
 use Nevela\Laravel\Support\Slug;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -63,6 +64,17 @@ abstract class ResourceRequest extends FormRequest
      * @return list<string>
      */
     protected function rich(): array
+    {
+        return [];
+    }
+
+    /**
+     * Phone fields held to one country, and which: phone:tel(UG). A generated request with
+     * any says which.
+     *
+     * @return array<string, string> field => country
+     */
+    protected function phones(): array
     {
         return [];
     }
@@ -206,7 +218,7 @@ abstract class ResourceRequest extends FormRequest
      */
     public function forFields(array $fields, array $input): array
     {
-        $input = self::cleaned($this->rich(), $input) + $input;
+        $input = $this->prepared($input);
         $issues = [];
         foreach (array_keys($input) as $key) {
             if (! in_array($key, $fields, true)) {
@@ -241,29 +253,35 @@ abstract class ResourceRequest extends FormRequest
 
     /**
      * Rich text is cleaned before anything looks at it: what is checked for being there,
-     * and for being short enough, is the HTML that would be stored.
+     * and for being short enough, is the HTML that would be stored. A phone number is put
+     * in the one form it is kept in, so 0772 123456 and +256772123456 are the same number
+     * to the unique check too.
      */
     protected function prepareForValidation(): void
     {
-        $this->merge(self::cleaned($this->rich(), $this->all()));
+        $fields = array_flip([...$this->rich(), ...array_keys($this->phones())]);
+        $this->merge(array_intersect_key($this->prepared($this->all()), $fields));
     }
 
     /**
-     * @param  list<string>  $fields
      * @param  array<string, mixed>  $input
-     * @return array<string, mixed> The fields that were sent as text, cleaned. One with nothing left to read is empty.
+     * @return array<string, mixed> The input with its rich text cleaned (one with nothing left to read is empty) and its numbers in their one form. A number that isn't one is left as sent, for the rule to say so.
      */
-    private static function cleaned(array $fields, array $input): array
+    private function prepared(array $input): array
     {
-        $clean = [];
-        foreach ($fields as $field) {
+        foreach ($this->rich() as $field) {
             if (is_string($input[$field] ?? null)) {
                 $html = Html::clean($input[$field]);
-                $clean[$field] = $html === '' ? null : $html;
+                $input[$field] = $html === '' ? null : $html;
+            }
+        }
+        foreach ($this->phones() as $field => $country) {
+            if (is_string($input[$field] ?? null) && ($number = Phone::normalise($input[$field], $country)) !== null) {
+                $input[$field] = $number;
             }
         }
 
-        return $clean;
+        return $input;
     }
 
     /**
@@ -589,7 +607,7 @@ abstract class ResourceRequest extends FormRequest
                     $issues[] = ['path' => (string) $key, 'message' => 'Unknown field.'];
                 }
             }
-            $row = self::cleaned($this->rich(), $row) + $row;
+            $row = $this->prepared($row);
             $validator = Validation::make($row, $rules);
             if ($validator->fails()) {
                 self::explainTrashed($validator, $row);

@@ -13,6 +13,7 @@ use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Key;
+use Nevela\Laravel\Support\Phone;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -157,6 +158,12 @@ final class ActionController
     {
         $sent = $request->input('input', []);
         $sent = is_array($sent) ? $sent : [];
+        // A number held to one country is checked, and handed on, in the one form it is kept in.
+        foreach ($action->fields as $key => $field) {
+            if ($field->country !== null && is_string($sent[$key] ?? null) && ($number = Phone::normalise($sent[$key], $field->country)) !== null) {
+                $sent[$key] = $number;
+            }
+        }
         $validator = Validator::make($sent, $action->rules());
         $validator->after(function ($validator) use ($sent, $action) {
             foreach (array_keys($sent) as $key) {
