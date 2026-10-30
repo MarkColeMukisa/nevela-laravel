@@ -76,6 +76,7 @@ final class BlogCommand extends Command
                 $path = str_replace('\\', '/', substr($row['path'], strlen(rtrim($web, '/\\')) + 1));
                 $this->components->twoColumnDetail("../web/{$path}", $row['status'] === 'created' ? '<fg=green>created</>' : '<fg=gray>exists (yours)</>');
             }
+            $this->homePage(rtrim($web, '/\\'));
         }
 
         $status = self::SUCCESS;
@@ -213,14 +214,88 @@ final class BlogCommand extends Command
             return self::SUCCESS; // it has posts already; these would only be in the way
         }
 
-        // A picture each, where pictures can be made here.
-        $pictures = Uploads::placeholders($descriptor, $descriptor->fields['image'], 3);
-        foreach (self::POSTS as $index => $post) {
-            $model::create($post + ['image' => $pictures[$index] ?? null, 'published_at' => now()->subDays(1 + $index * 3)]);
+        $image = $descriptor->fields['image'];
+        // A welcome, with a picture where one can be made here, then a post for each of Nevela's tutorials.
+        $posts = [self::WELCOME + ['image' => Uploads::placeholders($descriptor, $image, 1)[0] ?? null], ...$this->tutorialPosts($descriptor)];
+        // Oldest first, so the newest tutorial is the newest post, and the first the home page shows.
+        foreach ($posts as $index => $post) {
+            $model::create($post + ['published_at' => now()->subDays((count($posts) - $index) * 3)]);
         }
-        $this->components->info('Added three sample posts. Edit or delete them under Posts in the dashboard.');
+        $tutorials = count($posts) - 1;
+        $this->components->info('Added '.count($posts).' sample posts: a welcome'.($tutorials > 0 ? ", and one for each of Nevela's {$tutorials} tutorials" : '').'. Edit or delete them under Posts in the dashboard.');
 
         return self::SUCCESS;
+    }
+
+    /** Where the home page's template keeps a place for the newest posts. */
+    public const HOME_MARKER = '{/* nevela:latest-posts */}';
+
+    /**
+     * The newest posts on the home page, in the place its template keeps for them, as Grit's
+     * home page has its blog. A home page that has them already is left as it is, and one
+     * without the place (made before it, or rewritten) is told how to add them.
+     */
+    private function homePage(string $web): void
+    {
+        $page = $web.'/app/page.tsx';
+        $source = is_file($page) ? (string) file_get_contents($page) : '';
+        if ($source === '' || str_contains($source, '<LatestPosts')) {
+            return;
+        }
+        if (! str_contains($source, self::HOME_MARKER) || ! preg_match('/\A((?:import [^\n]*\n)+)/', $source)) {
+            $this->line('  To show the newest posts on the home page, put <fg=cyan><LatestPosts /></> from <fg=cyan>components/marketing/latest-posts.tsx</> in <fg=cyan>app/page.tsx</>.');
+
+            return;
+        }
+        $source = str_replace(self::HOME_MARKER, '<LatestPosts />', $source);
+        $source = (string) preg_replace('/\A((?:import [^\n]*\n)+)/', "$1import { LatestPosts } from \"@/components/marketing/latest-posts\";\n", $source, 1);
+        file_put_contents($page, $source);
+        $this->components->twoColumnDetail('../web/app/page.tsx', '<fg=green>the newest posts added</>');
+    }
+
+    /** Where the tutorials' words and covers are, in this package: scripts/tutorial-posts.mjs copies them from the docs. */
+    private const TUTORIALS = __DIR__.'/../../resources/tutorials';
+
+    private const DOCS = 'https://nevela-docs.vercel.app';
+
+    /**
+     * A post for each of Nevela's tutorials: its summary, what it takes, and a link to it on
+     * the docs, with its cover as the picture. The tutorials are as they were when this
+     * package was released; a later release brings the ones written since.
+     *
+     * @return list<array{title: string, slug: string, excerpt: string, body: string, image: string|null}>
+     */
+    private function tutorialPosts(Descriptor $descriptor): array
+    {
+        $list = self::TUTORIALS.'/tutorials.json';
+        $tutorials = is_file($list) ? json_decode((string) file_get_contents($list), true) : null;
+        if (! is_array($tutorials)) {
+            return [];
+        }
+        $image = $descriptor->fields['image'];
+        $e = fn (string $text) => htmlspecialchars($text, ENT_QUOTES);
+        $posts = [];
+        foreach ($tutorials as $tutorial) {
+            $cover = is_string($tutorial['cover'] ?? null) ? self::TUTORIALS.'/'.basename($tutorial['cover']) : null;
+            $picture = $cover !== null && is_file($cover)
+                ? Uploads::store($descriptor, $image, basename($cover), $cover, 'image/webp')->key
+                : (Uploads::placeholders($descriptor, $image, 1)[0] ?? null);
+            $url = self::DOCS.'/tutorials/'.rawurlencode((string) $tutorial['slug']).'/';
+            $posts[] = [
+                'title' => (string) $tutorial['title'],
+                'slug' => (string) $tutorial['slug'],
+                'excerpt' => mb_substr((string) $tutorial['summary'], 0, 500),
+                'body' => '<p>'.$e((string) $tutorial['summary']).'</p>'
+                    .'<ul><li><strong>Level:</strong> '.$e((string) $tutorial['level']).'</li>'
+                    .'<li><strong>Time:</strong> about '.(int) $tutorial['minutes'].' minutes</li>'
+                    .'<li><strong>What it covers:</strong> '.$e(implode(', ', (array) $tutorial['topics'])).'</li></ul>'
+                    .'<p><a href="'.$e($url).'">Read the tutorial</a> on the Nevela docs.</p>'
+                    .'<p><em>This post came with your app, to show the blog at work and to point you to a tutorial. Delete it whenever you like.</em></p>',
+                'image' => $picture,
+            ];
+        }
+
+        return $posts;
     }
 
     private function tableExists(string $table): bool
@@ -232,25 +307,15 @@ final class BlogCommand extends Command
         }
     }
 
-    /** @var list<array{title: string, slug: string, excerpt: string, body: string}> */
-    private const POSTS = [
-        [
-            'title' => 'Welcome to your blog',
-            'slug' => 'welcome-to-your-blog',
-            'excerpt' => 'This post came with the app. It is here so the blog has something on it the first time you open it.',
-            'body' => '<p>This post came with the app. It is here so the blog has something on it the first time you open it, and you can delete it whenever you like.</p><h2>Where posts are written</h2><p>Sign in and open <strong>Posts</strong> in the dashboard. A post has a title, an excerpt for the list, a picture and a body with headings, lists, links and quotes.</p><h2>Where they are read</h2><p>At <a href="/blog">/blog</a>, newest first, and each at an address of its own made from its title.</p>',
-        ],
-        [
-            'title' => 'Drafts, publishing and scheduling',
-            'slug' => 'drafts-publishing-and-scheduling',
-            'excerpt' => 'A post is not on the site until it is published. Until then it is a draft, and only people who sign in can see it.',
-            'body' => '<p>A post is not on the site until it is published. Until then it is a draft, and only people who sign in can see it.</p><ul><li><strong>Publish</strong> puts it on the site at once.</li><li><strong>Unpublish</strong> takes it off again and keeps it as a draft.</li><li>Give it a date and time still to come and it is <strong>scheduled</strong>: it appears by itself when that time arrives.</li></ul><p>The list in the dashboard says which of the three each post is, and can be filtered by it.</p>',
-        ],
-        [
-            'title' => 'Making the blog yours',
-            'slug' => 'making-the-blog-yours',
-            'excerpt' => 'The pages that show the blog were written once, into your own app, and are yours to change.',
-            'body' => '<p>The pages that show the blog were written once, into your own app, and are yours to change.</p><h3>What to open</h3><ol><li><strong>lib/blog.ts</strong> for the blog\'s title, its description and how many posts are on a page.</li><li><strong>app/blog</strong> for the list and for a post\'s own page.</li></ol><blockquote><p>There is an RSS feed at /blog/feed.xml, and every published post is in the sitemap.</p></blockquote>',
-        ],
+    /** The first post, about the blog itself: where posts are written, how they go on the site, and where to change it. */
+    private const WELCOME = [
+        'title' => 'Welcome to your blog',
+        'slug' => 'welcome-to-your-blog',
+        'excerpt' => 'This post came with the app, with one for each of Nevela\'s tutorials, so the blog has something on it the first time you open it.',
+        'body' => '<p>This post came with the app, with one for each of Nevela\'s tutorials, so the blog has something on it the first time you open it. Delete them whenever you like.</p>'
+            .'<h2>Where posts are written</h2><p>Sign in and open <strong>Posts</strong> in the dashboard, under <strong>Blog</strong>. A post has a title, an excerpt for the list, a picture and a body with headings, lists, links and quotes.</p>'
+            .'<h2>Drafts, publishing and scheduling</h2><p>A post is not on the site until it is published. Until then it is a draft, and only people who sign in can see it.</p><ul><li><strong>Publish</strong> puts it on the site at once.</li><li><strong>Unpublish</strong> takes it off again and keeps it as a draft.</li><li>Give it a date and time still to come and it is <strong>scheduled</strong>: it appears by itself when that time arrives.</li></ul>'
+            .'<h2>Making it yours</h2><p>The pages that show the blog were written once, into your own app, and are yours to change: <strong>lib/blog.ts</strong> for its title, its description and how many posts are on a page, and <strong>app/blog</strong> for the list and for a post\'s own page. The newest three are on the home page too, from <strong>components/marketing/latest-posts.tsx</strong>.</p>'
+            .'<blockquote><p>There is an RSS feed at /blog/feed.xml, and every published post is in the sitemap.</p></blockquote>',
     ];
 }

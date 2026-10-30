@@ -324,7 +324,8 @@ return [
             // A hero or cover image, where width matters more than total pixels.
             'cover' => [
                 'max' => [2400, 1200],
-                'renditions' => ['thumb' => [600, 300, 'crop']],
+                // 16:9, as the blog's cards show it: a picture made for the list fits it whole.
+                'renditions' => ['thumb' => [640, 360, 'crop']],
             ],
         ],
     ],

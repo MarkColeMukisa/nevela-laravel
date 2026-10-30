@@ -17,7 +17,7 @@ final class SetupCommand extends Command
         {--email= : Email for the starter account. Leave out to create no account}
         {--password= : Password for the starter account}
         {--no-sample-users : Create the starter account only, without the ten sample users}
-        {--no-blog : Leave out the blog: the Post resource, its three sample posts and the /blog pages}';
+        {--no-blog : Leave out the blog: the Post resource, its sample posts and the /blog pages}';
 
     protected $description = 'Finish setting up a new app: key, Sanctum\'s migration, generated files, migrations, the blog, a starter account and sample users';
 

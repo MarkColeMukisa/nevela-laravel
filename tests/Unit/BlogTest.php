@@ -150,7 +150,10 @@ final class BlogTest extends TestCase
             $this->assertDoesNotMatchRegularExpression('/__[A-Z]+__/', $file->contents, $file->path);
             $files[$file->path] = $file->contents;
         }
-        $this->assertSame(['lib/blog.ts', 'app/blog/page.tsx', 'app/blog/[slug]/page.tsx', 'app/blog/feed.xml/route.ts', 'app/sitemap.ts'], array_keys($files));
+        $this->assertSame(['lib/blog.ts', 'app/blog/page.tsx', 'app/blog/[slug]/page.tsx', 'app/blog/feed.xml/route.ts', 'app/sitemap.ts', 'components/marketing/latest-posts.tsx'], array_keys($files));
+        // The home page's newest three, through the same library, to the blog's own address.
+        $this->assertStringContainsString('await listPosts(1, 3)', $files['components/marketing/latest-posts.tsx']);
+        $this->assertStringContainsString('href={blog.path}', $files['components/marketing/latest-posts.tsx']);
 
         $library = $files['lib/blog.ts'];
         $this->assertStringContainsString('laravelPublic(`posts?sort=-publishedAt&page=${page}&perPage=${perPage}`', $library);
