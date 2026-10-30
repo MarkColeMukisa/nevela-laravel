@@ -222,7 +222,7 @@ final class SeedCommand extends Command
                 $created = date('Y-m-d H:i:s', $now - mt_rand(0, 60 * 86400));
                 // An integer id is the database's to give.
                 $id = $resource->idType === 'int' ? [] : ['id' => (string) Str::uuid7()];
-                $row = Fake::row($resource, $offset + $i + 1, $pools);
+                $row = Fake::row($resource, $offset + $i + 1, $pools, config('nevela.currency'));
                 foreach ($resource->unique as $index => $set) {
                     $row = $this->apart($resource, $set, $row, $taken[$index], $offset + $i + 1, $pools);
                 }
@@ -267,7 +267,7 @@ final class SeedCommand extends Command
 
                 return $row;
             }
-            $again = Fake::row($resource, $number, $pools);
+            $again = Fake::row($resource, $number, $pools, config('nevela.currency'));
             foreach ($set as $name) {
                 $column = $resource->fields[$name]->column();
                 $row[$column] = $again[$column];

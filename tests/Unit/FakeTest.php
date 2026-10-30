@@ -66,6 +66,39 @@ final class FakeTest extends TestCase
         $this->assertSame([1, 2, 3, 4, 5], $stars);
     }
 
+    public function test_money_in_a_currency_without_cents_comes_in_thousands(): void
+    {
+        $invoice = Descriptor::fromSpec('Invoice', 'amount:money, total:money');
+        foreach (range(1, 50) as $number) {
+            $row = Fake::row($invoice, $number, [], 'UGX');
+            $this->assertSame(0.0, fmod($row['amount'], 1000.0), "UGX {$row['amount']}");
+            $this->assertTrue($row['amount'] >= 50_000 && $row['amount'] <= 10_000_000);
+            // In dollars it is what it always was.
+            $this->assertLessThan(500, Fake::row($invoice, $number, [], 'USD')['amount']);
+        }
+        // A field's own currency wins over the app's.
+        $quote = Descriptor::fromArray(['name' => 'Quote', 'fields' => ['amount' => ['kind' => 'float', 'format' => 'money', 'currency' => 'RWF']]]);
+        $this->assertGreaterThanOrEqual(50_000, Fake::row($quote, 1, [], 'USD')['amount']);
+    }
+
+    public function test_a_billing_app_reads_like_one(): void
+    {
+        // A client with a company field is a person at that company.
+        $client = Descriptor::fromSpec('Client', 'name:string, company:string, email:email, address:text');
+        foreach (range(1, 20) as $number) {
+            $row = Fake::row($client, $number);
+            // Their address is made from the same name: ada.okafor7@example.com for Ada Okafor.
+            $this->assertStringStartsWith(strtolower(str_replace(' ', '.', $row['name'])).$number.'@', $row['email']);
+            $this->assertMatchesRegularExpression('/^Plot \d+, [A-Z][a-z]+( [A-Z][a-z]+)+, [A-Z][a-z]+$/', $row['address']);
+        }
+        // Without one, the client is the company.
+        $this->assertSame('Acme Ltd', Fake::row(Descriptor::fromSpec('Client', 'name:string, email:email'), 1)['name']);
+
+        $project = Descriptor::fromSpec('Project', 'name:string, amount:money');
+        $this->assertSame('Stock system', Fake::row($project, 1)['name']);
+        $this->assertSame('School website', Fake::row($project, 2)['name']);
+    }
+
     public function test_a_school_reads_like_one(): void
     {
         $course = Descriptor::fromSpec('Course', 'title:string, code:string!');

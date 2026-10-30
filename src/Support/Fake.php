@@ -14,6 +14,9 @@ final class Fake
 {
     private const FIRST = ['Ada', 'Grace', 'Alan', 'Linus', 'Amara', 'Kofi', 'Mei', 'Ravi', 'Sofia', 'Omar', 'Nia', 'Lucas', 'Aisha', 'Mateo', 'Yuki', 'Zainab', 'Noah', 'Priya', 'Elena', 'Kwame'];
 
+    /** Currencies with no smaller unit (ISO 4217's minor unit 0), whose amounts are whole. */
+    private const WHOLE_CURRENCIES = ['BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
+
     private const LAST = ['Okafor', 'Nakamura', 'Silva', 'Mukasa', 'Haddad', 'Novak', 'Mensah', 'Patel', 'Garcia', 'Kim', 'Otieno', 'Rossi', 'Dubois', 'Khan', 'Andersson', 'Nkosi', 'Tanaka', 'Moreno', 'Ivanov', 'Abebe'];
 
     private const ADJECTIVES = ['Compact', 'Classic', 'Urban', 'Bright', 'Quiet', 'Rapid', 'Solid', 'Smart', 'Fresh', 'Prime', 'Royal', 'Swift', 'Amber', 'Coastal', 'Nordic', 'Golden'];
@@ -28,11 +31,16 @@ final class Fake
     /** What a school teaches: titles for a Course, Class, Module or Lesson. */
     private const COURSES = ['Biology 101', 'Algebra I', 'World History', 'Introduction to Programming', 'Chemistry 101', 'English Literature', 'Physics 101', 'Human Geography', 'Principles of Economics', 'Statistics', 'Art and Design', 'French for Beginners', 'Data Structures', 'Creative Writing', 'Music Theory', 'Environmental Science'];
 
+    /** What a project done for a client is called. */
+    private const PROJECTS = ['Stock system', 'School website', 'Payroll system', 'Online shop', 'Point of sale', 'Booking app', 'Clinic records', 'Delivery tracker', 'Customer portal', 'Mobile money checkout', 'Inventory dashboard', 'Fees collection', 'Staff intranet', 'Sales reports', 'Loyalty app', 'Fleet tracking', 'Hotel bookings', 'Library system', 'Field data app', 'Company website'];
+
     /** What a teacher teaches. */
     private const SUBJECTS = ['Mathematics', 'Biology', 'Chemistry', 'Physics', 'English', 'History', 'Geography', 'Computer Science', 'Economics', 'Art', 'Music', 'French'];
 
     /** How a company's name ends: Acme Ltd, Acme Group. */
     private const COMPANY_ENDINGS = ['Ltd', 'Inc', 'Group', 'Labs', '& Co', 'Partners'];
+
+    private const STREETS = ['Station Road', 'Market Street', 'Lake View Road', 'Hill Lane', 'Garden Avenue', 'Church Road', 'Park Street', 'Industrial Road', 'Mill Street', 'Harbour Road'];
 
     private const CITIES = ['Kampala', 'Nairobi', 'Lagos', 'Accra', 'London', 'Berlin', 'Toronto', 'Tokyo', 'Lisbon', 'Austin', 'Mumbai', 'Sydney'];
 
@@ -77,15 +85,17 @@ final class Fake
      *
      * @param  int  $number  A number no other seeded row of this table shares: what keeps unique fields unique.
      * @param  array<string, list<string>>  $pools  Values to draw from, by field name: the ids a belongsTo may point at, the keys of files that exist.
+     * @param  string|null  $currency  The app's (nevela.currency), for a money field that names none
      * @return array<string, string|int|float|bool|null>
      */
-    public static function row(Descriptor $resource, int $number, array $pools = []): array
+    public static function row(Descriptor $resource, int $number, array $pools = [], ?string $currency = null): array
     {
         $first = self::pick(self::FIRST);
         $last = self::pick(self::LAST);
         $isPerson = isset($resource->fields['email']) || isset($resource->fields['firstName']);
         $isGroup = (bool) preg_match('/(Category|Collection|Department|Tag|Genre|Brand)$/', $resource->name);
-        $isCompany = (bool) preg_match('/(Company|Organi[sz]ation|Business|Supplier|Vendor|Partner|Agency|Firm|Client|Employer)$/', $resource->name);
+        // A client with a company of its own is a person at that company, not the company.
+        $isCompany = (bool) preg_match('/(Company|Organi[sz]ation|Business|Supplier|Vendor|Partner|Agency|Firm|Client|Employer)$/', $resource->name) && ! isset($resource->fields['company']);
 
         $row = [];
         foreach ($resource->fields as $field) {
@@ -107,7 +117,7 @@ final class Fake
 
                 continue;
             }
-            $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson);
+            $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson, $field->currency ?? $currency);
         }
 
         // A category is called Kitchen and a company Acme Ltd, not Compact Lamp. Each is walked
@@ -125,6 +135,12 @@ final class Fake
             if ($slug !== null && $slug->format === 'slug' && isset($row['slug'])) {
                 $row['slug'] = strtolower($group).($slug->unique && $number > count(self::GROUPS) ? "-{$number}" : '');
             }
+        }
+
+        // A project is a piece of work: a stock system, a school website.
+        if (preg_match('/(Project|Job|Engagement)$/', $resource->name) && $name !== null && $name->kind === 'string' && $name->format === null) {
+            $project = self::PROJECTS[($number - 1) % count(self::PROJECTS)];
+            $row['name'] = $name->unique && $number > count(self::PROJECTS) ? "{$project} {$number}" : $project;
         }
 
         // A course is called Biology 101, with a code to match, BIO-104; a teacher teaches a subject.
@@ -171,7 +187,7 @@ final class Fake
         return $row;
     }
 
-    private static function value(Field $field, int $number, string $first, string $last, bool $isPerson): string|int|float|bool
+    private static function value(Field $field, int $number, string $first, string $last, bool $isPerson, ?string $currency = null): string|int|float|bool
     {
         return match ($field->kind) {
             // A unique field walks its range by number instead of drawing at random; capacity() says how far that goes.
@@ -184,6 +200,8 @@ final class Fake
                 default => mt_rand(0, 500),
             },
             'float' => match (true) {
+                // Shillings come in thousands, not cents: UGX 1,250,000, not UGX 349.
+                $field->format === 'money' && in_array($currency, self::WHOLE_CURRENCIES, true) => $field->unique ? (float) ($number * 1000) : (float) (mt_rand(10, 2000) * 5000),
                 $field->format === 'percent' => round(($field->unique ? $number % 1001 : mt_rand(0, 1000)) / 10, 1),
                 $field->format === 'rating' => round(($field->unique ? 10 + $number % 41 : mt_rand(10, 50)) / 10, 1),
                 $field->unique => round($number + mt_rand(0, 99) / 100, 2),
@@ -198,9 +216,12 @@ final class Fake
             'datetime' => $field->unique
                 ? gmdate('Y-m-d H:i:s', self::EPOCH + $number)
                 : date('Y-m-d H:i:s', time() - mt_rand(0, 365 * 86400)),
-            'text' => $field->isRich()
-                ? self::article($field->unique ? " {$number}" : '')
-                : self::sentence(mt_rand(8, 24)).($field->unique ? " {$number}" : ''),
+            'text' => match (true) {
+                $field->isRich() => self::article($field->unique ? " {$number}" : ''),
+                // An address is a plot on a street in a city, not a sentence.
+                str_contains(strtolower($field->name), 'address') => sprintf('Plot %d, %s, %s', $field->unique ? $number : mt_rand(1, 240), self::pick(self::STREETS), self::pick(self::CITIES)),
+                default => self::sentence(mt_rand(8, 24)).($field->unique ? " {$number}" : ''),
+            },
             default => self::string($field, $number, $first, $last, $isPerson),
         };
     }
