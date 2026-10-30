@@ -13,7 +13,8 @@
       "Roles",
       "API"
     ],
-    "cover": "contacts.webp"
+    "cover": "contacts.webp",
+    "coverFrom": "dd025637d15a"
   },
   {
     "slug": "online-shop",
@@ -28,7 +29,8 @@
       "Public API",
       "Site pages"
     ],
-    "cover": "online-shop.webp"
+    "cover": "online-shop.webp",
+    "coverFrom": "67efd2e978c6"
   },
   {
     "slug": "student-app",
@@ -42,7 +44,8 @@
       "Public forms",
       "Notifications"
     ],
-    "cover": "student-app.webp"
+    "cover": "student-app.webp",
+    "coverFrom": "67255ac1b9d0"
   },
   {
     "slug": "billing-app",
@@ -56,6 +59,7 @@
       "Galleries",
       "Seeding"
     ],
-    "cover": "billing-app.webp"
+    "cover": "billing-app.webp",
+    "coverFrom": "c98b40319888"
   }
 ]
