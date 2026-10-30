@@ -57,9 +57,9 @@ final class GalleriesTest extends TestCase
         $this->assertStringContainsString("\$table->json('docs')->nullable();", $migration);
 
         $request = $generator->request($project);
-        $this->assertStringContainsString("'gallery' => ['required', 'array', 'max:20'],", $request);
+        $this->assertStringContainsString("'gallery' => ['required', 'list', 'max:20'],", $request);
         $this->assertStringContainsString("'gallery.*' => ['string', 'distinct', 'max:512', new \\Nevela\\Laravel\\Rules\\UploadKey('Project', 'gallery')],", $request);
-        $this->assertStringContainsString("'docs' => ['nullable', 'array', 'max:20'],", $request);
+        $this->assertStringContainsString("'docs' => ['nullable', 'list', 'max:20'],", $request);
 
         $this->assertStringContainsString("'gallery' => 'array',", $generator->model($project));
         $this->assertStringContainsString("'galleryFiles' => array_map(fn (string \$key) => \\Nevela\\Laravel\\Nevela::file(\$key), \$this->gallery ?? []),", $generator->resource($project));

@@ -173,7 +173,7 @@ abstract class ResourceRequest extends FormRequest
                 continue;
             }
             $value = array_key_exists($field, $data) ? $data[$field] : $record?->getAttribute($columns[$field]);
-            if ($value === null || $value === '') {
+            if ($value === null || $value === '' || $value === []) {
                 $found[$field] = $conditions[$field]['message'];
             }
         }

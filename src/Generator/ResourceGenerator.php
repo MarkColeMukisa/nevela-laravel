@@ -1252,8 +1252,8 @@ final class ResourceGenerator
         $type = match (true) {
             // An integer id is up to 18 digits, which is as many as always fit in the column.
             $f->kind === 'belongsTo' => [...($this->hasIntIds((string) $f->target, $d, $all) ? ["'integer'", "'digits_between:1,18'"] : ["'uuid'"]), "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
-            // Several files: a list, each checked under "gallery.*". Required is one at least.
-            $f->multiple => ["'array'", "'max:".Field::MAX_FILES."'"],
+            // Several files: a list (not an object of keys), each checked under "gallery.*". Required is one at least.
+            $f->multiple => ["'list'", "'max:".Field::MAX_FILES."'"],
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", $max(255)],
             $f->format === 'url' => ["'url'", $max(2048)],
