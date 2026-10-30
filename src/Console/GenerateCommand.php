@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Console;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
+use Nevela\Laravel\Generator\BlogPages;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Generator\Writer;
 use Nevela\Laravel\Nevela;
@@ -232,6 +233,8 @@ final class GenerateCommand extends Command
         $files[] = $generator->routes($all);
         $files[] = $generator->publicRoutes($all);
         $files[] = $generator->registry($all);
+        // What the home page shows of the blog: nothing, until there is one.
+        array_push($files, ...BlogPages::homePage($all));
         $files[] = $generator->authConfig((array) config('nevela.auth', []));
 
         $roots = ['api' => base_path()];

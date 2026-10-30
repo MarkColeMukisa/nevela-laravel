@@ -53,8 +53,6 @@ final class BlogPages
             "app/{$segment}/[slug]/page.tsx" => self::POST,
             "app/{$segment}/feed.xml/route.ts" => self::FEED,
             'app/sitemap.ts' => self::SITEMAP,
-            // The newest on the home page, where its template marks the place: nevela:blog puts it there.
-            'components/marketing/latest-posts.tsx' => self::LATEST,
         ];
 
         return array_map(
@@ -62,6 +60,38 @@ final class BlogPages
             array_keys($files),
             $files,
         );
+    }
+
+    /**
+     * What the home page shows of the blog, which it imports through resources/latest-posts.tsx.
+     * That file is regenerated every time and says whether there is a blog. This one is
+     * written once, when there is, and is the app's from then on.
+     *
+     * @param  list<Descriptor>  $all
+     * @return list<GeneratedFile>
+     */
+    public static function homePage(array $all): array
+    {
+        $blogs = array_values(array_filter($all, fn (Descriptor $d) => $d->blog !== null));
+        $blog = $blogs[0] ?? null;
+        $m = '// '.Writer::START;
+        $e = '// '.Writer::END;
+        $body = $blog === null
+            ? "/** The app has no blog, so the home page has no posts to show. `nevela blog` gives it one. */\nexport function LatestPosts() {\n  return null;\n}"
+            : "// The blog's newest posts, as components/marketing/latest-posts.tsx shows them. That file is yours.\nexport { LatestPosts } from \"@/components/marketing/latest-posts\";";
+        $files = [new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/latest-posts.tsx', <<<TSX
+        // What the home page shows of the blog (maintained by `php artisan nevela:generate`).
+        {$m}
+        {$body}
+        {$e}
+
+        TSX)];
+        if ($blog !== null) {
+            $header = "// Generated once by Nevela for the blog at {$blog->blog}. This file is yours.\n";
+            $files[] = new GeneratedFile(GeneratedFile::TARGET_WEB, 'components/marketing/latest-posts.tsx', $header.strtr(self::LATEST, ['__PLURAL__' => strtolower($blog->pluralLabel)]), GeneratedFile::MODE_ONCE);
+        }
+
+        return $files;
     }
 
     private const LIBRARY = <<<'TS'

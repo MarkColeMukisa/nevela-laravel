@@ -76,7 +76,6 @@ final class BlogCommand extends Command
                 $path = str_replace('\\', '/', substr($row['path'], strlen(rtrim($web, '/\\')) + 1));
                 $this->components->twoColumnDetail("../web/{$path}", $row['status'] === 'created' ? '<fg=green>created</>' : '<fg=gray>exists (yours)</>');
             }
-            $this->homePage(rtrim($web, '/\\'));
         }
 
         $status = self::SUCCESS;
@@ -225,32 +224,6 @@ final class BlogCommand extends Command
         $this->components->info('Added '.count($posts).' sample posts: a welcome'.($tutorials > 0 ? ", and one for each of Nevela's {$tutorials} tutorials" : '').'. Edit or delete them under Posts in the dashboard.');
 
         return self::SUCCESS;
-    }
-
-    /** Where the home page's template keeps a place for the newest posts. */
-    public const HOME_MARKER = '{/* nevela:latest-posts */}';
-
-    /**
-     * The newest posts on the home page, in the place its template keeps for them, as Grit's
-     * home page has its blog. A home page that has them already is left as it is, and one
-     * without the place (made before it, or rewritten) is told how to add them.
-     */
-    private function homePage(string $web): void
-    {
-        $page = $web.'/app/page.tsx';
-        $source = is_file($page) ? (string) file_get_contents($page) : '';
-        if ($source === '' || str_contains($source, '<LatestPosts')) {
-            return;
-        }
-        if (! str_contains($source, self::HOME_MARKER) || ! preg_match('/\A((?:import [^\n]*\n)+)/', $source)) {
-            $this->line('  To show the newest posts on the home page, put <fg=cyan><LatestPosts /></> from <fg=cyan>components/marketing/latest-posts.tsx</> in <fg=cyan>app/page.tsx</>.');
-
-            return;
-        }
-        $source = str_replace(self::HOME_MARKER, '<LatestPosts />', $source);
-        $source = (string) preg_replace('/\A((?:import [^\n]*\n)+)/', "$1import { LatestPosts } from \"@/components/marketing/latest-posts\";\n", $source, 1);
-        file_put_contents($page, $source);
-        $this->components->twoColumnDetail('../web/app/page.tsx', '<fg=green>the newest posts added</>');
     }
 
     /** Where the tutorials' words and covers are, in this package: scripts/tutorial-posts.mjs copies them from the docs. */
