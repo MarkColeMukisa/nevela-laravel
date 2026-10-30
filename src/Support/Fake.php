@@ -98,7 +98,12 @@ final class Fake
             // A relation or a file can't be invented: it has to be one that exists.
             if (in_array($field->kind, ['belongsTo', 'file'], true)) {
                 $pool = $pools[$field->name] ?? [];
-                $row[$field->column()] = $pool === [] ? null : self::pick($pool);
+                $row[$field->column()] = match (true) {
+                    $pool === [] => null,
+                    // A gallery of one to four different ones, written as its JSON column holds it.
+                    $field->multiple => json_encode(array_slice(self::shuffled($pool), 0, min(count($pool), mt_rand(1, 4)))),
+                    default => self::pick($pool),
+                };
 
                 continue;
             }
@@ -269,5 +274,16 @@ final class Fake
     private static function pick(array $from): mixed
     {
         return $from[mt_rand(0, count($from) - 1)];
+    }
+
+    /**
+     * @param  list<mixed>  $from
+     * @return list<mixed>
+     */
+    private static function shuffled(array $from): array
+    {
+        shuffle($from);
+
+        return $from;
     }
 }

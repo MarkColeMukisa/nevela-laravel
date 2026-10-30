@@ -36,6 +36,9 @@ final class Field
 
     public const RESERVED = ['id', 'createdAt', 'updatedAt', 'deletedAt'];
 
+    /** At most this many files in a field that holds several: gallery:files(image). */
+    public const MAX_FILES = 20;
+
     /**
      * @param  list<string>  $options  enum values
      * @param  string|null  $target  belongsTo: the resource this points at, e.g. "Category"
@@ -73,6 +76,7 @@ final class Field
         public readonly ?string $auto = null,
         public readonly ?string $country = null,
         public readonly array $when = [],
+        public readonly bool $multiple = false,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -226,6 +230,12 @@ final class Field
             if ($profile !== null && ! preg_match('/^[a-z][a-z0-9-]*$/', $profile)) {
                 throw new InvalidArgumentException("Image profile \"{$profile}\" on \"{$name}\" may only use lower-case letters, digits and -.");
             }
+            if ($multiple && $private) {
+                throw new InvalidArgumentException("\"{$name}\" can't be both several files and private: a private file is one, fetched through its record. Make it {$name}:file(…|private), or several that aren't private.");
+            }
+        }
+        if ($multiple && $kind !== 'file') {
+            throw new InvalidArgumentException("\"{$name}\" can't hold several: that is for files, {$name}:files(image).");
         }
     }
 
@@ -237,6 +247,7 @@ final class Field
      *   body:richtext                     formatted text, kept as HTML that has been cleaned
      *   category:belongsTo(Category)      stored as categoryId
      *   image:image                       an optimised image; image:image(product) names a profile
+     *   gallery:files(image)              several, up to 20; gallery:images is the same
      *   manual:file(pdf|document)         any other upload
      *   cv:file(pdf|private)              one only those who may view the record can fetch
      *   status:enum(pending|paid)=pending what it is when a create leaves it out
@@ -321,11 +332,15 @@ final class Field
         if ($type === 'image') {
             return new self($name, 'file', null, $required, $unique, accept: ['image'], profile: $list[0] ?? null);
         }
-        if ($type === 'file') {
+        if ($type === 'file' || $type === 'files') {
             // cv:file(pdf|private): "private" among what it takes is how it is kept, not a kind of file.
             $accept = array_values(array_diff($list, ['private']));
 
-            return new self($name, 'file', null, $required, $unique, accept: $accept ?: ['any'], private: count($accept) !== count($list));
+            // gallery:files(image): several, in Grit's word.
+            return new self($name, 'file', null, $required, $unique, accept: $accept ?: ['any'], private: count($accept) !== count($list), multiple: $type === 'files');
+        }
+        if ($type === 'images') {
+            return new self($name, 'file', null, $required, $unique, accept: ['image'], profile: $list[0] ?? null, multiple: true);
         }
         if ($type === 'auto') {
             if ($args === '') {
@@ -335,7 +350,7 @@ final class Field
             return new self($name, 'string', null, true, true, auto: $args);
         }
         if (! isset(self::ALIASES[$type])) {
-            throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…).');
+            throw new InvalidArgumentException("Unknown type \"{$type}\" on \"{$name}\". Use one of: ".implode(', ', array_keys(self::ALIASES)).', enum(a|b), belongsTo(Resource), image, file(pdf|…), files(image).');
         }
         [$kind, $format] = self::ALIASES[$type];
         // price:money(product.price): copied from the record it points at.
@@ -407,6 +422,7 @@ final class Field
             $data['country'] ?? null,
             // "when": {"kind": "recurring"}, or several values in a list.
             array_map(fn ($values) => is_array($values) ? array_values($values) : [$values], (array) ($data['when'] ?? [])),
+            (bool) ($data['multiple'] ?? false),
         );
     }
 
@@ -420,6 +436,7 @@ final class Field
             'optionLabels' => $this->optionLabels ?: null,
             'currency' => $this->currency,
             'country' => $this->country,
+            'multiple' => $this->multiple ?: null,
             'when' => $this->when === [] ? null : array_map(fn (array $values) => count($values) === 1 ? $values[0] : $values, $this->when),
             'target' => $this->target,
             'accept' => $this->accept ?: null,

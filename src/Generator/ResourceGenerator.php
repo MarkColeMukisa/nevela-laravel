@@ -652,7 +652,7 @@ final class ResourceGenerator
         $fillable = implode(', ', array_map(fn (Field $f) => "'{$f->column()}'", $d->fields));
         $casts = [];
         foreach ($d->fields as $f) {
-            $cast = match ($f->kind) {
+            $cast = $f->multiple ? 'array' : match ($f->kind) {
                 'int' => 'integer',
                 'float' => 'float',
                 'boolean' => 'boolean',
@@ -804,6 +804,8 @@ final class ResourceGenerator
                 continue;
             }
             $line = match (true) {
+                // Several files: the list of their keys.
+                $f->multiple => "\$table->json('{$c}')",
                 $f->kind === 'file' => "\$table->string('{$c}', 512)",
                 // More than a text column holds on MySQL, or HTML, whose tags count against it too.
                 $f->kind === 'text' && ($f->isRich() || $f->maxLength > 65535) => "\$table->longText('{$c}')",
@@ -1086,6 +1088,10 @@ final class ResourceGenerator
         $columns = [];
         foreach ($d->fields as $f) {
             $rules[] = "            '{$f->name}' => [".implode(', ', $this->rules($d, $f, $all)).'],';
+            if ($f->multiple) {
+                // Each of them, as a field of one file is checked.
+                $rules[] = "            '{$f->name}.*' => ['string', 'distinct', 'max:512', new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')],";
+            }
             $columns[] = "'{$f->name}' => '{$f->column()}'";
         }
         $ruleLines = implode("\n", $rules);
@@ -1246,6 +1252,8 @@ final class ResourceGenerator
         $type = match (true) {
             // An integer id is up to 18 digits, which is as many as always fit in the column.
             $f->kind === 'belongsTo' => [...($this->hasIntIds((string) $f->target, $d, $all) ? ["'integer'", "'digits_between:1,18'"] : ["'uuid'"]), "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
+            // Several files: a list, each checked under "gallery.*". Required is one at least.
+            $f->multiple => ["'array'", "'max:".Field::MAX_FILES."'"],
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", $max(255)],
             $f->format === 'url' => ["'url'", $max(2048)],
@@ -1287,7 +1295,10 @@ final class ResourceGenerator
                 default => "\$this->{$f->column()}",
             };
             $lines[] = "            '{$f->name}' => {$value},";
-            if ($f->kind === 'file') {
+            if ($f->multiple) {
+                // Each file's details, in the order the keys are in.
+                $lines[] = "            '{$f->name}Files' => array_map(fn (string \$key) => \\Nevela\\Laravel\\Nevela::file(\$key), \$this->{$f->column()} ?? []),";
+            } elseif ($f->kind === 'file') {
                 // The key is what a record stores; this is what a page needs to show it.
                 $lines[] = $f->private
                     // A private file is fetched through its record, so its details say which record.
@@ -1608,8 +1619,14 @@ final class ResourceGenerator
                 // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.
                 $parts[] = '...({ rich: true } as {})';
             }
+            if ($f->multiple) {
+                // Flare's file is one key, so several are its JSON: a list of keys, which the dashboard draws as files from `files`.
+                $parts[] = 'sortable: false';
+                $parts[] = '...({ files: '.$j($f->accept).' } as {})';
+            }
             $opts = $parts ? '{ '.implode(', ', $parts).' }' : '';
             $call = match (true) {
+                $f->multiple => "field.json({$opts})",
                 $f->kind === 'belongsTo' => "field.belongsTo({$j($f->target)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'file' => "field.file({$j($f->accept)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'enum' => "field.enum({$j($f->options)}".($opts ? ", {$opts}" : '').')',

@@ -187,7 +187,7 @@ final class SeedCommand extends Command
                 if ($pools[$field->name] === [] && $field->required) {
                     throw new InvalidArgumentException($field->isImage()
                         ? "\"{$field->name}\" is a required image, and PHP's GD extension isn't installed to make placeholder pictures with."
-                        : "\"{$field->name}\" is a required file, which the seeder can't make up. Make it optional ({$field->name}:file(…)?) or add records yourself.");
+                        : "\"{$field->name}\" is a required file, which the seeder can't make up. Make it optional ({$field->name}:".($field->multiple ? 'files' : 'file')."(…)?) or add records yourself.");
                 }
             }
         }

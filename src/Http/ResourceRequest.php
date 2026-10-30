@@ -402,9 +402,9 @@ abstract class ResourceRequest extends FormRequest
                 $known[] = 'items';
                 $this->checkItems($validator);
             }
-            // A file field is sent back with its details beside it (imageFile for image);
+            // A file field is sent back with its details beside it (imageFile for image, galleryFiles for a gallery);
             // a client that echoes a record shouldn't be refused for it.
-            $computed = array_map(fn (string $field) => $field.'File', $known);
+            $computed = [...array_map(fn (string $field) => $field.'File', $known), ...array_map(fn (string $field) => $field.'Files', $known)];
             foreach (array_keys($this->json()->all() ?: $this->request->all()) as $key) {
                 if (! in_array($key, $known, true) && ! in_array($key, self::READ_ONLY, true) && ! in_array($key, $computed, true)) {
                     $validator->errors()->add((string) $key, 'Unknown field.');
@@ -676,7 +676,7 @@ abstract class ResourceRequest extends FormRequest
         if ($owner !== null) {
             unset($rules[$owner], $columns[$owner], $defaults[$owner]);
         }
-        $computed = array_map(fn (string $field) => $field.'File', $known);
+        $computed = [...array_map(fn (string $field) => $field.'File', $known), ...array_map(fn (string $field) => $field.'Files', $known)];
         $unique = array_keys(array_filter($rules, fn ($rule) => is_array($rule) && array_filter($rule, fn ($one) => $one instanceof Unique) !== []));
 
         $values = [];

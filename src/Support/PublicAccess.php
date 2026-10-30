@@ -168,6 +168,9 @@ final class PublicAccess
                 if (! isset($fields[$field])) {
                     throw new InvalidArgumentException("{$resource}: public {$what} lists \"{$field}\", which is not one of its fields.");
                 }
+                if ($fields[$field]->multiple) {
+                    throw new InvalidArgumentException("{$resource}: public {$what} lists \"{$field}\", which holds several files. The public API doesn't {$what} those yet; leave it to the dashboard.");
+                }
             }
         }
         foreach ($this->read ?? [] as $field) {

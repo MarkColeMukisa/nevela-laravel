@@ -154,7 +154,8 @@ final class Nevela
         // One query for every file on the page, instead of one per record.
         foreach ($resource->fields as $field) {
             if ($field->kind === 'file') {
-                Uploads::preload($page->getCollection()->pluck($field->column()));
+                // A gallery's column is a list of keys: every key of every record.
+                Uploads::preload($page->getCollection()->pluck($field->column())->flatten());
             }
         }
 
