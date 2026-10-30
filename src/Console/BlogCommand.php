@@ -121,6 +121,8 @@ final class BlogCommand extends Command
         $descriptor = Descriptor::fromArray([
             'name' => self::RESOURCE,
             'icon' => 'book',
+            // Under a heading of its own, apart from the resources the app's makers make themselves.
+            'group' => 'Blog',
             'publish' => 'publishedAt',
             'blog' => self::PATH,
             'fields' => [
