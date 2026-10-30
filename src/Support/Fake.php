@@ -200,8 +200,8 @@ final class Fake
                 default => mt_rand(0, 500),
             },
             'float' => match (true) {
-                // Shillings come in thousands, not cents: UGX 1,250,000, not UGX 349.
-                $field->format === 'money' && in_array($currency, self::WHOLE_CURRENCIES, true) => $field->unique ? (float) ($number * 1000) : (float) (mt_rand(10, 2000) * 5000),
+                // Shillings come in thousands, not cents: UGX 1,250,000, not UGX 349. A unique amount is its number, which every column of decimal(12, 2) holds.
+                $field->format === 'money' && in_array($currency, self::WHOLE_CURRENCIES, true) => $field->unique ? (float) $number : (float) (mt_rand(10, 2000) * 5000),
                 $field->format === 'percent' => round(($field->unique ? $number % 1001 : mt_rand(0, 1000)) / 10, 1),
                 $field->format === 'rating' => round(($field->unique ? 10 + $number % 41 : mt_rand(10, 50)) / 10, 1),
                 $field->unique => round($number + mt_rand(0, 99) / 100, 2),
