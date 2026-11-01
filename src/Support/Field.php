@@ -24,13 +24,13 @@ final class Field
 
     /** Shorthand types accepted by --fields, mapped to kind + format. */
     private const ALIASES = [
-        'string' => ['string', null], 'text' => ['text', null], 'richtext' => ['text', 'rich'],
+        'string' => ['string', null], 'text' => ['text', null], 'textarea' => ['text', null], 'richtext' => ['text', 'rich'],
         'email' => ['string', 'email'], 'url' => ['string', 'url'], 'tel' => ['string', 'tel'],
         'slug' => ['string', 'slug'], 'color' => ['string', 'color'],
         'int' => ['int', null], 'integer' => ['int', null],
         'float' => ['float', null], 'money' => ['float', 'money'], 'decimal' => ['float', 'money'],
         'percent' => ['float', 'percent'], 'rating' => ['int', 'rating'],
-        'boolean' => ['boolean', null], 'bool' => ['boolean', null],
+        'boolean' => ['boolean', null], 'bool' => ['boolean', null], 'toggle' => ['boolean', null], 'checkbox' => ['boolean', null],
         'date' => ['date', null], 'datetime' => ['datetime', null],
     ];
 
@@ -278,8 +278,8 @@ final class Field
         // status:enum(pending|paid)=pending: what the field is when a create leaves it out.
         $default = null;
         // The default comes after the type, so an "=" inside its brackets (a value's label) isn't it.
-        $close = strrpos($written, ')');
-        if (($at = strpos($written, '=', $close === false ? 0 : $close)) !== false) {
+        $close = max((int) strrpos($written, ')'), (int) strrpos($written, ']'));
+        if (($at = strpos($written, '=', $close)) !== false) {
             $default = trim(substr($written, $at + 1));
             $written = rtrim(substr($written, 0, $at));
         }
@@ -310,12 +310,14 @@ final class Field
         $unique = str_contains($suffix, '!');
         $list = array_values(array_filter(array_map('trim', explode('|', $args)), fn ($v) => $v !== ''));
 
-        if ($type === 'enum') {
+        if (in_array($type, ['enum', 'select', 'radio'], true)) {
             $values = [];
             $labels = [];
             foreach ($list as $item) {
                 [$value, $text] = array_pad(array_map('trim', explode('=', $item, 2)), 2, null);
                 $values[] = $value;
+                // net15="Net 15", as Grit writes it, is net15=Net 15.
+                $text = $text === null ? null : trim($text, '"\'');
                 if ($text !== null && $text !== '') {
                     $labels[$value] = $text;
                 }
@@ -369,6 +371,10 @@ final class Field
         }
         // excerpt:string(500): a length of its own.
         $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
+        // Said rather than dropped: someone who wrote it meant something by it.
+        if ($args !== '' && $maxLength === null) {
+            throw new InvalidArgumentException("\"{$name}\" is a {$type}, and \"{$args}\" after it means nothing to one. Write {$name}:{$type}, with ! for unique and ? for optional.");
+        }
 
         return new self($name, $kind, $format, $required, $unique, maxLength: $maxLength);
     }
@@ -382,11 +388,13 @@ final class Field
      *   image:file:image          image:file[image]        image:file:[image]     → image:file(image)
      *   category:belongs_to:Category                                              → category:belongs_to(Category)
      *   status:enum:draft|live    docs:file:[pdf, image]                          → …(draft|live), …(pdf|image)
+     *   email:email:unique        phone:tel:UG:unique                             → email:email!, phone:tel(UG)!
      */
     private static function normalise(string $token): string
     {
         // Spaces around the punctuation don't mean anything: "file: [ image ]".
         $token = (string) preg_replace('/\s*([:\[\]])\s*/', '$1', $token);
+        $token = (string) preg_replace('/:unique([?!]*)$/i', '$1!', $token);
         if (preg_match('/^([^:()\[\]]+):([A-Za-z_]+):?\[([^\[\]()]*)\]([?!]{0,2})$/', $token, $m)
             || preg_match('/^([^:()\[\]]+):([A-Za-z_]+):([^:()\[\]?!]+)([?!]{0,2})$/', $token, $m)) {
             $list = implode('|', array_filter(array_map('trim', preg_split('/[,|]/', $m[3])), fn ($value) => $value !== ''));

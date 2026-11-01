@@ -149,11 +149,9 @@ final class IntegerIdsTest extends TestCase
 
     public function test_a_string_can_have_a_length_of_its_own(): void
     {
-        $post = Descriptor::fromSpec('Post', 'title:string, excerpt:string(500)?, body:text(100000), site:url(300), price:money(2)');
+        $post = Descriptor::fromSpec('Post', 'title:string, excerpt:string(500)?, body:text(100000), site:url(300)');
         $this->assertSame(500, $post->fields['excerpt']->maxLength);
         $this->assertNull($post->fields['title']->maxLength);
-        // A number means a length only where there is one to set.
-        $this->assertNull($post->fields['price']->maxLength);
         $this->assertSame(500, Descriptor::fromJson($post->toJson())->fields['excerpt']->maxLength);
         $this->assertArrayNotHasKey('maxLength', $post->toArray()['fields']['title']);
 
