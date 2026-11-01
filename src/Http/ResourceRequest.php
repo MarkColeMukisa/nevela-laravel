@@ -707,7 +707,7 @@ abstract class ResourceRequest extends FormRequest
             }
             foreach ($unique as $field) {
                 $value = $row[$field] ?? null;
-                if (! is_scalar($value) || (string) $value === '') {
+                if (! is_scalar($value) || $value === '') {
                     continue;
                 }
                 $mark = $field."\0".$value;
@@ -720,7 +720,7 @@ abstract class ResourceRequest extends FormRequest
             // The same for fields that go together: one row of the batch has them first.
             foreach ($this->together() as $set) {
                 $together = array_map(fn (string $field) => $row[$field] ?? $defaults[$field] ?? null, $set['fields']);
-                if (in_array($owner, $set['fields'], true) || array_filter($together, fn ($value) => ! is_scalar($value) || (string) $value === '') !== []) {
+                if (in_array($owner, $set['fields'], true) || array_filter($together, fn ($value) => ! is_scalar($value) || $value === '') !== []) {
                     continue;
                 }
                 $mark = implode("\0", [...$set['fields'], ...array_map('strval', $together)]);
