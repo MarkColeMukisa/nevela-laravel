@@ -160,7 +160,7 @@ final class IntegerIdsTest extends TestCase
         $this->assertStringContainsString("'title' => ['required', 'string', 'max:255'],", $request);
         $this->assertStringContainsString("'excerpt' => ['nullable', 'string', 'max:500'],", $request);
         $this->assertStringContainsString("'body' => ['required', 'string', 'max:100000'],", $request);
-        $this->assertStringContainsString("'site' => ['required', 'url', 'max:300'],", $request);
+        $this->assertStringContainsString("'site' => ['required', 'url:http,https', 'max:300'],", $request);
 
         $migration = $generator->migration($post);
         $this->assertStringContainsString("\$table->string('title');", $migration);

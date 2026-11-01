@@ -81,6 +81,16 @@ abstract class ResourceRequest extends FormRequest
     }
 
     /**
+     * Fields kept in one form by their format, which a generated request with any says.
+     *
+     * @return array<string, string> field => format
+     */
+    protected function kept(): array
+    {
+        return [];
+    }
+
+    /**
      * What a field is when a create leaves it out. A generated request with any says which.
      *
      * @return array<string, mixed> field => value
@@ -348,7 +358,7 @@ abstract class ResourceRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        $fields = array_flip([...$this->rich(), ...array_keys($this->phones())]);
+        $fields = array_flip([...$this->rich(), ...array_keys($this->phones()), ...array_keys($this->kept())]);
         $this->merge(array_intersect_key($this->prepared($this->all()), $fields));
     }
 
@@ -367,6 +377,11 @@ abstract class ResourceRequest extends FormRequest
         foreach ($this->phones() as $field => $country) {
             if (is_string($input[$field] ?? null) && ($number = Phone::normalise($input[$field], $country)) !== null) {
                 $input[$field] = $number;
+            }
+        }
+        foreach ($this->kept() as $field => $format) {
+            if (is_string($input[$field] ?? null)) {
+                $input[$field] = Field::inOneForm($format, $input[$field]);
             }
         }
 

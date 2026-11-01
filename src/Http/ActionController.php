@@ -12,6 +12,7 @@ use Illuminate\Validation\ValidationException;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\Phone;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -162,6 +163,9 @@ final class ActionController
         foreach ($action->fields as $key => $field) {
             if ($field->country !== null && is_string($sent[$key] ?? null) && ($number = Phone::normalise($sent[$key], $field->country)) !== null) {
                 $sent[$key] = $number;
+            }
+            if (in_array($field->format, ['email', 'color'], true) && is_string($sent[$key] ?? null)) {
+                $sent[$key] = Field::inOneForm($field->format, $sent[$key]);
             }
         }
         $validator = Validator::make($sent, $action->rules());

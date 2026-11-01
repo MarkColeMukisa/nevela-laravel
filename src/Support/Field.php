@@ -53,6 +53,7 @@ final class Field
      * @param  string|null  $auto  string: the prefix of the number Laravel gives each new record, e.g. "INV" for INV-0001
      * @param  bool|string|null  $list  Its column in the dashboard's table: true shown, "hidden" off until someone turns it on, false left out. Null leaves it to listing().
      * @param  string|null  $country  tel: the country its numbers are of, "UG", kept as +256772123456. Any country's when not set.
+     * @param  int|null  $max  rating: the most stars, from 2 to 10. Five unless set.
      * @param  array<string, list<string|bool>>  $when  The field it applies for, and the values: ["kind" => ["recurring"]]. Empty when it always does. Where it doesn't, it is empty; where it does, it is required if the field is.
      */
     public function __construct(
@@ -77,6 +78,7 @@ final class Field
         public readonly ?string $country = null,
         public readonly array $when = [],
         public readonly bool $multiple = false,
+        public readonly ?int $max = null,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Field \"{$name}\" must be camelCase (e.g. publishedAt).");
@@ -99,6 +101,14 @@ final class Field
         foreach ($options as $option) {
             if (! preg_match('/^[A-Za-z0-9_-]+$/', $option)) {
                 throw new InvalidArgumentException("Enum value \"{$option}\" on \"{$name}\" may only use letters, digits, _ and -.");
+            }
+        }
+        if ($max !== null) {
+            if ($format !== 'rating') {
+                throw new InvalidArgumentException("\"{$name}\" can't have a most: that is for a rating ({$name}:rating(10)).");
+            }
+            if ($max < 2 || $max > 10) {
+                throw new InvalidArgumentException("A rating has from 2 to 10 stars, so \"{$name}\" can't have {$max}.");
             }
         }
         if ($optionLabels !== []) {
@@ -369,6 +379,10 @@ final class Field
         if ($format === 'tel' && $args !== '' && ! ctype_digit($args)) {
             return new self($name, $kind, $format, $required, $unique, country: strtoupper($args));
         }
+        // stars:rating(10): out of ten.
+        if ($format === 'rating' && ctype_digit($args)) {
+            return new self($name, $kind, $format, $required, $unique, max: (int) $args);
+        }
         // excerpt:string(500): a length of its own.
         $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
         // Said rather than dropped: someone who wrote it meant something by it.
@@ -435,6 +449,7 @@ final class Field
             // "when": {"kind": "recurring"}, or several values in a list.
             array_map(fn ($values) => is_array($values) ? array_values($values) : [$values], (array) ($data['when'] ?? [])),
             (bool) ($data['multiple'] ?? false),
+            isset($data['max']) ? (int) $data['max'] : null,
         );
     }
 
@@ -454,6 +469,7 @@ final class Field
             'accept' => $this->accept ?: null,
             'profile' => $this->profile,
             'maxLength' => $this->maxLength,
+            'max' => $this->max,
             'private' => $this->private ?: null,
             'default' => $this->default,
             'from' => $this->from,
@@ -544,6 +560,27 @@ final class Field
     }
 
     /** Whether every record has it: required, and not only for some. The column of one that isn't is nullable. */
+    /** The most stars a rating has. */
+    public function mostStars(): int
+    {
+        return $this->max ?? 5;
+    }
+
+    /**
+     * A value in the one form a format keeps it in, so that two ways of writing one thing
+     * are one thing to a unique field: Ada@Example.COM is ada@example.com, #ABC is #aabbcc.
+     * Anything it can't make sense of is handed back as it is, for the rules to refuse.
+     */
+    public static function inOneForm(string $format, string $value): string
+    {
+        $value = trim($value);
+        if ($format === 'color' && preg_match('/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/', $value, $short)) {
+            $value = "#{$short[1]}{$short[1]}{$short[2]}{$short[2]}{$short[3]}{$short[3]}";
+        }
+
+        return mb_strtolower($value);
+    }
+
     public function alwaysRequired(): bool
     {
         return $this->required && $this->when === [];

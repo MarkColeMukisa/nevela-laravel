@@ -1229,6 +1229,16 @@ final class ResourceGenerator
                 return [{$phones}];
             }
         PHP;
+        $kept = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => '{$f->format}'", array_filter($d->fields, fn (Field $f) => in_array($f->format, ['email', 'color'], true))));
+        $richBlock .= $kept === '' ? '' : <<<PHP
+
+
+            /** Fields kept in one form, by their format: an email in small letters, a colour as #aabbcc. Put in it before they are checked. */
+            protected function kept(): array
+            {
+                return [{$kept}];
+            }
+        PHP;
         $together = implode(', ', array_map(fn (array $set) => '['
             ."'fields' => [".implode(', ', array_map(fn (string $name) => "'{$name}'", $set)).'], '
             ."'table' => '{$d->table}', "
@@ -1335,7 +1345,7 @@ final class ResourceGenerator
             $f->multiple => ["'list'", "'max:".Field::MAX_FILES."'"],
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", $max(255)],
-            $f->format === 'url' => ["'url'", $max(2048)],
+            $f->format === 'url' => ["'url:http,https'", $max(2048)],
             $f->format === 'tel' && $f->country !== null => ["'string'", $max(32), "new \\Nevela\\Laravel\\Rules\\Phone('{$f->country}')"],
             $f->format === 'tel' => ["'string'", $max(32)],
             $f->format === 'slug' => ["'string'", "'alpha_dash'", $max(255)],
@@ -1343,8 +1353,10 @@ final class ResourceGenerator
             $f->kind === 'string' => ["'string'", $max(255)],
             $f->kind === 'text' => ["'string'", $max(65535)],
             $f->kind === 'int' && $f->format === 'percent' => ["'integer'", "'between:0,100'"],
+            $f->kind === 'int' && $f->format === 'rating' => ["'integer'", "'between:1,{$f->mostStars()}'"],
             $f->kind === 'int' => ["'integer'"],
             $f->kind === 'float' && $f->format === 'percent' => ["'numeric'", "'between:0,100'"],
+            $f->kind === 'float' && $f->format === 'rating' => ["'numeric'", "'between:1,{$f->mostStars()}'"],
             $f->kind === 'float' => ["'numeric'"],
             $f->kind === 'boolean' => ["'boolean'"],
             $f->kind === 'date' => ["'date_format:Y-m-d'"],
@@ -1660,6 +1672,7 @@ final class ResourceGenerator
                 'currency' => ($currency = $this->currencyOf($f)) !== null ? $j($currency) : null,
                 'optionLabels' => $f->optionLabels !== [] ? $j($f->optionLabels) : null,
                 'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
+                'max' => $f->max !== null ? (string) $f->max : null,
                 'placeholder' => $f->auto !== null ? $j("Left empty: the next {$f->auto}- number") : null,
                 'default' => $f->whenLeftOut() !== null ? $j($f->whenLeftOut()) : null,
                 // What the migration does when the parent goes: an optional link is cleared.
