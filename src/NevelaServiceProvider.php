@@ -34,6 +34,7 @@ use Nevela\Laravel\Console\DeployCheckCommand;
 use Nevela\Laravel\Console\DevCommand;
 use Nevela\Laravel\Console\DigestCommand;
 use Nevela\Laravel\Console\DisposableCommand;
+use Nevela\Laravel\Console\FieldCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
 use Nevela\Laravel\Console\PruneSessionsCommand;
@@ -100,7 +101,7 @@ final class NevelaServiceProvider extends ServiceProvider
 
             $this->publishes([__DIR__.'/../config/nevela.php' => config_path('nevela.php')], 'nevela-config');
             $this->commands([
-                MakeResourceCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
+                MakeResourceCommand::class, FieldCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
                 TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class,
             ]);

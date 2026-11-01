@@ -329,15 +329,15 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check', 'resource:remove'];
+        \$nevela = ['resource', 'field', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check', 'resource:remove'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
         }
 
         if (in_array(\$name, \$nevela, true)) {
-            // A new resource is no use until its table exists, so make it in the same step.
-            if (\$name === 'resource' && ! in_array('--no-migrate', \$args, true)) {
+            // A new resource or field is no use until its column exists, so make it in the same step.
+            if (in_array(\$name, ['resource', 'field'], true) && ! in_array('--no-migrate', \$args, true)) {
                 \$args[] = '--migrate';
             }
             \$args = array_values(array_diff(\$args, ['--no-migrate']));
@@ -355,6 +355,8 @@ final class ResourceGenerator
               php nevela status                check versions, migrations, users and the dashboard
               php nevela resource Product --fields="name:string, price:money" --seed
                                                add a resource, create its table, fill it
+              php nevela field Product "weight:float?"
+                                               add a field to a resource, and its column
               php nevela adopt posts           make a resource of a table you already have
               php nevela resource:remove Product   take a resource out again (shows what it would do; --force does it)
               php nevela blog                  give the site a blog: posts in the dashboard, /blog to read them
@@ -789,51 +791,7 @@ final class ResourceGenerator
     /** @param list<Descriptor> $all */
     public function migration(Descriptor $d, array $all = []): string
     {
-        $columns = [];
-        foreach ($d->fields as $f) {
-            $c = $f->column();
-            if ($f->kind === 'belongsTo') {
-                // A required parent can't be deleted while it has children; an optional one lets go of them.
-                $foreign = $this->hasIntIds((string) $f->target, $d, $all) ? 'foreignId' : 'foreignUuid';
-                $columns[] = "            \$table->{$foreign}('{$c}')"
-                    .($f->required ? '' : '->nullable()')
-                    .($f->unique ? '->unique()' : '->index()')
-                    ."->constrained('{$this->tableOf((string) $f->target, $d, $all)}')"
-                    .($f->required ? '' : '->nullOnDelete()').';';
-
-                continue;
-            }
-            $line = match (true) {
-                // Several files: the list of their keys.
-                $f->multiple => "\$table->json('{$c}')",
-                $f->kind === 'file' => "\$table->string('{$c}', 512)",
-                // More than a text column holds on MySQL, or HTML, whose tags count against it too.
-                $f->kind === 'text' && ($f->isRich() || $f->maxLength > 65535) => "\$table->longText('{$c}')",
-                $f->kind === 'text' => "\$table->text('{$c}')",
-                $f->kind === 'int' => "\$table->integer('{$c}')",
-                $f->kind === 'float' && $f->format === 'money' => "\$table->decimal('{$c}', 12, 2)",
-                $f->kind === 'float' => "\$table->double('{$c}')",
-                $f->kind === 'boolean' => "\$table->boolean('{$c}')->default(false)",
-                $f->kind === 'date' => "\$table->date('{$c}')",
-                $f->kind === 'datetime' => "\$table->dateTime('{$c}')",
-                $f->maxLength !== null => "\$table->string('{$c}', {$f->maxLength})",
-                $f->format === 'url' => "\$table->string('{$c}', 2048)",
-                default => "\$table->string('{$c}')",
-            };
-            if (! $f->alwaysRequired()) {
-                $line .= '->nullable()';
-            }
-            if ($f->default !== null && $f->kind !== 'text') {
-                // (A text column can't have one on MySQL; the request supplies it there.)
-                $line = str_replace('->default(false)', '', $line).'->default('.var_export($f->default, true).')';
-            }
-            if ($f->unique) {
-                $line .= '->unique()';
-            } elseif ($f->kind === 'enum') {
-                $line .= '->index()';
-            }
-            $columns[] = "            {$line};";
-        }
+        $columns = array_map(fn (Field $f) => '            '.$this->column($f, $d, $all), array_values($d->fields));
         foreach ($d->unique as $set) {
             $columns[] = '            // '.ucfirst($this->togetherWords($d, $set)).' go together once only.';
             $columns[] = '            '.$this->uniqueIndex($d, $set).';';
@@ -873,6 +831,127 @@ final class ResourceGenerator
         };
 
         PHP;
+    }
+
+    /**
+     * The line of a migration that makes a field's column.
+     *
+     * A column added to a table that has records can't insist on a value they don't have,
+     * so a required field's is nullable there, unless a default gives them one. Its rules
+     * still ask for it, whenever a record is next saved through its form.
+     *
+     * @param  list<Descriptor>  $all
+     */
+    private function column(Field $f, Descriptor $d, array $all, bool $added = false): string
+    {
+        $c = $f->column();
+        if ($f->kind === 'belongsTo') {
+            // A required parent can't be deleted while it has children; an optional one lets go of them.
+            $foreign = $this->hasIntIds((string) $f->target, $d, $all) ? 'foreignId' : 'foreignUuid';
+
+            return "\$table->{$foreign}('{$c}')"
+                .($f->required && ! $added ? '' : '->nullable()')
+                .($f->unique ? '->unique()' : '->index()')
+                ."->constrained('{$this->tableOf((string) $f->target, $d, $all)}')"
+                .($f->required ? '' : '->nullOnDelete()').';';
+        }
+        $line = match (true) {
+            // Several files: the list of their keys.
+            $f->multiple => "\$table->json('{$c}')",
+            $f->kind === 'file' => "\$table->string('{$c}', 512)",
+            // More than a text column holds on MySQL, or HTML, whose tags count against it too.
+            $f->kind === 'text' && ($f->isRich() || $f->maxLength > 65535) => "\$table->longText('{$c}')",
+            $f->kind === 'text' => "\$table->text('{$c}')",
+            $f->kind === 'int' => "\$table->integer('{$c}')",
+            $f->kind === 'float' && $f->format === 'money' => "\$table->decimal('{$c}', 12, 2)",
+            $f->kind === 'float' => "\$table->double('{$c}')",
+            $f->kind === 'boolean' => "\$table->boolean('{$c}')->default(false)",
+            $f->kind === 'date' => "\$table->date('{$c}')",
+            $f->kind === 'datetime' => "\$table->dateTime('{$c}')",
+            $f->maxLength !== null => "\$table->string('{$c}', {$f->maxLength})",
+            $f->format === 'url' => "\$table->string('{$c}', 2048)",
+            default => "\$table->string('{$c}')",
+        };
+        $hasNoValue = $added && $f->kind !== 'boolean' && ($f->default === null || $f->kind === 'text');
+        if (! $f->alwaysRequired() || $hasNoValue) {
+            $line .= '->nullable()';
+        }
+        if ($f->default !== null && $f->kind !== 'text') {
+            // (A text column can't have one on MySQL; the request supplies it there.)
+            $line = str_replace('->default(false)', '', $line).'->default('.var_export($f->default, true).')';
+        }
+        if ($f->unique) {
+            $line .= '->unique()';
+        } elseif ($f->kind === 'enum') {
+            $line .= '->index()';
+        }
+
+        return "{$line};";
+    }
+
+    /**
+     * The migration that adds fields to a table already made: what `nevela:field` writes.
+     *
+     * @param  list<Field>  $fields
+     * @param  list<Descriptor>  $all
+     */
+    public function addFieldsMigration(Descriptor $d, array $fields, array $all = []): string
+    {
+        $up = implode("\n", array_map(fn (Field $f) => '            '.$this->column($f, $d, $all, true), $fields));
+        $down = [];
+        // An index goes before its column: SQLite won't drop a column that has one.
+        foreach ($fields as $f) {
+            $c = $f->column();
+            if ($f->kind === 'belongsTo') {
+                $down[] = "            \$table->dropForeign(['{$c}']);";
+            }
+            if ($f->unique) {
+                $down[] = "            \$table->dropUnique(['{$c}']);";
+            } elseif ($f->kind === 'belongsTo' || $f->kind === 'enum') {
+                $down[] = "            \$table->dropIndex(['{$c}']);";
+            }
+            $down[] = "            \$table->dropColumn('{$c}');";
+        }
+        $down = implode("\n", $down);
+
+        return <<<PHP
+        <?php
+
+        use Illuminate\Database\Migrations\Migration;
+        use Illuminate\Database\Schema\Blueprint;
+        use Illuminate\Support\Facades\Schema;
+
+        // Written once by `nevela field`.
+        return new class extends Migration
+        {
+            public function up(): void
+            {
+                Schema::table('{$d->table}', function (Blueprint \$table) {
+        {$up}
+                });
+            }
+
+            public function down(): void
+            {
+                Schema::table('{$d->table}', function (Blueprint \$table) {
+        {$down}
+                });
+            }
+        };
+
+        PHP;
+    }
+
+    /**
+     * @param  list<Field>  $fields
+     * @param  list<Descriptor>  $all
+     */
+    public function addFieldsMigrationFile(Descriptor $d, array $fields, string $timestamp, array $all = []): GeneratedFile
+    {
+        // Named after what it adds, while that fits in a file name.
+        $names = count($fields) > 3 ? count($fields).'_fields' : implode('_and_', array_map(fn (Field $f) => $f->column(), $fields));
+
+        return new GeneratedFile(GeneratedFile::TARGET_API, "database/migrations/{$timestamp}_add_{$names}_to_{$d->table}_table.php", $this->addFieldsMigration($d, $fields, $all), GeneratedFile::MODE_ONCE);
     }
 
     /**

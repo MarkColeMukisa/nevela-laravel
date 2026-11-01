@@ -133,6 +133,16 @@ final class Descriptor
     /** Build from a name and a `--fields` string: "name:string, price:money, status:enum(draft|live)?". */
     public static function fromSpec(string $name, string $spec, ?string $icon = null, ?string $group = null, string $idType = 'uuid'): self
     {
+        return self::make(Naming::pascal($name), self::fieldsOf($spec), icon: $icon, group: $group, idType: $idType);
+    }
+
+    /**
+     * The fields a --fields string describes.
+     *
+     * @return array<string, Field> keyed by field name
+     */
+    public static function fieldsOf(string $spec): array
+    {
         $fields = [];
         foreach (array_filter(array_map('trim', self::splitSpec($spec))) as $token) {
             $field = Field::parse($token);
@@ -142,7 +152,7 @@ final class Descriptor
             $fields[$field->name] = $field;
         }
 
-        return self::make(Naming::pascal($name), $fields, icon: $icon, group: $group, idType: $idType);
+        return $fields;
     }
 
     /** @param array<string, Field> $fields */
