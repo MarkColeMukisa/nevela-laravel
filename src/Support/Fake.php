@@ -86,9 +86,10 @@ final class Fake
      * @param  int  $number  A number no other seeded row of this table shares: what keeps unique fields unique.
      * @param  array<string, list<string>>  $pools  Values to draw from, by field name: the ids a belongsTo may point at, the keys of files that exist.
      * @param  string|null  $currency  The app's (nevela.currency), for a money field that names none
+     * @param  array<string, int>  $numbers  The number a numbered field is to have, by field name, where it isn't $number
      * @return array<string, string|int|float|bool|null>
      */
-    public static function row(Descriptor $resource, int $number, array $pools = [], ?string $currency = null): array
+    public static function row(Descriptor $resource, int $number, array $pools = [], ?string $currency = null, array $numbers = []): array
     {
         $first = self::pick(self::FIRST);
         $last = self::pick(self::LAST);
@@ -117,7 +118,9 @@ final class Fake
 
                 continue;
             }
-            $row[$field->column()] = self::value($field, $number, $first, $last, $isPerson, $field->currency ?? $currency);
+            $row[$field->column()] = $field->auto !== null && isset($numbers[$field->name])
+                ? Numbering::format($field->auto, $numbers[$field->name])
+                : self::value($field, $number, $first, $last, $isPerson, $field->currency ?? $currency);
         }
 
         // A category is called Kitchen and a company Acme Ltd, not Compact Lamp. Each is walked

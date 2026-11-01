@@ -25,6 +25,17 @@ final class NumbersAndCopiesTest extends TestCase
         $this->assertSame('INV-10000', Numbering::format('INV', 10000));
     }
 
+    public function test_a_seeded_number_can_be_told_what_it_is_and_what_is_made_from_it_follows(): void
+    {
+        $invoice = Descriptor::fromSpec('Invoice', 'number:auto(INV), slug:slug(number)!');
+
+        $row = Fake::row($invoice, 1180000001, [], null, ['number' => 21]);
+
+        $this->assertSame('INV-0021', $row['number']);
+        $this->assertSame('inv-0021', $row['slug']);
+        $this->assertSame('INV-1180000001', Fake::row($invoice, 1180000001)['number'], 'told nothing, it is the row\'s number');
+    }
+
     public function test_a_copy_is_written_as_the_relation_and_its_field(): void
     {
         $field = Field::parse('price:money(product.price)');

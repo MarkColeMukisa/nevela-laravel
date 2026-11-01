@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Each is given once, whoever else is making a record at that moment: the row that holds
  * the last one given is locked while the next is worked out. The numbers in the table count
- * too, the trash's included, because seeding and numbers typed in don't pass through here.
+ * too, the trash's included, because numbers typed in don't pass through here.
  *
  * A record that fails after being given a number leaves a gap, unless it was in a
  * transaction that is rolled back, which gives the number back. Inside a transaction the
@@ -22,32 +22,36 @@ final class Numbering
 
     private const TABLE = 'nevela_numbers';
 
+    /** How many of the longest numbers are looked at together, to find the highest. */
+    private const LOOKED_AT = 50;
+
     public static function next(string $table, string $column, string $prefix): string
+    {
+        return self::format($prefix, self::reserve($table, $column, $prefix) + 1);
+    }
+
+    /**
+     * Speak for the next numbers: the ones after what this returns are the caller's, and
+     * are given to nobody else.
+     */
+    public static function reserve(string $table, string $column, string $prefix, int $count = 1): int
     {
         // Upgraded and not yet migrated: as it was before there was a table for this.
         if (! SchemaFacts::hasTable(self::TABLE)) {
-            return self::format($prefix, self::highest($table, $column, $prefix) + 1);
+            return self::highest($table, $column, $prefix);
         }
         $name = "{$table}.{$column}.{$prefix}";
 
-        return DB::transaction(function () use ($table, $column, $prefix, $name): string {
+        return DB::transaction(function () use ($table, $column, $prefix, $name, $count): int {
             // A write first, even one that changes nothing: SQLite has no row locks, and
             // this is what makes the others wait there.
             DB::table(self::TABLE)->insertOrIgnore(['name' => $name, 'last' => 0]);
             $last = (int) DB::table(self::TABLE)->where('name', $name)->lockForUpdate()->value('last');
-            $number = max($last, self::highest($table, $column, $prefix)) + 1;
-            DB::table(self::TABLE)->where('name', $name)->update(['last' => $number]);
+            $before = max($last, self::highest($table, $column, $prefix));
+            DB::table(self::TABLE)->where('name', $name)->update(['last' => $before + $count]);
 
-            return self::format($prefix, $number);
+            return $before;
         }, 3);
-    }
-
-    /** The last number given to a field: the one kept, or a higher one that didn't pass through here. */
-    public static function lastGiven(string $table, string $column, string $prefix): int
-    {
-        $kept = SchemaFacts::hasTable(self::TABLE) ? (int) DB::table(self::TABLE)->where('name', "{$table}.{$column}.{$prefix}")->value('last') : 0;
-
-        return max($kept, self::highest($table, $column, $prefix));
     }
 
     /** Start a table's numbers again: it has been emptied, or is gone. */
@@ -63,20 +67,26 @@ final class Numbering
         return $prefix.'-'.str_pad((string) $number, self::DIGITS, '0', STR_PAD_LEFT);
     }
 
-    /** The highest number with this prefix in the table, the trash's included. */
+    /**
+     * The highest number with this prefix in the table, the trash's included. Looked for
+     * longest first, as INV-10000 is after INV-9999, and on until there is one: something
+     * typed in with the same start, such as INV-2026-0001, is longer and isn't a number.
+     */
     private static function highest(string $table, string $column, string $prefix): int
     {
-        $query = DB::table($table);
-        $wrapped = $query->getGrammar()->wrap($column);
-        // The longest first, then the highest of those: INV-10000 is after INV-9999.
-        $given = $query->where($column, 'like', "{$prefix}-%")->orderByRaw("length({$wrapped}) desc")->orderBy($column, 'desc')->limit(50)->pluck($column)->all();
         $highest = 0;
-        foreach ($given as $value) {
-            if (preg_match('/^'.preg_quote($prefix, '/').'-(\d+)$/', (string) $value, $match)) {
-                $highest = max($highest, (int) $match[1]);
+        for ($offset = 0; ; $offset += self::LOOKED_AT) {
+            $query = DB::table($table);
+            $wrapped = $query->getGrammar()->wrap($column);
+            $given = $query->where($column, 'like', "{$prefix}-%")->orderByRaw("length({$wrapped}) desc")->orderBy($column, 'desc')->offset($offset)->limit(self::LOOKED_AT)->pluck($column)->all();
+            foreach ($given as $value) {
+                if (preg_match('/^'.preg_quote($prefix, '/').'-(\d+)$/', (string) $value, $match)) {
+                    $highest = max($highest, (int) $match[1]);
+                }
+            }
+            if ($highest > 0 || count($given) < self::LOOKED_AT) {
+                return $highest;
             }
         }
-
-        return $highest;
     }
 }
