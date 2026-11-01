@@ -42,6 +42,14 @@ final class Numbering
         }, 3);
     }
 
+    /** The last number given to a field: the one kept, or a higher one that didn't pass through here. */
+    public static function lastGiven(string $table, string $column, string $prefix): int
+    {
+        $kept = SchemaFacts::hasTable(self::TABLE) ? (int) DB::table(self::TABLE)->where('name', "{$table}.{$column}.{$prefix}")->value('last') : 0;
+
+        return max($kept, self::highest($table, $column, $prefix));
+    }
+
     /** Start a table's numbers again: it has been emptied, or is gone. */
     public static function forget(string $table): void
     {

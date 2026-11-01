@@ -142,7 +142,6 @@ final class SeedCommand extends Command
             return self::FAILURE;
         }
         if ($fresh) {
-            Numbering::forget($resource->table);
             $this->components->info('Removed '.number_format($removed)." existing {$resource->pluralLabel}.");
         }
 
@@ -205,6 +204,17 @@ final class SeedCommand extends Command
     private function fill(Descriptor $resource, int $count, int $chunk, int $offset, bool $fresh, ProgressBar $bar, array $pools = []): int
     {
         $removed = $fresh ? DB::table($resource->table)->delete() : 0;
+        if ($fresh) {
+            Numbering::forget($resource->table);
+        }
+        // Numbered fields go on from the last number given, and take no part in the blocks
+        // the other unique fields are drawn from: INV-0021, not INV-1180000001.
+        $numbered = [];
+        foreach ($resource->fields as $field) {
+            if ($field->auto !== null) {
+                $numbered[$field->column()] = [$field->auto, Numbering::lastGiven($resource->table, $field->column(), $field->auto)];
+            }
+        }
         $now = time();
         // A list whose form proves addresses: a seeded record is confirmed as it is made, as one
         // added in the dashboard is. Nobody is there to ask.
@@ -227,6 +237,9 @@ final class SeedCommand extends Command
                 $row = Fake::row($resource, $offset + $i + 1, $pools, config('nevela.currency'));
                 foreach ($resource->unique as $index => $set) {
                     $row = $this->apart($resource, $set, $row, $taken[$index], $offset + $i + 1, $pools);
+                }
+                foreach ($numbered as $column => [$prefix, $last]) {
+                    $row[$column] = Numbering::format($prefix, $last + $i + 1);
                 }
                 foreach ($resource->fields as $copy) {
                     $copies = $pools["{$copy->name}@"] ?? null;
