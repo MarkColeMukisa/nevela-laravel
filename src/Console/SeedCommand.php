@@ -11,6 +11,7 @@ use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Fake;
+use Nevela\Laravel\Support\Numbering;
 use Nevela\Laravel\Support\SchemaFacts;
 use Symfony\Component\Console\Helper\ProgressBar;
 use Throwable;
@@ -141,6 +142,7 @@ final class SeedCommand extends Command
             return self::FAILURE;
         }
         if ($fresh) {
+            Numbering::forget($resource->table);
             $this->components->info('Removed '.number_format($removed)." existing {$resource->pluralLabel}.");
         }
 

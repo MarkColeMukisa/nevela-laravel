@@ -10,6 +10,7 @@ use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Naming;
+use Nevela\Laravel\Support\Numbering;
 use Nevela\Laravel\Support\Removal;
 use Throwable;
 
@@ -95,6 +96,7 @@ final class RemoveResourceCommand extends Command
         }
 
         $roles = $this->forgetPermissions($resource->table);
+        Numbering::forget($resource->table);
 
         Nevela::forget();
         $rest = Nevela::all();
