@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Support;
 
 use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumber;
 use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberType;
 use libphonenumber\PhoneNumberUtil;
@@ -48,7 +49,7 @@ final class Phone
 
     public static function known(string $country): bool
     {
-        return in_array($country, PhoneNumberUtil::getInstance()->getSupportedRegions(), true);
+        return in_array($country, PhoneNumberUtil::getInstance()->getSupportedRegions(), true) && self::sample($country) !== null;
     }
 
     /**
@@ -72,7 +73,7 @@ final class Phone
             return null;
         }
         // An extension has nowhere to go in +256772123456, and would be lost without a word.
-        if ($parsed->hasExtension() || ! $phones->isValidNumber($parsed) || ($country !== null && $phones->getRegionCodeForNumber($parsed) !== $country)) {
+        if ($parsed->hasExtension() || ! ($country === null ? $phones->isValidNumber($parsed) : $phones->isValidNumberForRegion($parsed, $country))) {
             return null;
         }
 
@@ -99,11 +100,10 @@ final class Phone
         }
         $from = (string) ($country ?? $assume);
         $local = self::NAMED[$from]['example'] ?? self::written($from, PhoneNumberFormat::NATIONAL);
-        $international = PhoneNumberUtil::getInstance()->format(PhoneNumberUtil::getInstance()->parse((string) self::normalise($local, $from)), PhoneNumberFormat::INTERNATIONAL);
         // +256 772 123456 is how it is said here, whichever way the library spaces it.
-        if (isset(self::NAMED[$from])) {
-            $international = '+'.PhoneNumberUtil::getInstance()->getCountryCodeForRegion($from).' '.substr($local, 1);
-        }
+        $international = isset(self::NAMED[$from])
+            ? '+'.PhoneNumberUtil::getInstance()->getCountryCodeForRegion($from).' '.substr($local, 1)
+            : self::written($from, PhoneNumberFormat::INTERNATIONAL);
         if ($country === null) {
             return "Enter a valid phone number, such as {$local} or {$international}. One from another country starts with its code.";
         }
@@ -126,10 +126,16 @@ final class Phone
         $example = self::example($country);
         $code = (string) PhoneNumberUtil::getInstance()->getCountryCodeForRegion($country);
         $national = substr($example, strlen($code) + 1);
-        // It starts as the example does, so it reads as one from there.
-        $lead = substr($national, 0, 2);
+        // It starts as the example does, so it reads as one from there, and with as little of
+        // it as gives a real number. The US's 20 can't, and its 2015 can't, and 201555 can.
+        for ($kept = 2; $kept < strlen($national); $kept++) {
+            $made = "+{$code}".substr($national, 0, $kept).self::tail($number, strlen($national) - $kept, $unique);
+            if (self::normalise($made, $country) === $made) {
+                return $made;
+            }
+        }
 
-        return "+{$code}{$lead}".self::tail($number, strlen($national) - 2, $unique);
+        return $example;
     }
 
     private static function tail(int $number, int $digits, bool $unique): string
@@ -141,9 +147,26 @@ final class Phone
 
     private static function written(string $country, PhoneNumberFormat|int $format): string
     {
-        $phones = PhoneNumberUtil::getInstance();
-        $example = $phones->getExampleNumberForType($country, PhoneNumberType::MOBILE) ?? $phones->getExampleNumber($country);
+        $sample = self::sample($country);
 
-        return $example === null ? '' : $phones->format($example, $format);
+        return $sample === null ? '' : PhoneNumberUtil::getInstance()->format($sample, $format);
+    }
+
+    /**
+     * A number of that country, by the country's own rules. Where it shares its calling code,
+     * as the Vatican does with Italy, the library's example can be its neighbour's.
+     */
+    private static function sample(string $country): ?PhoneNumber
+    {
+        $phones = PhoneNumberUtil::getInstance();
+        foreach ([PhoneNumberType::MOBILE, PhoneNumberType::FIXED_LINE, PhoneNumberType::FIXED_LINE_OR_MOBILE] as $type) {
+            $example = $phones->getExampleNumberForType($country, $type);
+            if ($example !== null && $phones->isValidNumberForRegion($example, $country)) {
+                return $example;
+            }
+        }
+        $example = $phones->getExampleNumber($country);
+
+        return $example !== null && $phones->isValidNumberForRegion($example, $country) ? $example : null;
     }
 }

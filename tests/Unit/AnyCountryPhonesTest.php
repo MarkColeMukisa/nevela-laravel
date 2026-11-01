@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Tests\Unit;
 
 use InvalidArgumentException;
+use libphonenumber\PhoneNumberUtil;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Fake;
@@ -92,6 +93,48 @@ final class AnyCountryPhonesTest extends TestCase
                 $this->assertSame($number, Phone::normalise($number, $country), "{$number} isn't {$country}'s");
             }
         }
+    }
+
+    public function test_every_country_it_knows_is_one_it_can_speak_of_and_seed(): void
+    {
+        $known = array_values(array_filter(PhoneNumberUtil::getInstance()->getSupportedRegions(), fn (string $country) => Phone::known($country)));
+        $this->assertGreaterThan(235, count($known));
+
+        foreach ($known as $country) {
+            $example = Phone::example($country);
+            $this->assertSame($example, Phone::normalise($example, $country), "{$country}'s example isn't its own");
+
+            // What is said of a number that isn't one, either way a country can come up.
+            $this->assertStringContainsString('such as', Phone::message($country), $country);
+            $this->assertStringContainsString('such as', Phone::message(null, $country), $country);
+
+            foreach ([1, 77, 4000, 123456] as $n) {
+                $unique = Phone::fake($country, $n, true);
+                $this->assertSame($unique, Phone::normalise($unique, $country), "{$unique} isn't {$country}'s, at {$n}");
+                $any = Phone::fake($country, $n, false);
+                $this->assertSame($any, Phone::normalise($any, $country), "{$any} isn't {$country}'s");
+            }
+        }
+    }
+
+    public function test_a_number_is_held_to_its_country_where_it_shares_a_calling_code(): void
+    {
+        // The Vatican shares +39 with Italy, the Isle of Man +44 with Britain, and each has its own numbers.
+        $this->assertSame('+393331234567', Phone::normalise('+39 333 123 4567', 'IT'));
+        $this->assertNull(Phone::normalise('+44 7400 123456', 'IM'));
+        $this->assertSame('+447624123456', Phone::normalise('+44 7624 123456', 'IM'));
+        $this->assertIsString(Phone::message('VA'));
+        $this->assertIsString(Phone::message('SJ'));
+        $this->assertIsString(Phone::message('AX'));
+    }
+
+    public function test_a_us_field_seeds_numbers_the_us_would_take(): void
+    {
+        foreach ([1, 77, 4000] as $n) {
+            $number = Phone::fake('US', $n, true);
+            $this->assertSame($number, Phone::normalise($number, 'US'), $number);
+        }
+        $this->assertNotSame(Phone::fake('US', 1, true), Phone::fake('US', 2, true));
     }
 
     public function test_a_field_seeds_a_real_number_whichever_way_it_says_it_is_a_phone(): void
