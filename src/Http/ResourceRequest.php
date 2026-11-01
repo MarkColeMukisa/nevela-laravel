@@ -82,6 +82,7 @@ abstract class ResourceRequest extends FormRequest
 
     /**
      * Fields kept in one form by their format, which a generated request with any says.
+     * A json field read from a file comes as text, and is read as what it says, here too.
      *
      * @return array<string, string> field => format
      */
@@ -381,7 +382,8 @@ abstract class ResourceRequest extends FormRequest
         }
         foreach ($this->kept() as $field => $format) {
             if (is_string($input[$field] ?? null)) {
-                $input[$field] = Field::inOneForm($format, $input[$field]);
+                // Text that isn't JSON is left as it is, for the rule to refuse.
+                $input[$field] = $format === 'json' ? (json_decode($input[$field], true) ?? $input[$field]) : Field::inOneForm($format, $input[$field]);
             }
         }
 

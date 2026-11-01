@@ -654,7 +654,7 @@ final class ResourceGenerator
         $fillable = implode(', ', array_map(fn (Field $f) => "'{$f->column()}'", $d->fields));
         $casts = [];
         foreach ($d->fields as $f) {
-            $cast = $f->multiple ? 'array' : match ($f->kind) {
+            $cast = $f->multiple || $f->kind === 'json' ? 'array' : match ($f->kind) {
                 'int' => 'integer',
                 'float' => 'float',
                 'boolean' => 'boolean',
@@ -857,7 +857,7 @@ final class ResourceGenerator
         }
         $line = match (true) {
             // Several files: the list of their keys.
-            $f->multiple => "\$table->json('{$c}')",
+            $f->multiple || $f->kind === 'json' => "\$table->json('{$c}')",
             $f->kind === 'file' => "\$table->string('{$c}', 512)",
             // More than a text column holds on MySQL, or HTML, whose tags count against it too.
             $f->kind === 'text' && ($f->isRich() || $f->maxLength > 65535) => "\$table->longText('{$c}')",
@@ -870,6 +870,9 @@ final class ResourceGenerator
             $f->kind === 'datetime' => "\$table->dateTime('{$c}')",
             $f->maxLength !== null => "\$table->string('{$c}', {$f->maxLength})",
             $f->format === 'url' => "\$table->string('{$c}', 2048)",
+            $f->format === 'domain' => "\$table->string('{$c}', 253)",
+            $f->format === 'country' => "\$table->string('{$c}', 2)",
+            $f->format === 'time' => "\$table->string('{$c}', 5)",
             default => "\$table->string('{$c}')",
         };
         $hasNoValue = $added && $f->kind !== 'boolean' && ($f->default === null || $f->kind === 'text');
@@ -1229,11 +1232,11 @@ final class ResourceGenerator
                 return [{$phones}];
             }
         PHP;
-        $kept = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => '{$f->format}'", array_filter($d->fields, fn (Field $f) => in_array($f->format, ['email', 'color'], true))));
+        $kept = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => '".($f->format ?? $f->kind)."'", array_filter($d->fields, fn (Field $f) => in_array($f->format, Field::KEPT_IN_ONE_FORM, true) || $f->kind === 'json')));
         $richBlock .= $kept === '' ? '' : <<<PHP
 
 
-            /** Fields kept in one form, by their format: an email in small letters, a colour as #aabbcc. Put in it before they are checked. */
+            /** Fields kept in one form, by their format: an email in small letters, a colour as #aabbcc, a domain without its https://. Put in it before they are checked. */
             protected function kept(): array
             {
                 return [{$kept}];
@@ -1343,6 +1346,10 @@ final class ResourceGenerator
             $f->kind === 'belongsTo' => [...($this->hasIntIds((string) $f->target, $d, $all) ? ["'integer'", "'digits_between:1,18'"] : ["'uuid'"]), "Rule::exists('{$this->tableOf((string) $f->target, $d, $all)}', 'id')"],
             // Several files: a list (not an object of keys), each checked under "gallery.*". Required is one at least.
             $f->multiple => ["'list'", "'max:".Field::MAX_FILES."'"],
+            $f->kind === 'json' => ["'array'"],
+            $f->format === 'domain' => ["'string'", "'regex:".Field::DOMAIN_PATTERN."'"],
+            $f->format === 'country' => ["'string'", 'Rule::in(\\Nevela\\Laravel\\Support\\Countries::CODES)'],
+            $f->format === 'time' => ["'string'", "'regex:".Field::TIME_PATTERN."'"],
             $f->kind === 'file' => ["'string'", "'max:512'", "new \\Nevela\\Laravel\\Rules\\UploadKey('{$d->name}', '{$f->name}')"],
             $f->format === 'email' => ["'email'", $max(255)],
             $f->format === 'url' => ["'url:http,https'", $max(2048)],
@@ -1711,6 +1718,10 @@ final class ResourceGenerator
                 // Flare has no word for it, so it is said in passing: the dashboard reads `rich` off the field.
                 $parts[] = '...({ rich: true } as {})';
             }
+            if ($f->format === 'time') {
+                // Nor for this.
+                $parts[] = '...({ time: true } as {})';
+            }
             if ($f->multiple) {
                 // Flare's file is one key, so several are its JSON: a list of keys, which the dashboard draws as files from `files`.
                 $parts[] = 'sortable: false';
@@ -1722,6 +1733,7 @@ final class ResourceGenerator
                 $f->kind === 'belongsTo' => "field.belongsTo({$j($f->target)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'file' => "field.file({$j($f->accept)}".($opts ? ", {$opts}" : '').')',
                 $f->kind === 'enum' => "field.enum({$j($f->options)}".($opts ? ", {$opts}" : '').')',
+                $f->format === 'time' => "field.string({$opts})",
                 $f->kind === 'string' && $f->format !== null => "field.{$f->format}({$opts})",
                 default => "field.{$f->kind}({$opts})",
             };

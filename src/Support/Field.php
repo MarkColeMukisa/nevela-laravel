@@ -10,14 +10,23 @@ use InvalidArgumentException;
  */
 final class Field
 {
-    public const KINDS = ['string', 'text', 'int', 'float', 'boolean', 'date', 'datetime', 'enum', 'belongsTo', 'file'];
+    public const KINDS = ['string', 'text', 'int', 'float', 'boolean', 'date', 'datetime', 'enum', 'belongsTo', 'file', 'json'];
 
     public const FORMATS = [
-        'string' => ['email', 'url', 'tel', 'slug', 'color'],
+        'string' => ['email', 'url', 'tel', 'slug', 'color', 'domain', 'country', 'time'],
         'text' => ['rich'],
         'float' => ['money', 'percent', 'rating'],
         'int' => ['percent', 'rating'],
     ];
+
+    /** Formats whose values are kept in one form: see inOneForm(). */
+    public const KEPT_IN_ONE_FORM = ['email', 'color', 'domain', 'country', 'time'];
+
+    /** A bare host with at least one dot, in small letters: example.com, xn--mnchen-3ya.de. */
+    public const DOMAIN_PATTERN = '/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])$/';
+
+    /** A time of day: 09:05. */
+    public const TIME_PATTERN = '/^([01][0-9]|2[0-3]):[0-5][0-9]$/';
 
     /** What a file field may accept, in Flare's categories. The MIME types are in Media\FileTypes. */
     public const ACCEPTS = ['any', 'image', 'pdf', 'video', 'audio', 'text', 'csv', 'document', 'spreadsheet', 'archive'];
@@ -27,6 +36,8 @@ final class Field
         'string' => ['string', null], 'text' => ['text', null], 'textarea' => ['text', null], 'richtext' => ['text', 'rich'],
         'email' => ['string', 'email'], 'url' => ['string', 'url'], 'tel' => ['string', 'tel'],
         'slug' => ['string', 'slug'], 'color' => ['string', 'color'],
+        'domain' => ['string', 'domain'], 'country' => ['string', 'country'], 'time' => ['string', 'time'],
+        'json' => ['json', null],
         'int' => ['int', null], 'integer' => ['int', null],
         'float' => ['float', null], 'money' => ['float', 'money'], 'decimal' => ['float', 'money'],
         'percent' => ['float', 'percent'], 'rating' => ['int', 'rating'],
@@ -102,6 +113,12 @@ final class Field
             if (! preg_match('/^[A-Za-z0-9_-]+$/', $option)) {
                 throw new InvalidArgumentException("Enum value \"{$option}\" on \"{$name}\" may only use letters, digits, _ and -.");
             }
+        }
+        if ($kind === 'json' && $unique) {
+            throw new InvalidArgumentException("\"{$name}\" is json, which can't be unique. Give what has to be unique a field of its own.");
+        }
+        if ($format === 'country' && $default !== null && ! in_array($default, Countries::CODES, true)) {
+            throw new InvalidArgumentException("The default of \"{$name}\" has to be a country's two-letter code in capitals, such as UG, and \"{$default}\" isn't one.");
         }
         if ($max !== null) {
             if ($format !== 'rating') {
@@ -379,6 +396,10 @@ final class Field
         if ($format === 'tel' && $args !== '' && ! ctype_digit($args)) {
             return new self($name, $kind, $format, $required, $unique, country: strtoupper($args));
         }
+        // country:country(UG), and Grit's country:country:UG: what it is when a create leaves it out.
+        if ($format === 'country' && $args !== '') {
+            return new self($name, $kind, $format, $required, $unique, default: strtoupper($args));
+        }
         // stars:rating(10): out of ten.
         if ($format === 'rating' && ctype_digit($args)) {
             return new self($name, $kind, $format, $required, $unique, max: (int) $args);
@@ -494,6 +515,7 @@ final class Field
             $this->list === false => 'none',
             $this->list === 'hidden' => 'hidden',
             $this->kind === 'text',
+            $this->kind === 'json' && ! $this->multiple,
             $this->kind === 'string' && $this->format === null && $this->maxLength !== null && $this->maxLength > 255,
             $this->kind === 'file' && (! $this->isImage() || $this->private) => 'hidden',
             default => 'auto',
@@ -568,17 +590,38 @@ final class Field
 
     /**
      * A value in the one form a format keeps it in, so that two ways of writing one thing
-     * are one thing to a unique field: Ada@Example.COM is ada@example.com, #ABC is #aabbcc.
-     * Anything it can't make sense of is handed back as it is, for the rules to refuse.
+     * are one thing to a unique field: Ada@Example.COM is ada@example.com, #ABC is #aabbcc,
+     * https://Example.COM/about is example.com, ug is UG, 9:05 is 09:05. Anything it can't
+     * make sense of is handed back as it is, for the rules to refuse.
      */
     public static function inOneForm(string $format, string $value): string
     {
         $value = trim($value);
-        if ($format === 'color' && preg_match('/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/', $value, $short)) {
-            $value = "#{$short[1]}{$short[1]}{$short[2]}{$short[2]}{$short[3]}{$short[3]}";
+
+        return match ($format) {
+            'color' => mb_strtolower((string) preg_replace('/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/', '#$1$1$2$2$3$3', $value)),
+            'domain' => self::host($value),
+            'country' => strtoupper($value),
+            'time' => preg_match('/^(\d{1,2}):(\d{2})(:\d{2})?$/', $value, $time) ? str_pad($time[1], 2, '0', STR_PAD_LEFT).':'.$time[2] : $value,
+            default => mb_strtolower($value),
+        };
+    }
+
+    /** What is left of an address once all but its host is taken off, with an international name as punycode. */
+    private static function host(string $value): string
+    {
+        $host = (string) preg_replace('#^[a-z][a-z0-9+.-]*://#i', '', $value);
+        $host = explode('/', explode('?', explode('#', $host)[0])[0])[0];
+        $host = (string) preg_replace('/^.*@/', '', $host);
+        $host = mb_strtolower(rtrim((string) preg_replace('/:\d+$/', '', $host), '.'));
+        if ($host !== '' && ! mb_check_encoding($host, 'ASCII') && function_exists('idn_to_ascii')) {
+            $ascii = idn_to_ascii($host, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+            if (is_string($ascii) && $ascii !== '') {
+                return $ascii;
+            }
         }
 
-        return mb_strtolower($value);
+        return $host;
     }
 
     public function alwaysRequired(): bool
@@ -619,12 +662,12 @@ final class Field
 
     public function sortable(): bool
     {
-        return ! in_array($this->kind, ['text', 'file'], true);
+        return ! in_array($this->kind, ['text', 'file', 'json'], true);
     }
 
     public function filterable(): bool
     {
-        return ! in_array($this->kind, ['text', 'file'], true);
+        return ! in_array($this->kind, ['text', 'file', 'json'], true);
     }
 
     public function searchable(): bool

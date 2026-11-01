@@ -164,7 +164,7 @@ final class ActionController
             if ($field->country !== null && is_string($sent[$key] ?? null) && ($number = Phone::normalise($sent[$key], $field->country)) !== null) {
                 $sent[$key] = $number;
             }
-            if (in_array($field->format, ['email', 'color'], true) && is_string($sent[$key] ?? null)) {
+            if (in_array($field->format, Field::KEPT_IN_ONE_FORM, true) && is_string($sent[$key] ?? null)) {
                 $sent[$key] = Field::inOneForm($field->format, $sent[$key]);
             }
         }

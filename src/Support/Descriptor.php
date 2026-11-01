@@ -115,7 +115,7 @@ final class Descriptor
                     throw new InvalidArgumentException("{$name}: \"unique\" names \"".(is_string($field) ? $field : json_encode($field))."\", which is not one of its fields.");
                 }
                 // A database can't index a long text or say two files are the same.
-                if (in_array($fields[$field]->kind, ['text', 'file'], true)) {
+                if (in_array($fields[$field]->kind, ['text', 'file', 'json'], true)) {
                     throw new InvalidArgumentException("{$name}: \"{$field}\" is a {$fields[$field]->kind} field, which can't be part of a unique set.");
                 }
             }

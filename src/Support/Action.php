@@ -149,7 +149,11 @@ final class Action
         foreach ($this->fields as $field) {
             $rules[$field->name] = [$field->required ? 'required' : 'nullable', ...match (true) {
                 $field->format === 'email' => ['email', 'max:'.($field->maxLength ?? 255)],
-                $field->format === 'url' => ['url', 'max:'.($field->maxLength ?? 2048)],
+                $field->format === 'url' => ['url:http,https', 'max:'.($field->maxLength ?? 2048)],
+                $field->format === 'domain' => ['string', 'regex:'.Field::DOMAIN_PATTERN],
+                $field->format === 'country' => ['string', Rule::in(Countries::CODES)],
+                $field->format === 'time' => ['string', 'regex:'.Field::TIME_PATTERN],
+                $field->kind === 'json' => ['array'],
                 $field->format === 'tel' && $field->country !== null => ['string', 'max:'.($field->maxLength ?? 32), new \Nevela\Laravel\Rules\Phone($field->country)],
                 $field->format === 'tel' => ['string', 'max:'.($field->maxLength ?? 32)],
                 $field->format === 'slug' => ['string', 'alpha_dash', 'max:'.($field->maxLength ?? 255)],
@@ -157,8 +161,10 @@ final class Action
                 $field->kind === 'string' => ['string', 'max:'.($field->maxLength ?? 255)],
                 $field->kind === 'text' => ['string', 'max:'.($field->maxLength ?? 65535)],
                 $field->kind === 'int' && $field->format === 'percent' => ['integer', 'between:0,100'],
+                $field->kind === 'int' && $field->format === 'rating' => ['integer', 'between:1,'.$field->mostStars()],
                 $field->kind === 'int' => ['integer'],
                 $field->kind === 'float' && $field->format === 'percent' => ['numeric', 'between:0,100'],
+                $field->kind === 'float' && $field->format === 'rating' => ['numeric', 'between:1,'.$field->mostStars()],
                 $field->kind === 'float' => ['numeric'],
                 $field->kind === 'boolean' => ['boolean'],
                 $field->kind === 'date' => ['date_format:Y-m-d'],
