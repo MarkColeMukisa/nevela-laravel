@@ -34,7 +34,11 @@ final class FakeTest extends TestCase
 
     public function test_unique_fields_never_repeat_and_required_fields_are_never_empty(): void
     {
-        $contact = Descriptor::fromSpec('Contact', 'name:string, email:email!, code:string!, slug:slug!, rank:int!, city:string?, phone:tel!, bio:text!, seenAt:datetime!, born:date!, tint:color!, title:string!');
+        $contact = Descriptor::fromSpec('Contact', 'name:string, email:email!, code:string!, slug:slug!, rank:int!, city:string?, phone:tel!, bio:text, seenAt:datetime!, born:date!, tint:color!, title:string!');
+        // The command no longer writes a unique text, and a descriptor from before may still say so.
+        $described = $contact->toArray();
+        $described['fields']['bio']['unique'] = true;
+        $contact = Descriptor::fromArray($described);
 
         $seen = ['email' => [], 'code' => [], 'slug' => [], 'rank' => [], 'phone' => [], 'bio' => [], 'seen_at' => [], 'born' => [], 'tint' => [], 'title' => []];
         for ($n = 1; $n <= 2000; $n++) {

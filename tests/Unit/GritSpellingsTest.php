@@ -107,6 +107,29 @@ final class GritSpellingsTest extends TestCase
         Field::parse($written);
     }
 
+    /** @return iterable<string, array{string}> */
+    public static function uniqueTexts(): iterable
+    {
+        yield 'text' => ['body:text!'];
+        yield 'textarea' => ['body:textarea:unique'];
+        yield 'rich text' => ['body:richtext!'];
+        yield 'a text with a length' => ['body:text(100000)!'];
+    }
+
+    #[DataProvider('uniqueTexts')]
+    public function test_a_text_cannot_be_unique_because_mysql_cannot_index_one(string $written): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('body:string!');
+
+        Field::parse($written);
+    }
+
+    public function test_a_descriptor_that_already_says_so_is_still_read(): void
+    {
+        $this->assertTrue(Field::fromArray('body', ['kind' => 'text', 'unique' => true])->unique);
+    }
+
     public function test_what_a_type_does_take_still_works(): void
     {
         $this->assertSame(500, Field::parse('excerpt:string(500)')->maxLength);

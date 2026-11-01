@@ -375,6 +375,10 @@ final class Field
         if ($args !== '' && $maxLength === null) {
             throw new InvalidArgumentException("\"{$name}\" is a {$type}, and \"{$args}\" after it means nothing to one. Write {$name}:{$type}, with ! for unique and ? for optional.");
         }
+        // MySQL can't index a whole text column, so its migration would fail there.
+        if ($kind === 'text' && $unique) {
+            throw new InvalidArgumentException("\"{$name}\" is a {$type}, which can't be unique. Use a string, which can: {$name}:string!");
+        }
 
         return new self($name, $kind, $format, $required, $unique, maxLength: $maxLength);
     }
