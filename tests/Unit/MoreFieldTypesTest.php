@@ -154,6 +154,18 @@ final class MoreFieldTypesTest extends TestCase
         Field::parse($written);
     }
 
+    public function test_a_descriptor_can_not_give_one_a_length_either(): void
+    {
+        foreach (['domain', 'country', 'time'] as $format) {
+            try {
+                Field::fromArray('field', ['kind' => 'string', 'format' => $format, 'maxLength' => 10]);
+                $this->fail("{$format} took a length");
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('has a length of its own', $e->getMessage());
+            }
+        }
+    }
+
     public function test_a_field_is_seeded_by_its_format_before_its_name(): void
     {
         $place = Descriptor::fromSpec('Place', 'website:domain, emailDomain:domain, phoneLand:country, emailAt:time');

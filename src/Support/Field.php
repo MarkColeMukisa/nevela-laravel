@@ -114,6 +114,10 @@ final class Field
                 throw new InvalidArgumentException("Enum value \"{$option}\" on \"{$name}\" may only use letters, digits, _ and -.");
             }
         }
+        // Each is as long as it is, and a column cut shorter would refuse what its rule lets through.
+        if ($maxLength !== null && in_array($format, ['domain', 'country', 'time'], true)) {
+            throw new InvalidArgumentException("\"{$name}\" is a {$format}, which has a length of its own, so it can't be given one.");
+        }
         if ($kind === 'json' && $unique) {
             throw new InvalidArgumentException("\"{$name}\" is json, which can't be unique. Give what has to be unique a field of its own.");
         }
