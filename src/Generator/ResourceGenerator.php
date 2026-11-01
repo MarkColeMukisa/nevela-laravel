@@ -1175,7 +1175,7 @@ final class ResourceGenerator
         }
         $ruleLines = implode("\n", $rules);
         $columnMap = implode(', ', $columns);
-        $defaults = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => ".var_export($f->default, true), array_filter($d->fields, fn (Field $f) => $f->default !== null)));
+        $defaults = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => ".var_export($f->whenLeftOut(), true), array_filter($d->fields, fn (Field $f) => $f->whenLeftOut() !== null)));
         $defaultsBlock = $defaults === '' ? '' : <<<PHP
 
 
@@ -1323,7 +1323,7 @@ final class ResourceGenerator
         // A slug made from another field, a number and a copy may be left empty: they are filled in.
         $rules = [$f->alwaysRequired() && $f->from === null && $f->auto === null ? "'required'" : "'nullable'"];
         // With a default, leaving it out is saying "the usual". Sent, it is checked like any other.
-        if ($f->default !== null) {
+        if ($f->whenLeftOut() !== null) {
             array_unshift($rules, "'sometimes'");
         }
         // A length of the field's own takes the place of the usual one.
@@ -1661,7 +1661,7 @@ final class ResourceGenerator
                 'optionLabels' => $f->optionLabels !== [] ? $j($f->optionLabels) : null,
                 'maxLength' => $f->maxLength !== null ? (string) $f->maxLength : null,
                 'placeholder' => $f->auto !== null ? $j("Left empty: the next {$f->auto}- number") : null,
-                'default' => $f->default !== null ? $j($f->default) : null,
+                'default' => $f->whenLeftOut() !== null ? $j($f->whenLeftOut()) : null,
                 // What the migration does when the parent goes: an optional link is cleared.
                 'onDelete' => $f->kind === 'belongsTo' && ! $f->required ? '"set null"' : null,
                 // In the table or not. A picture is worth a column; Flare leaves files out, so it is said.

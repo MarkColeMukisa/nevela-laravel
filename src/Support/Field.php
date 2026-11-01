@@ -538,6 +538,16 @@ final class Field
     }
 
     /**
+     * What the field is when a create leaves it out: its default. A required yes/no has
+     * one without being given it, because leaving a switch alone is saying no. A unique
+     * one hasn't, for the reason a unique field can't be given a default.
+     */
+    public function whenLeftOut(): string|int|float|bool|null
+    {
+        return $this->default ?? ($this->kind === 'boolean' && $this->alwaysRequired() && ! $this->unique ? false : null);
+    }
+
+    /**
      * Whether the value of the field a conditional one depends on is one it applies for.
      * A yes/no comes back from some databases as 1 and 0, and from a form as "true". One
      * left empty is a no, as its column's default and the dashboard's switch have it.
