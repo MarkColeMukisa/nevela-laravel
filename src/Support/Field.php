@@ -539,11 +539,12 @@ final class Field
 
     /**
      * What the field is when a create leaves it out: its default. A required yes/no has
-     * one without being given it, because leaving a switch alone is saying no.
+     * one without being given it, because leaving a switch alone is saying no. A unique
+     * one hasn't, for the reason a unique field can't be given a default.
      */
     public function whenLeftOut(): string|int|float|bool|null
     {
-        return $this->default ?? ($this->kind === 'boolean' && $this->alwaysRequired() ? false : null);
+        return $this->default ?? ($this->kind === 'boolean' && $this->alwaysRequired() && ! $this->unique ? false : null);
     }
 
     /**

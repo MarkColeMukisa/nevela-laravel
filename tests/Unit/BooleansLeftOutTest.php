@@ -23,6 +23,16 @@ final class BooleansLeftOutTest extends TestCase
         $this->assertNull(Field::parse('sent:boolean if kind == once')->whenLeftOut());
     }
 
+    public function test_a_unique_one_is_still_required_as_a_unique_field_can_have_no_default(): void
+    {
+        $this->assertNull(Field::parse('flag:boolean!')->whenLeftOut());
+
+        $invoice = Descriptor::fromSpec('Invoice', 'number:string, flag:boolean!');
+        $rules = (new ResourceGenerator)->request($invoice, [$invoice]);
+        $this->assertStringContainsString("'flag' => ['required', 'boolean'", $rules);
+        $this->assertStringNotContainsString("'flag' => false", $rules);
+    }
+
     public function test_left_out_is_written_into_the_rules_and_the_form_and_not_the_descriptor(): void
     {
         $invoice = Descriptor::fromSpec('Invoice', 'number:string, sent:boolean');
