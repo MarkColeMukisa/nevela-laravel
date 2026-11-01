@@ -158,16 +158,16 @@ final class Field
                 throw new InvalidArgumentException("\"{$name}\" can't have a country: that is for a phone number ({$name}:tel({$country})).");
             }
             if (! Phone::known($country)) {
-                throw new InvalidArgumentException("\"{$country}\" on \"{$name}\" is not a country Nevela knows the numbers of. Use one of: ".implode(', ', array_keys(Phone::COUNTRIES)).", or tel alone for any country's.");
+                throw new InvalidArgumentException("\"{$country}\" on \"{$name}\" is not a country with phone numbers. Use its two-letter code in capitals, such as UG.");
             }
             // +256772123456 is how every number is kept, so the column has to hold one.
-            $kept = 1 + strlen(Phone::COUNTRIES[$country]['code']) + Phone::COUNTRIES[$country]['digits'];
-            if ($maxLength !== null && $maxLength < $kept) {
-                throw new InvalidArgumentException("\"{$name}\" can't have a length of {$maxLength}: its numbers are kept as {$kept} characters, such as ".Phone::normalise(Phone::COUNTRIES[$country]['example'], $country).'.');
+            $example = Phone::example($country);
+            if ($maxLength !== null && $maxLength < strlen($example)) {
+                throw new InvalidArgumentException("\"{$name}\" can't have a length of {$maxLength}: its numbers are kept as ".strlen($example)." characters, such as {$example}.");
             }
             // A default is saved without passing a request, so it is written the way numbers are kept.
             if ($default !== null && (! is_string($default) || Phone::normalise($default, $country) !== $default)) {
-                throw new InvalidArgumentException("The default of \"{$name}\" has to be a number of that country as it is kept, such as ".Phone::normalise(Phone::COUNTRIES[$country]['example'], $country).'.');
+                throw new InvalidArgumentException("The default of \"{$name}\" has to be a number of that country as it is kept, such as {$example}.");
             }
         }
         if ($list !== null && ! is_bool($list) && $list !== 'hidden') {

@@ -155,7 +155,7 @@ final class Action
                 $field->format === 'time' => ['string', 'regex:'.Field::TIME_PATTERN],
                 $field->kind === 'json' => ['array'],
                 $field->format === 'tel' && $field->country !== null => ['string', 'max:'.($field->maxLength ?? 32), new \Nevela\Laravel\Rules\Phone($field->country)],
-                $field->format === 'tel' => ['string', 'max:'.($field->maxLength ?? 32)],
+                $field->format === 'tel' => ['string', 'max:'.($field->maxLength ?? 32), new \Nevela\Laravel\Rules\Phone],
                 $field->format === 'slug' => ['string', 'alpha_dash', 'max:'.($field->maxLength ?? 255)],
                 $field->format === 'color' => ['string', 'regex:/^#[0-9a-fA-F]{6}$/'],
                 $field->kind === 'string' => ['string', 'max:'.($field->maxLength ?? 255)],

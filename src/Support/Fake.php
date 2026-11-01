@@ -261,9 +261,7 @@ final class Fake
             $field->format === 'url' || str_contains($name, 'website') || str_ends_with($name, 'url') => 'https://example.com/'.strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
             // Seeded straight into the table, so already in the one form a country's number is kept in.
             $field->country !== null => Phone::fake($field->country, $number, $field->unique),
-            $field->format === 'tel' || str_contains($name, 'phone') => $field->unique
-                ? '+256 7'.str_pad((string) $number, 10, '0', STR_PAD_LEFT)
-                : sprintf('+256 7%02d %03d %03d', mt_rand(0, 99), mt_rand(0, 999), mt_rand(0, 999)),
+            $field->format === 'tel' || str_contains($name, 'phone') => Phone::fake(null, $number, $field->unique),
             $field->format === 'slug' => strtolower(self::pick(self::ADJECTIVES).'-'.self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
             $field->format === 'color' => sprintf('#%06x', $field->unique ? $number % self::COLORS : mt_rand(0, 0xFFFFFF)),
             in_array($name, ['sku', 'code', 'reference', 'ref', 'number'], true) => strtoupper(substr(self::pick(self::NOUNS), 0, 3)).'-'.str_pad((string) $number, 6, '0', STR_PAD_LEFT),
@@ -279,7 +277,7 @@ final class Fake
 
         // Emails, URLs, slugs, codes and phone numbers end in the number already, and a colour
         // is derived from it; everything else gets it appended.
-        if ($field->unique && ! in_array($field->format, ['color', 'domain', 'country', 'time'], true) && ! preg_match('/'.$number.'(@|$)/', $value)) {
+        if ($field->unique && ! in_array($field->format, ['color', 'domain', 'country', 'time', 'tel'], true) && ! str_contains($name, 'phone') && ! preg_match('/'.$number.'(@|$)/', $value)) {
             $value .= " {$number}";
         }
 

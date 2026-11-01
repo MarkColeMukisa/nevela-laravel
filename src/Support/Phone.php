@@ -2,76 +2,148 @@
 
 namespace Nevela\Laravel\Support;
 
+use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumberFormat;
+use libphonenumber\PhoneNumberType;
+use libphonenumber\PhoneNumberUtil;
+
 /**
- * Phone numbers of one country, for a field written phone:tel(UG).
+ * Phone numbers, checked against libphonenumber: Google's record of how numbers look in
+ * each country, which the dashboard's check reads too.
  *
- * A number is taken the ways people write it there (0772 123456, 772123456, 256772123456,
- * +256 772 123 456) and kept the one way: +256772123456. A plain tel field takes any
- * country's number and is left as it was sent.
+ * A number is taken the ways people write it (0772 123456, 772123456, 256772123456,
+ * 00256 772 123 456, +256 772 123 456) and kept the one way: +256772123456.
+ *
+ * phone:tel(UG) takes that country's numbers only. phone:tel takes any country's, and reads
+ * one without a + as a number of NEVELA_PHONE_COUNTRY, if the app says.
  */
 final class Phone
 {
     /**
-     * The countries a field can be held to: the calling code, how many digits come after
-     * it, the 0 dialled before them at home, what a number there is called, and one
-     * written the local way.
+     * What a number of these countries is called, and how one is written there, for what
+     * is said about one that isn't. Any other country is named by its code.
      *
-     * @var array<string, array{code: string, digits: int, trunk: string, name: string, example: string}>
+     * @var array<string, array{name: string, example: string}>
      */
-    public const COUNTRIES = [
-        'UG' => ['code' => '256', 'digits' => 9, 'trunk' => '0', 'name' => 'Ugandan', 'example' => '0772 123456'],
-        'KE' => ['code' => '254', 'digits' => 9, 'trunk' => '0', 'name' => 'Kenyan', 'example' => '0712 345678'],
-        'TZ' => ['code' => '255', 'digits' => 9, 'trunk' => '0', 'name' => 'Tanzanian', 'example' => '0712 345678'],
-        'RW' => ['code' => '250', 'digits' => 9, 'trunk' => '0', 'name' => 'Rwandan', 'example' => '0788 123456'],
+    private const NAMED = [
+        'UG' => ['name' => 'Ugandan', 'example' => '0772 123456'],
+        'KE' => ['name' => 'Kenyan', 'example' => '0712 345678'],
+        'TZ' => ['name' => 'Tanzanian', 'example' => '0712 345678'],
+        'RW' => ['name' => 'Rwandan', 'example' => '0788 123456'],
+    ];
+
+    /**
+     * Where the seeder's numbers come from when any country's will do: a calling code, what
+     * starts a mobile number there, and how many digits follow. Each was measured: whatever
+     * digits follow, the number is real, which a shorter start such as France's 6 isn't.
+     *
+     * @var list<array{string, string, int}>
+     */
+    private const SEEDED = [
+        ['256', '77', 7], ['254', '71', 7], ['255', '71', 7], ['250', '78', 7], ['234', '803', 7],
+        ['233', '24', 7], ['27', '82', 7], ['44', '74', 8], ['49', '151', 8], ['33', '61', 7],
+        ['91', '98', 8], ['34', '6', 8], ['39', '33', 8], ['971', '50', 7], ['966', '50', 7],
+        ['20', '10', 8], ['212', '61', 7], ['31', '61', 7], ['61', '41', 7], ['65', '91', 6],
     ];
 
     public static function known(string $country): bool
     {
-        return isset(self::COUNTRIES[$country]);
-    }
-
-    /** The number as +256772123456, or null when it isn't one of that country's. */
-    public static function normalise(string $value, string $country): ?string
-    {
-        ['code' => $code, 'digits' => $digits, 'trunk' => $trunk] = self::COUNTRIES[$country];
-        // Spaces, dashes, dots and brackets are how it was written, not the number.
-        $number = (string) preg_replace('/[\s\-.()\x{00A0}]/u', '', $value);
-        $number = match (true) {
-            str_starts_with($number, '+') => str_starts_with($number, "+{$code}") ? substr($number, strlen($code) + 1) : null,
-            str_starts_with($number, "00{$code}") => substr($number, strlen($code) + 2),
-            str_starts_with($number, $code) && strlen($number) === strlen($code) + $digits => substr($number, strlen($code)),
-            $trunk !== '' && str_starts_with($number, $trunk) && strlen($number) === $digits + strlen($trunk) => substr($number, strlen($trunk)),
-            default => $number,
-        };
-        if ($number === null || ! ctype_digit($number) || strlen($number) !== $digits || $number[0] === '0') {
-            return null;
-        }
-
-        return "+{$code}{$number}";
-    }
-
-    /** What to say when a number isn't one: "Enter a Ugandan number, such as 0772 123456 or +256 772 123456." */
-    public static function message(string $country): string
-    {
-        ['code' => $code, 'trunk' => $trunk, 'name' => $name, 'example' => $example] = self::COUNTRIES[$country];
-        $international = "+{$code} ".substr($example, strlen($trunk));
-
-        return "Enter a {$name} number, such as {$example} or {$international}.";
+        return in_array($country, PhoneNumberUtil::getInstance()->getSupportedRegions(), true);
     }
 
     /**
-     * A made-up number of that country, for the seeder: the nth of them when it has to be
-     * unique, or any. It starts as the example does, so it reads as one from there.
+     * The number as +256772123456, or null when it isn't one.
+     *
+     * @param  string|null  $country  It has to be a number of this country.
+     * @param  string|null  $assume  Otherwise, where a number without a + is from. With neither, it needs a +.
      */
-    public static function fake(string $country, int $number, bool $unique): string
+    public static function normalise(string $value, ?string $country = null, ?string $assume = null): ?string
     {
-        ['code' => $code, 'digits' => $digits, 'trunk' => $trunk, 'example' => $example] = self::COUNTRIES[$country];
-        $lead = substr(str_replace(' ', '', $example), strlen($trunk), 2);
-        $rest = $digits - strlen($lead);
-        $tail = $unique
-            ? str_pad((string) ($number % 10 ** $rest), $rest, '0', STR_PAD_LEFT)
-            : implode('', array_map(fn () => (string) mt_rand(0, 9), range(1, $rest)));
+        $phones = PhoneNumberUtil::getInstance();
+        // Spaces, dashes, dots and brackets are how it was written, not the number, and 00 is
+        // how a + is dialled in most of the world.
+        $number = (string) preg_replace('/[\s\-.()\x{00A0}]/u', '', $value);
+        if (str_starts_with($number, '00')) {
+            $number = '+'.substr($number, 2);
+        }
+        try {
+            $parsed = $phones->parse($number, $country ?? $assume);
+        } catch (NumberParseException) {
+            return null;
+        }
+        // An extension has nowhere to go in +256772123456, and would be lost without a word.
+        if ($parsed->hasExtension() || ! $phones->isValidNumber($parsed) || ($country !== null && $phones->getRegionCodeForNumber($parsed) !== $country)) {
+            return null;
+        }
 
-        return "+{$code}{$lead}{$tail}";
+        return $phones->format($parsed, PhoneNumberFormat::E164);
+    }
+
+    /** One such number as it is kept, to show what is meant: +256772123456. */
+    public static function example(string $country): string
+    {
+        return isset(self::NAMED[$country])
+            ? (string) self::normalise(self::NAMED[$country]['example'], $country)
+            : self::written($country, PhoneNumberFormat::E164);
+    }
+
+    /**
+     * What to say when a number isn't one: "Enter a Ugandan number, such as 0772 123456 or +256 772 123456."
+     *
+     * @param  string|null  $assume  For a field of any country: where a number without a + is from.
+     */
+    public static function message(?string $country = null, ?string $assume = null): string
+    {
+        if ($country === null && $assume === null) {
+            return 'Enter a valid phone number, with its country code, such as '.self::written('UG', PhoneNumberFormat::INTERNATIONAL).'.';
+        }
+        $from = (string) ($country ?? $assume);
+        $local = self::NAMED[$from]['example'] ?? self::written($from, PhoneNumberFormat::NATIONAL);
+        $international = PhoneNumberUtil::getInstance()->format(PhoneNumberUtil::getInstance()->parse((string) self::normalise($local, $from)), PhoneNumberFormat::INTERNATIONAL);
+        // +256 772 123456 is how it is said here, whichever way the library spaces it.
+        if (isset(self::NAMED[$from])) {
+            $international = '+'.PhoneNumberUtil::getInstance()->getCountryCodeForRegion($from).' '.substr($local, 1);
+        }
+        if ($country === null) {
+            return "Enter a valid phone number, such as {$local} or {$international}. One from another country starts with its code.";
+        }
+        $what = isset(self::NAMED[$from]) ? 'a '.self::NAMED[$from]['name'].' number' : "a number from {$from}";
+
+        return "Enter {$what}, such as {$local} or {$international}.";
+    }
+
+    /**
+     * A made-up number that is a real one, for the seeder: of that country or, with none,
+     * from around the world. The nth of them when it has to be unique, or any.
+     */
+    public static function fake(?string $country, int $number, bool $unique): string
+    {
+        if ($country === null) {
+            [$code, $lead, $digits] = self::SEEDED[$number % count(self::SEEDED)];
+
+            return "+{$code}{$lead}".self::tail(intdiv($number, count(self::SEEDED)), $digits, $unique);
+        }
+        $example = self::example($country);
+        $code = (string) PhoneNumberUtil::getInstance()->getCountryCodeForRegion($country);
+        $national = substr($example, strlen($code) + 1);
+        // It starts as the example does, so it reads as one from there.
+        $lead = substr($national, 0, 2);
+
+        return "+{$code}{$lead}".self::tail($number, strlen($national) - 2, $unique);
+    }
+
+    private static function tail(int $number, int $digits, bool $unique): string
+    {
+        return $unique
+            ? str_pad((string) ($number % 10 ** $digits), $digits, '0', STR_PAD_LEFT)
+            : implode('', array_map(fn () => (string) mt_rand(0, 9), range(1, $digits)));
+    }
+
+    private static function written(string $country, PhoneNumberFormat|int $format): string
+    {
+        $phones = PhoneNumberUtil::getInstance();
+        $example = $phones->getExampleNumberForType($country, PhoneNumberType::MOBILE) ?? $phones->getExampleNumber($country);
+
+        return $example === null ? '' : $phones->format($example, $format);
     }
 }

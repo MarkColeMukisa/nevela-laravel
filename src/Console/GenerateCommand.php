@@ -138,7 +138,7 @@ final class GenerateCommand extends Command
     {
         try {
             // A money field that names no currency is shown in the app's.
-            $generator = new ResourceGenerator(config('nevela.currency') ?: null);
+            $generator = new ResourceGenerator(config('nevela.currency') ?: null, config('nevela.phone_country') ?: null);
         } catch (InvalidArgumentException $e) {
             $command->components->error($e->getMessage());
 

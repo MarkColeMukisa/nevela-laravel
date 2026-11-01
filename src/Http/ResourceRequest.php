@@ -11,6 +11,7 @@ use Illuminate\Validation\Rules\Unique;
 use Illuminate\Validation\Validator;
 use Nevela\Laravel\Access\Visibility;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Rules\Phone as PhoneRule;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Html;
 use Nevela\Laravel\Support\Phone;
@@ -376,7 +377,7 @@ abstract class ResourceRequest extends FormRequest
             }
         }
         foreach ($this->phones() as $field => $country) {
-            if (is_string($input[$field] ?? null) && ($number = Phone::normalise($input[$field], $country)) !== null) {
+            if (is_string($input[$field] ?? null) && ($number = Phone::normalise($input[$field], $country, PhoneRule::assumed())) !== null) {
                 $input[$field] = $number;
             }
         }

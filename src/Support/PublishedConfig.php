@@ -53,6 +53,7 @@ final class PublishedConfig
         'auth.social' => '0.10.0',
         'currency' => '0.11.0',
         'auth.session' => '0.12.0',
+        'phone_country' => '0.29.0',
     ];
 
     /**

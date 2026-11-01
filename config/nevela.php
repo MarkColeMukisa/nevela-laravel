@@ -176,6 +176,15 @@ return [
     */
     'currency' => env('NEVELA_CURRENCY'),
 
+    /*
+    | Where a phone number without a + is from, as a two-letter code: UG. Set, 0772 123456 is
+    | read as a Ugandan number in a `tel` field, and the dashboard's picker starts at Uganda.
+    | Unset, a number needs its + and the picker starts at the viewer's own country. A number
+    | that starts with + is read as what it says either way. Run `php nevela generate` after
+    | changing it.
+    */
+    'phone_country' => env('NEVELA_PHONE_COUNTRY'),
+
     /* List defaults, matching Flare's client. */
     'per_page' => 25,
     'max_per_page' => 100,

@@ -64,7 +64,7 @@ final class PhoneTest extends TestCase
             Field::parse('phone:tel(ZZ)');
             $this->fail('ZZ was taken');
         } catch (InvalidArgumentException $e) {
-            $this->assertStringContainsString('Use one of: UG, KE, TZ, RW, or tel alone', $e->getMessage());
+            $this->assertStringContainsString('is not a country with phone numbers', $e->getMessage());
         }
         $this->expectExceptionMessage("can't have a country");
         Field::fromArray('email', ['kind' => 'string', 'format' => 'email', 'country' => 'UG']);
@@ -118,13 +118,13 @@ final class PhoneTest extends TestCase
 
         $request = $generator->request($client);
         $this->assertStringContainsString("'phone' => ['required', 'string', 'max:32', new \\Nevela\\Laravel\\Rules\\Phone('UG')],", $request);
-        $this->assertStringContainsString("'fax' => ['nullable', 'string', 'max:32'],", $request);
-        $this->assertStringContainsString("return ['phone' => 'UG'];", $request);
+        $this->assertStringContainsString("'fax' => ['nullable', 'string', 'max:32', new \\Nevela\\Laravel\\Rules\\Phone],", $request);
+        $this->assertStringContainsString("return ['phone' => 'UG', 'fax' => NULL];", $request);
         $this->assertStringContainsString('phone: field.tel({ ...({ country: "UG" } as {}) }),', $generator->typescript($client));
         $this->assertStringContainsString('fax: field.tel({ required: false }),', $generator->typescript($client));
 
         // A resource without one has the request it always had.
-        $this->assertStringNotContainsString('function phones()', $generator->request(Descriptor::fromSpec('Note', 'title:string, phone:tel')));
+        $this->assertStringNotContainsString('function phones()', $generator->request(Descriptor::fromSpec('Note', 'title:string')));
     }
 
     public function test_an_action_asking_for_a_number_checks_it_the_same_way(): void

@@ -77,7 +77,7 @@ final class FieldCommand extends Command
         $described = Nevela::resource($resource->name);
         $columns = array_values(array_filter($fields, fn (Field $field) => ! self::hasColumn($resource->table, $field->column())));
         if ($madeAlready && $columns !== []) {
-            $file = (new ResourceGenerator(config('nevela.currency') ?: null))->addFieldsMigrationFile($described, $columns, self::nextTimestamp(), $all);
+            $file = (new ResourceGenerator(config('nevela.currency') ?: null, config('nevela.phone_country') ?: null))->addFieldsMigrationFile($described, $columns, self::nextTimestamp(), $all);
             (new Writer(['api' => base_path()]))->write([$file]);
             $this->components->twoColumnDetail($file->path, '<fg=green>created</>');
         }

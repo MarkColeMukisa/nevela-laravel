@@ -7,6 +7,7 @@ use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
 use Nevela\Laravel\Support\Naming;
 use Nevela\Laravel\Support\Numbering;
+use Nevela\Laravel\Support\Phone;
 use Nevela\Laravel\Support\PublicAccess;
 
 /**
@@ -21,8 +22,11 @@ final class ResourceGenerator
     /**
      * @param  string|null  $currency  The app's currency (nevela.currency), for a money field that names none
      */
-    public function __construct(private readonly ?string $currency = null)
+    public function __construct(private readonly ?string $currency = null, private readonly ?string $phoneCountry = null)
     {
+        if ($phoneCountry !== null && ! Phone::known($phoneCountry)) {
+            throw new \InvalidArgumentException("NEVELA_PHONE_COUNTRY is \"{$phoneCountry}\", which is not a country with phone numbers. Use its two-letter code in capitals, such as UG.");
+        }
         if ($currency !== null && ! Field::isCurrency($currency)) {
             throw new \InvalidArgumentException("NEVELA_CURRENCY is \"{$currency}\", which is not a currency. Use its three-letter ISO 4217 code, in capitals: UGX, USD, EUR.");
         }
@@ -1222,11 +1226,11 @@ final class ResourceGenerator
                 return [{$rich}];
             }
         PHP;
-        $phones = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => '{$f->country}'", array_filter($d->fields, fn (Field $f) => $f->country !== null)));
+        $phones = implode(', ', array_map(fn (Field $f) => "'{$f->name}' => ".var_export($f->country, true), array_filter($d->fields, fn (Field $f) => $f->format === 'tel')));
         $richBlock .= $phones === '' ? '' : <<<PHP
 
 
-            /** Phone fields held to one country. A number is put in the form it is kept in, +256772123456, before it is checked. */
+            /** Phone fields, and the country each is held to, if any. A number is put in the form it is kept in, +256772123456, before it is checked. */
             protected function phones(): array
             {
                 return [{$phones}];
@@ -1354,7 +1358,7 @@ final class ResourceGenerator
             $f->format === 'email' => ["'email'", $max(255)],
             $f->format === 'url' => ["'url:http,https'", $max(2048)],
             $f->format === 'tel' && $f->country !== null => ["'string'", $max(32), "new \\Nevela\\Laravel\\Rules\\Phone('{$f->country}')"],
-            $f->format === 'tel' => ["'string'", $max(32)],
+            $f->format === 'tel' => ["'string'", $max(32), 'new \\Nevela\\Laravel\\Rules\\Phone'],
             $f->format === 'slug' => ["'string'", "'alpha_dash'", $max(255)],
             $f->format === 'color' => ["'string'", "'regex:/^#[0-9a-fA-F]{6}$/'"],
             $f->kind === 'string' => ["'string'", $max(255)],
@@ -1704,6 +1708,9 @@ final class ResourceGenerator
             if ($f->country !== null) {
                 // The dashboard's phone field stays on that country rather than offering every one.
                 $parts[] = '...({ country: '.$j($f->country).' } as {})';
+            } elseif ($f->format === 'tel' && $this->phoneCountry !== null) {
+                // And this one starts on the app's.
+                $parts[] = '...({ startsAt: '.$j($this->phoneCountry).' } as {})';
             }
             if ($f->conditional()) {
                 // Shown in the form only where it applies, and required there if it is required at all.

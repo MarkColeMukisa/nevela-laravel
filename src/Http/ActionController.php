@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Rules\Phone as PhoneRule;
 use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
@@ -159,9 +160,9 @@ final class ActionController
     {
         $sent = $request->input('input', []);
         $sent = is_array($sent) ? $sent : [];
-        // A number held to one country is checked, and handed on, in the one form it is kept in.
+        // A number is checked, and handed on, in the one form it is kept in.
         foreach ($action->fields as $key => $field) {
-            if ($field->country !== null && is_string($sent[$key] ?? null) && ($number = Phone::normalise($sent[$key], $field->country)) !== null) {
+            if ($field->format === 'tel' && is_string($sent[$key] ?? null) && ($number = Phone::normalise($sent[$key], $field->country, PhoneRule::assumed())) !== null) {
                 $sent[$key] = $number;
             }
             if (in_array($field->format, Field::KEPT_IN_ONE_FORM, true) && is_string($sent[$key] ?? null)) {

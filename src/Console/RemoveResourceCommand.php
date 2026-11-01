@@ -49,7 +49,7 @@ final class RemoveResourceCommand extends Command
             $roots['web'] = rtrim((string) realpath($web), '/\\');
         }
         $descriptorFile = rtrim((string) config('nevela.descriptors_path'), '/\\').DIRECTORY_SEPARATOR.Naming::kebab($resource->name).'.json';
-        $plan = Removal::plan($resource, $all, $roots, $descriptorFile, new ResourceGenerator(config('nevela.currency') ?: null));
+        $plan = Removal::plan($resource, $all, $roots, $descriptorFile, new ResourceGenerator(config('nevela.currency') ?: null, config('nevela.phone_country') ?: null));
         $force = (bool) $this->option('force');
         $withYours = (bool) $this->option('with-yours');
 
