@@ -405,7 +405,7 @@ final class Field
             return new self($name, $kind, $format, $required, $unique, max: (int) $args);
         }
         // excerpt:string(500): a length of its own.
-        $maxLength = in_array($kind, ['string', 'text'], true) && $format !== 'color' && ctype_digit($args) ? (int) $args : null;
+        $maxLength = in_array($kind, ['string', 'text'], true) && ! in_array($format, ['color', 'domain', 'country', 'time'], true) && ctype_digit($args) ? (int) $args : null;
         // Said rather than dropped: someone who wrote it meant something by it.
         if ($args !== '' && $maxLength === null) {
             throw new InvalidArgumentException("\"{$name}\" is a {$type}, and \"{$args}\" after it means nothing to one. Write {$name}:{$type}, with ! for unique and ? for optional.");
@@ -602,7 +602,7 @@ final class Field
             'color' => mb_strtolower((string) preg_replace('/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/', '#$1$1$2$2$3$3', $value)),
             'domain' => self::host($value),
             'country' => strtoupper($value),
-            'time' => preg_match('/^(\d{1,2}):(\d{2})(:\d{2})?$/', $value, $time) ? str_pad($time[1], 2, '0', STR_PAD_LEFT).':'.$time[2] : $value,
+            'time' => preg_match('/^(\d{1,2}):(\d{2})(:[0-5]\d)?$/', $value, $time) ? str_pad($time[1], 2, '0', STR_PAD_LEFT).':'.$time[2] : $value,
             default => mb_strtolower($value),
         };
     }

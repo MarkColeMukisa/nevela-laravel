@@ -23,7 +23,17 @@ final class MoreFieldTypesTest extends TestCase
         yield 'with someone in it' => ['https://ada:secret@example.com/', 'example.com'];
         yield 'with a dot at the end' => ['example.com.', 'example.com'];
         yield 'a subdomain' => ['shop.example.co.ug', 'shop.example.co.ug'];
-        yield 'international' => ['münchen.de', 'xn--mnchen-3ya.de'];
+    }
+
+    public function test_an_international_domain_is_kept_as_punycode_where_php_can_write_it(): void
+    {
+        if (! function_exists('idn_to_ascii')) {
+            $this->assertSame('münchen.de', Field::inOneForm('domain', 'münchen.de'));
+            $this->assertSame(0, preg_match(Field::DOMAIN_PATTERN, 'münchen.de'), 'and refused, rather than kept as it is');
+
+            return;
+        }
+        $this->assertSame('xn--mnchen-3ya.de', Field::inOneForm('domain', 'MÜNCHEN.de'));
     }
 
     #[DataProvider('domains')]
@@ -47,7 +57,7 @@ final class MoreFieldTypesTest extends TestCase
         $this->assertSame('09:05', Field::inOneForm('time', '9:05'));
         $this->assertSame('09:05', Field::inOneForm('time', '09:05:30'));
         $this->assertSame('23:59', Field::inOneForm('time', '23:59'));
-        foreach (['24:00', '9:60', 'noon', '9'] as $bad) {
+        foreach (['24:00', '9:60', 'noon', '9', '09:05:99', '09:05:60'] as $bad) {
             $this->assertSame(0, preg_match(Field::TIME_PATTERN, Field::inOneForm('time', $bad)), "{$bad} passed");
         }
     }
@@ -121,6 +131,40 @@ final class MoreFieldTypesTest extends TestCase
         $this->assertStringContainsString('land: field.country(', $typescript);
         $this->assertMatchesRegularExpression('/opens: field\.string\(\{.*time: true/', $typescript);
         $this->assertStringContainsString('extra: field.json(', $typescript);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function lengths(): iterable
+    {
+        yield 'a domain' => ['site:domain(10)'];
+        yield 'a country' => ['land:country(3)'];
+        yield 'a time' => ['opens:time(3)'];
+    }
+
+    #[DataProvider('lengths')]
+    public function test_a_length_means_nothing_to_these_and_is_refused(string $written): void
+    {
+        if ($written === 'land:country(3)') {
+            // "3" is no country, which is how a country reads what is in its brackets.
+            $this->expectExceptionMessage('"3" isn\'t one');
+        } else {
+            $this->expectExceptionMessage('means nothing to one');
+        }
+
+        Field::parse($written);
+    }
+
+    public function test_a_field_is_seeded_by_its_format_before_its_name(): void
+    {
+        $place = Descriptor::fromSpec('Place', 'website:domain, emailDomain:domain, phoneLand:country, emailAt:time');
+
+        foreach (range(1, 20) as $n) {
+            $row = Fake::row($place, $n);
+            $this->assertSame(1, preg_match(Field::DOMAIN_PATTERN, $row['website']), $row['website']);
+            $this->assertSame(1, preg_match(Field::DOMAIN_PATTERN, $row['email_domain']), $row['email_domain']);
+            $this->assertContains($row['phone_land'], Countries::CODES);
+            $this->assertSame(1, preg_match(Field::TIME_PATTERN, $row['email_at']), $row['email_at']);
+        }
     }
 
     public function test_seeded_values_are_what_their_rules_ask_for_and_unique_ones_do_not_repeat(): void

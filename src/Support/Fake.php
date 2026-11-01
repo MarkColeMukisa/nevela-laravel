@@ -252,6 +252,10 @@ final class Fake
             return Numbering::format($field->auto, $number);
         }
         $value = match (true) {
+            $field->format === 'domain' => strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : '').'.example.com',
+            $field->format === 'country' => $field->unique ? Countries::CODES[$number % count(Countries::CODES)] : self::pick(Countries::CODES),
+            // Working hours, on the quarter, as times people set are.
+            $field->format === 'time' => $field->unique ? sprintf('%02d:%02d', intdiv($number % 1440, 60), $number % 60) : sprintf('%02d:%02d', mt_rand(8, 17), mt_rand(0, 3) * 15),
             // Always numbered: two people called Ada Okafor must not share an address.
             $field->format === 'email' || str_contains($name, 'email') => strtolower("{$first}.{$last}{$number}@example.com"),
             $field->format === 'url' || str_contains($name, 'website') || str_ends_with($name, 'url') => 'https://example.com/'.strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
@@ -262,10 +266,6 @@ final class Fake
                 : sprintf('+256 7%02d %03d %03d', mt_rand(0, 99), mt_rand(0, 999), mt_rand(0, 999)),
             $field->format === 'slug' => strtolower(self::pick(self::ADJECTIVES).'-'.self::pick(self::NOUNS)).($field->unique ? "-{$number}" : ''),
             $field->format === 'color' => sprintf('#%06x', $field->unique ? $number % self::COLORS : mt_rand(0, 0xFFFFFF)),
-            $field->format === 'domain' => strtolower(self::pick(self::NOUNS)).($field->unique ? "-{$number}" : '').'.example.com',
-            $field->format === 'country' => $field->unique ? Countries::CODES[$number % count(Countries::CODES)] : self::pick(Countries::CODES),
-            // Working hours, on the quarter, as times people set are.
-            $field->format === 'time' => $field->unique ? sprintf('%02d:%02d', intdiv($number % 1440, 60), $number % 60) : sprintf('%02d:%02d', mt_rand(8, 17), mt_rand(0, 3) * 15),
             in_array($name, ['sku', 'code', 'reference', 'ref', 'number'], true) => strtoupper(substr(self::pick(self::NOUNS), 0, 3)).'-'.str_pad((string) $number, 6, '0', STR_PAD_LEFT),
             $name === 'firstname' => $first,
             $name === 'lastname' => $last,
