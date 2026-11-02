@@ -33,8 +33,11 @@ final class Numbering
     /**
      * Speak for the next numbers: the ones after what this returns are the caller's, and
      * are given to nobody else.
+     *
+     * @param  bool  $look  Whether to look through the table for a higher number than the one kept. Someone asking again for more, who
+     *                      has just looked, can leave it out: on a table of a million it is the slowest part of a batch of a seed.
      */
-    public static function reserve(string $table, string $column, string $prefix, int $count = 1): int
+    public static function reserve(string $table, string $column, string $prefix, int $count = 1, bool $look = true): int
     {
         // Upgraded and not yet migrated: as it was before there was a table for this.
         if (! SchemaFacts::hasTable(self::TABLE)) {
@@ -42,12 +45,12 @@ final class Numbering
         }
         $name = "{$table}.{$column}.{$prefix}";
 
-        return DB::transaction(function () use ($table, $column, $prefix, $name, $count): int {
+        return DB::transaction(function () use ($table, $column, $prefix, $name, $count, $look): int {
             // A write first, even one that changes nothing: SQLite has no row locks, and
             // this is what makes the others wait there.
             DB::table(self::TABLE)->insertOrIgnore(['name' => $name, 'last' => 0]);
             $last = (int) DB::table(self::TABLE)->where('name', $name)->lockForUpdate()->value('last');
-            $before = max($last, self::highest($table, $column, $prefix));
+            $before = $look ? max($last, self::highest($table, $column, $prefix)) : $last;
             DB::table(self::TABLE)->where('name', $name)->update(['last' => $before + $count]);
 
             return $before;

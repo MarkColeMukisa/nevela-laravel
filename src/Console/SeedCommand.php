@@ -20,7 +20,7 @@ final class SeedCommand extends Command
 {
     protected $signature = 'nevela:seed
         {name : The resource to fill, e.g. Product}
-        {--count=1000 : How many records to create}
+        {--count=1000 : How many records the table should hold. Seeds what is missing, and can be stopped and run again}
         {--chunk=500 : Rows per insert statement}
         {--fresh : Delete the resource\'s existing records first}';
 
@@ -32,6 +32,9 @@ final class SeedCommand extends Command
     private const BLOCKS = 400;
 
     private const ATTEMPTS = 5;
+
+    /** How many rows are saved at a time. A run stopped partway keeps what it saved, and at most this many are lost. */
+    private const BATCH = 5000;
 
     /** The most records already there whose values for fields that go together are read, to keep new ones apart from them. */
     private const MOST_TAKEN = 200_000;
@@ -61,7 +64,17 @@ final class SeedCommand extends Command
         $chunk = min($chunk, max(1, intdiv(30_000, count($resource->fields) + 3)));
         $fresh = (bool) $this->option('fresh');
 
+        // What the table holds, the trash's included, is what new values have to stay apart from.
+        // What it should hold is counted as the list counts: without the trash.
         $existing = $fresh ? 0 : (int) DB::table($resource->table)->count();
+        $listed = $fresh ? 0 : self::listed($resource);
+        if ($listed >= $count) {
+            $this->components->info(number_format($listed)." {$resource->pluralLabel} are there, and you asked for ".number_format($count).'. Nothing to seed.');
+
+            return self::SUCCESS;
+        }
+        $wanted = $count;
+        $count -= $listed;
         foreach ($resource->fields as $field) {
             $capacity = Fake::capacity($field);
             if ($capacity !== null && $existing + $count > $capacity) {
@@ -115,29 +128,42 @@ final class SeedCommand extends Command
             return self::FAILURE;
         }
         $removed = 0;
+        $done = 0;
         $bar = $this->output->createProgressBar($count);
+        // Unique fields are numbered from one more than the table holds. Numbers from an earlier
+        // run can be higher than that; then an insert fails, its batch rolls back and a block of
+        // MAX_COUNT is picked at random, as a run is at most that long. Two runs only meet if
+        // they pick the same block. An empty table starts at 1: ada.okafor12@example.com.
+        $offset = $existing;
+        $taken = $this->taken($resource, $fresh);
+        // Only the first batch looks through the table for the highest number. The next go on from it.
+        $look = true;
         try {
-            for ($attempt = 1; ; $attempt++) {
-                // Unique fields are numbered from a block of MAX_COUNT picked per run (a run is at
-                // most that long). Two runs only meet if they pick the same block; then the insert
-                // fails, the transaction rolls back and another block is picked. An empty table
-                // has nothing to meet, so it starts at 1: ada.okafor12@example.com, not 1705000012.
-                $offset = ($fresh || $existing === 0) && $attempt === 1 ? 0 : mt_rand(0, self::BLOCKS - 1) * self::MAX_COUNT;
-                $bar->start();
+            for ($attempt = 1; $done < $count;) {
+                // --fresh is all or nothing: until it finishes, the records it replaces are still there.
+                $batch = $fresh ? $count : min(self::BATCH, $count - $done);
+                $bar->setProgress($done);
                 try {
-                    $removed = DB::transaction(fn () => $this->fill($resource, $count, $chunk, $offset, $fresh, $bar, $pools));
-                    break;
+                    $removed += DB::transaction(fn () => $this->fill($resource, $batch, $chunk, $offset + $done, $fresh, $bar, $pools, $taken, $look));
+                    $done += $batch;
+                    $look = false;
                 } catch (UniqueConstraintViolationException $e) {
                     if ($attempt === self::ATTEMPTS) {
                         throw $e;
                     }
+                    $attempt++;
+                    $look = true;
+                    $offset = mt_rand(0, self::BLOCKS - 1) * self::MAX_COUNT - $done;
                 }
             }
             $bar->finish();
             $this->newLine(2);
         } catch (Throwable $e) {
             $this->newLine(2);
-            $this->components->error("Seeding {$resource->pluralLabel} failed, and the table is as it was: ".Str::limit($e->getMessage(), 300));
+            $kept = $fresh || $done === 0
+                ? 'and the table is as it was'
+                : 'after '.number_format($done).', which are saved. Run the same command again to carry on';
+            $this->components->error("Seeding {$resource->pluralLabel} failed, {$kept}: ".Str::limit($e->getMessage(), 300));
 
             return self::FAILURE;
         }
@@ -149,9 +175,35 @@ final class SeedCommand extends Command
         $time = $seconds < 1 ? round($seconds * 1000).' ms' : number_format($seconds, 2).' s';
         $rate = number_format($count / max($seconds, 0.001));
         $this->components->info('Seeded '.number_format($count)." {$resource->pluralLabel} in {$time} ({$rate} rows/s).");
-        $this->components->twoColumnDetail("{$resource->pluralLabel} in the database", number_format(DB::table($resource->table)->count()));
+        $this->components->twoColumnDetail("{$resource->pluralLabel} in the database", number_format(self::listed($resource)).($wanted === self::listed($resource) ? '' : " of {$wanted}"));
 
         return self::SUCCESS;
+    }
+
+    /** How many records the list shows: those not in the trash. */
+    private static function listed(Descriptor $resource): int
+    {
+        $query = DB::table($resource->table);
+
+        return (int) (SchemaFacts::hasColumn($resource->table, 'deleted_at') ? $query->whereNull('deleted_at') : $query)->count();
+    }
+
+    /**
+     * What the records there already have, for each set of fields that go together, the trash's included.
+     *
+     * @return array<int, array<string, true>>
+     */
+    private function taken(Descriptor $resource, bool $fresh): array
+    {
+        $taken = [];
+        foreach ($fresh ? [] : $resource->unique as $index => $set) {
+            $columns = array_map(fn (string $name) => $resource->fields[$name]->column(), $set);
+            foreach (DB::table($resource->table)->select(['id', ...$columns])->lazyById(1000) as $existing) {
+                $taken[$index][self::mark(array_map(fn (string $column) => $existing->{$column}, $columns))] = true;
+            }
+        }
+
+        return $taken;
     }
 
     /**
@@ -197,11 +249,12 @@ final class SeedCommand extends Command
     }
 
     /**
-     * Runs inside the transaction: the optional delete and every insert succeed or fail together.
+     * Runs inside a transaction: the optional delete and these inserts succeed or fail together.
      *
      * @param  array<string, list<string>>  $pools
+     * @param  array<int, array<string, true>>  $taken  What earlier records have, for fields that go together, kept up to date here
      */
-    private function fill(Descriptor $resource, int $count, int $chunk, int $offset, bool $fresh, ProgressBar $bar, array $pools = []): int
+    private function fill(Descriptor $resource, int $count, int $chunk, int $offset, bool $fresh, ProgressBar $bar, array $pools, array &$taken, bool $look = true): int
     {
         $removed = $fresh ? DB::table($resource->table)->delete() : 0;
         if ($fresh) {
@@ -213,21 +266,13 @@ final class SeedCommand extends Command
         $before = [];
         foreach ($resource->fields as $field) {
             if ($field->auto !== null) {
-                $before[$field->name] = Numbering::reserve($resource->table, $field->column(), $field->auto, $count);
+                $before[$field->name] = Numbering::reserve($resource->table, $field->column(), $field->auto, $count, $look);
             }
         }
         $now = time();
         // A list whose form proves addresses: a seeded record is confirmed as it is made, as one
         // added in the dashboard is. Nobody is there to ask.
         $confirms = $resource->public?->confirm !== null && SchemaFacts::hasColumn($resource->table, 'confirmed_at');
-        // What the records there already have, for each set of fields that go together, the trash's included.
-        $taken = [];
-        foreach ($resource->unique as $index => $set) {
-            $columns = array_map(fn (string $name) => $resource->fields[$name]->column(), $set);
-            foreach (DB::table($resource->table)->select(['id', ...$columns])->lazyById(1000) as $existing) {
-                $taken[$index][self::mark(array_map(fn (string $column) => $existing->{$column}, $columns))] = true;
-            }
-        }
         for ($done = 0; $done < $count; $done += $chunk) {
             $rows = [];
             for ($i = $done; $i < min($count, $done + $chunk); $i++) {
