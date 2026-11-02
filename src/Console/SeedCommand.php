@@ -162,7 +162,8 @@ final class SeedCommand extends Command
             $this->newLine(2);
             $kept = $fresh || $done === 0
                 ? 'and the table is as it was'
-                : 'after '.number_format($done).', which are saved. Run the same command again to carry on';
+                : 'after '.number_format($done).', which are saved. Run the same command again to carry on'
+                    .($resource->unique !== [] ? ', which it can until there are '.number_format(self::MOST_TAKEN).' of them' : '');
             $this->components->error("Seeding {$resource->pluralLabel} failed, {$kept}: ".Str::limit($e->getMessage(), 300));
 
             return self::FAILURE;
