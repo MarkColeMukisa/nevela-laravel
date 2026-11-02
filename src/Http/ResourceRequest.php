@@ -2,8 +2,11 @@
 
 namespace Nevela\Laravel\Http;
 
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator as Validation;
 use Illuminate\Validation\Rules\Exists;
@@ -18,6 +21,7 @@ use Nevela\Laravel\Support\Phone;
 use Nevela\Laravel\Support\SchemaFacts;
 use Nevela\Laravel\Support\Slug;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 /**
  * Base for generated resource requests.
@@ -416,7 +420,11 @@ abstract class ResourceRequest extends FormRequest
 
     public function withValidator(Validator $validator): void
     {
+        $this->refuseIfChanged();
         $validator->after(function (Validator $validator) {
+            if ($this->readAt() === false) {
+                $validator->errors()->add('updatedAt', 'Send the updatedAt the record was read with, as it came.');
+            }
             $known = array_keys($this->columns());
             if ($this->lineItems() !== null) {
                 $known[] = 'items';
@@ -439,6 +447,64 @@ abstract class ResourceRequest extends FormRequest
                 $validator->errors()->add($field, $message);
             }
         });
+    }
+
+    /**
+     * A change sent with the updatedAt its sender read is made only if nobody has saved the
+     * record since: otherwise it would put back, unseen, what the other person changed. It
+     * is refused with a 409 that carries the record as it is now, for the sender to bring
+     * their change up to date. Asked after the policy, so it says nothing to someone who
+     * may not change the record, and before validation, which the record as it is now may
+     * answer differently.
+     *
+     * Leaving updatedAt out saves regardless, as before.
+     */
+    private function refuseIfChanged(): void
+    {
+        $record = $this->record();
+        $read = $this->readAt();
+        if ($record === null || ! $read instanceof CarbonInterface) {
+            return;
+        }
+        $saved = $record->getAttribute($record->getUpdatedAtColumn());
+        if (! $saved instanceof CarbonInterface || $read->equalTo($saved)) {
+            return;
+        }
+
+        $what = strtolower(Nevela::find(class_basename($record))?->label ?? 'record');
+        $body = [
+            'error' => "Someone else saved this {$what} after you read it, so nothing was changed. Send your change again with the updatedAt it has now.",
+            'code' => 'CHANGED_SINCE_READ',
+        ];
+        // The record as it is now, as the API gives it, for the sender to compare with what they read.
+        $resource = preg_replace('/\\\\Requests\\\\(.*)Request$/', '\\\\Resources\\\\$1Resource', static::class);
+        if (is_string($resource) && $resource !== static::class && class_exists($resource)) {
+            $body['current'] = (new $resource($record))->resolve($this);
+        }
+
+        throw new HttpResponseException(response()->json($body, 409));
+    }
+
+    /**
+     * When the sender read the record, from the updatedAt they sent back with a change.
+     * Null when there is none to go by: a create, no updatedAt, or a model without one.
+     * False when one was sent that isn't a time.
+     */
+    private function readAt(): CarbonInterface|false|null
+    {
+        $record = $this->record();
+        if ($record === null || ! $record->usesTimestamps() || $record->getUpdatedAtColumn() === null || ! ($this->isMethod('PATCH') || $this->isMethod('PUT'))) {
+            return null;
+        }
+        $sent = ($this->json()->all() ?: $this->request->all())['updatedAt'] ?? null;
+        if ($sent === null || $sent === '') {
+            return null;
+        }
+        try {
+            return is_string($sent) ? Carbon::parse($sent) : false;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**
