@@ -480,6 +480,14 @@ abstract class ResourceRequest extends FormRequest
         $resource = preg_replace('/\\\\Requests\\\\(.*)Request$/', '\\\\Resources\\\\$1Resource', static::class);
         if (is_string($resource) && $resource !== static::class && class_exists($resource)) {
             $body['current'] = (new $resource($record))->resolve($this);
+            // And its lines, which a save sends whole: without theirs, yours would replace them unseen.
+            $lines = $this->lineItems();
+            $linesResource = $lines === null ? null : preg_replace('/\\\\Requests\\\\(.*)Request$/', '\\\\Resources\\\\$1Resource', $lines['request']);
+            if ($lines !== null && is_string($linesResource) && class_exists($linesResource)) {
+                $model = $lines['model'];
+                $rows = $model::query()->where($lines['column'], $record->getKey())->orderBy((new $model)->getKeyName())->get();
+                $body['current']['items'] = $linesResource::collection($rows)->resolve($this);
+            }
         }
 
         throw new HttpResponseException(response()->json($body, 409));
