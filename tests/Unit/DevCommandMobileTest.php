@@ -49,6 +49,28 @@ final class DevCommandMobileTest extends TestCase
         $this->assertStringEndsWith("EXPO_PUBLIC_API_PORT=8000\n", $written);
     }
 
+    public function test_it_says_whether_the_port_was_written(): void
+    {
+        $this->assertTrue(DevCommand::tellMobile($this->dir, 8000));
+        $this->assertTrue(DevCommand::tellMobile($this->dir, 8000), 'nothing to change is not a failure');
+        $this->assertFalse(DevCommand::tellMobile($this->dir.'/no-such-folder', 8000));
+    }
+
+    public function test_a_port_another_program_holds_on_every_address_is_passed_over(): void
+    {
+        // Claimed the way the API claims it when the project has a mobile app.
+        $held = stream_socket_server('tcp://0.0.0.0:0');
+        $this->assertNotFalse($held);
+        $port = (int) substr((string) strrchr((string) stream_socket_get_name($held, false), ':'), 1);
+
+        try {
+            $this->assertNotSame($port, DevCommand::freePort($port, '0.0.0.0'));
+            $this->assertNotSame($port, DevCommand::freePort($port));
+        } finally {
+            fclose($held);
+        }
+    }
+
     public function test_it_does_not_touch_a_file_that_already_has_the_port(): void
     {
         file_put_contents($this->dir.'/.env.local', "EXPO_PUBLIC_API_PORT=8000\n");
