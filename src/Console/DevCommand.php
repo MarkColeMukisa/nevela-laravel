@@ -12,7 +12,7 @@ final class DevCommand extends Command
         {--port=8000 : The first port to try for the API}
         {--api-only : Start the API without the dashboard}';
 
-    protected $description = 'Run the API and the dashboard together';
+    protected $description = 'Run the API and the dashboard together, and open the API to a mobile app if the project has one';
 
     public function handle(): int
     {
@@ -31,7 +31,15 @@ final class DevCommand extends Command
         $url = "http://127.0.0.1:{$port}";
 
         $php = (new PhpExecutableFinder)->find(false) ?: 'php';
-        $api = new Process([$php, 'artisan', 'serve', '--host=127.0.0.1', "--port={$port}"], base_path(), null, null, null);
+        // A phone can't reach 127.0.0.1 on this computer: that address is the phone itself.
+        // With a mobile app in the project the API listens on the network too, so the app
+        // on a phone on the same Wi-Fi can call it. Without one it stays on this machine.
+        $mobile = self::mobilePath();
+        $host = $mobile ? '0.0.0.0' : '127.0.0.1';
+        $api = new Process([$php, 'artisan', 'serve', "--host={$host}", "--port={$port}"], base_path(), null, null, null);
+        if ($mobile) {
+            self::tellMobile($mobile, $port);
+        }
 
         $web = null;
         $webPath = config('nevela.web_path');
@@ -51,6 +59,10 @@ final class DevCommand extends Command
         $this->components->twoColumnDetail('API', $url);
         if ($web) {
             $this->components->twoColumnDetail('Dashboard', 'http://localhost:3000/sign-in (see below if that port is taken)');
+        }
+        if ($mobile) {
+            $this->components->twoColumnDetail('Mobile app', 'in another terminal: cd apps/mobile && npx expo start');
+            $this->line('  <fg=gray>The API is open to this network while this runs, so a phone on the same Wi-Fi can reach it.</>');
         }
         $this->newLine();
 
@@ -84,6 +96,35 @@ final class DevCommand extends Command
         }
 
         return null;
+    }
+
+    /** The project's mobile app (nevela.mobile_path), or null when it has none. */
+    public static function mobilePath(): ?string
+    {
+        $path = config('nevela.mobile_path');
+
+        return is_string($path) && $path !== '' && is_file("{$path}/app.json") ? $path : null;
+    }
+
+    /**
+     * Write the API's port where the mobile app reads it: EXPO_PUBLIC_API_PORT in its
+     * .env.local. The app works out the computer's address for itself, and can't guess
+     * that the API moved off 8000 because something else had the port. Every other line
+     * of the file is left as it is.
+     */
+    public static function tellMobile(string $mobile, int $port): void
+    {
+        $file = "{$mobile}/.env.local";
+        $line = "EXPO_PUBLIC_API_PORT={$port}";
+        $now = is_file($file) ? (string) file_get_contents($file) : '';
+        if (preg_match('/^EXPO_PUBLIC_API_PORT=.*$/m', $now)) {
+            $next = preg_replace('/^EXPO_PUBLIC_API_PORT=.*$/m', $line, $now, 1);
+        } else {
+            $next = ($now === '' ? '' : rtrim($now)."\n\n")."# The port `nevela dev` serves the API on. Written each time it starts.\n{$line}\n";
+        }
+        if ($next !== $now) {
+            @file_put_contents($file, $next);
+        }
     }
 
     /** The package manager a folder was installed with, from its lock file. */

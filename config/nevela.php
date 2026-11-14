@@ -14,6 +14,13 @@ return [
     'web_path' => env('NEVELA_WEB_PATH', base_path('../web')),
 
     /*
+    | The Expo mobile app, when the project has one (nevela new my-app --mobile). While
+    | it exists, `nevela dev` opens the API to your network so a phone can reach it.
+    | Set to null if you never want that.
+    */
+    'mobile_path' => env('NEVELA_MOBILE_PATH', base_path('../mobile')),
+
+    /*
     | The top of the project, where the `php nevela` launcher is written. Null works it
     | out: two folders up when this app is at <project>/apps/<name>. Set a path if yours
     | is somewhere else, or false to have no launcher.
