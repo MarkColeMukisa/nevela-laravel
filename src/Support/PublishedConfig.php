@@ -55,6 +55,7 @@ final class PublishedConfig
         'auth.session' => '0.12.0',
         'phone_country' => '0.29.0',
         'mobile_path' => '0.30.0',
+        'auth.social.app_redirects' => '0.31.0',
     ];
 
     /**

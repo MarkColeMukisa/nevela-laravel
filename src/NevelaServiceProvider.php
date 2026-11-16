@@ -260,6 +260,8 @@ final class NevelaServiceProvider extends ServiceProvider
                     // Google and GitHub: called by the dashboard's server, on the way out and on the way back.
                     Route::post('oauth/{provider}/start', [SocialController::class, 'start'])->name('oauth.start');
                     Route::post('oauth/{provider}/callback', [SocialController::class, 'callback'])->name('oauth.callback');
+                    // The way back from the provider when a mobile app started the sign-in.
+                    Route::get('oauth/{provider}/app', [SocialController::class, 'app'])->name('oauth.app');
                     Route::post('register', [AccountController::class, 'register'])->name('register');
                     Route::post('email/send', [AccountController::class, 'resendVerification'])->name('email.send');
                     Route::post('email/verify', [AccountController::class, 'verifyEmail'])->name('email.verify');

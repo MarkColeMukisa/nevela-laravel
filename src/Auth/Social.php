@@ -73,6 +73,58 @@ final class Social
         return Web::url("/api/auth/oauth/{$provider}/callback", [], $request);
     }
 
+    /**
+     * Where the provider sends the browser back to when a mobile app started the sign-in:
+     * this API's own address, which hands the browser on to the app. It is APP_URL, so it is
+     * the same address each time, and the one to register with the provider.
+     */
+    public static function appCallback(string $provider): string
+    {
+        return rtrim((string) config('app.url'), '/').'/'.trim((string) config('nevela.prefix', 'api'), '/')."/auth/oauth/{$provider}/app";
+    }
+
+    /**
+     * An address an app may be sent back to, or null. Only one that starts with an address the
+     * app's owner listed (NEVELA_APP_REDIRECTS), such as "juice-me://": anything else would let
+     * whoever starts a sign-in send the code wherever they like. The list's entry has to end at
+     * a boundary, so "https://example.com" doesn't allow "https://example.com.evil.test".
+     * While APP_ENV is local, Expo Go's own address is allowed as well.
+     */
+    public static function appRedirect(mixed $value): ?string
+    {
+        if (! is_string($value) || $value === '' || strlen($value) > 500 || preg_match('/[\x00-\x20\x7F\\\\#]/', $value) === 1) {
+            return null;
+        }
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#i', $value) !== 1) {
+            return null;
+        }
+        $allowed = array_map(fn ($entry) => trim((string) $entry), (array) config('nevela.auth.social.app_redirects', []));
+        if (app()->environment('local')) {
+            array_push($allowed, 'exp://', 'exps://');
+        }
+        foreach ($allowed as $prefix) {
+            if ($prefix === '' || ! str_starts_with(strtolower($value), strtolower($prefix))) {
+                continue;
+            }
+            $next = substr($value, strlen($prefix), 1);
+            if (str_ends_with($prefix, '/') || $next === '' || in_array($next, ['/', '?'], true)) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * What an app sends when it starts a sign-in to prove, when it finishes, that it is the one
+     * that started it: the SHA-256 of a secret it keeps, in base64url. The browser only ever
+     * carries the code and the state, so whoever intercepts them still can't finish the sign-in.
+     */
+    public static function appChallenge(string $verifier): string
+    {
+        return rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+    }
+
     /** Socialite's provider, set up from config/nevela.php, with no session: the state is ours. */
     public static function driver(string $provider, string $callback): AbstractProvider
     {
