@@ -370,7 +370,7 @@ final class NevelaServiceProvider extends ServiceProvider
 
             // The descriptors, so the web app (and tooling) can check it matches the API.
             Route::get('_nevela/resources', fn () => response()->json([
-                'data' => array_map(fn ($d) => $d->toArray(), Nevela::all()),
+                'data' => Nevela::described(),
             ]))->name('resources');
 
             // A resource's own actions: on one record, and on the list or a selection from it.

@@ -111,6 +111,31 @@ final class Nevela
         return $all;
     }
 
+    /**
+     * Every resource as a client reads it (GET _nevela/resources). A money field that names no
+     * currency of its own carries the app's (NEVELA_CURRENCY), as the dashboard's descriptors do,
+     * so a phone writes UGX 4,500 and not 4500.00.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function described(): array
+    {
+        $currency = config('nevela.currency');
+
+        return array_map(function (Descriptor $d) use ($currency): array {
+            $array = $d->toArray();
+            if (is_string($currency) && $currency !== '') {
+                foreach ($array['fields'] as $name => $field) {
+                    if (($field['kind'] ?? null) === 'float' && ($field['format'] ?? null) === 'money' && ! isset($field['currency'])) {
+                        $array['fields'][$name]['currency'] = $currency;
+                    }
+                }
+            }
+
+            return $array;
+        }, self::all());
+    }
+
     public static function forget(): void
     {
         self::$descriptors = [];
