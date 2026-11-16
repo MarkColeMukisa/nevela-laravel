@@ -155,7 +155,7 @@ return [
         | The role a self-registered account starts with. USER allows nothing beyond the
         | person's own account, which is what makes open sign-up safe. Null gives no role.
         */
-        'default_role' => 'USER',
+        'default_role' => env('NEVELA_DEFAULT_ROLE', 'USER'),
 
         /*
         | Where the dashboard is, for the links in emails and for passkeys, which are tied
