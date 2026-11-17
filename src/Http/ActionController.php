@@ -193,7 +193,7 @@ final class ActionController
      */
     private function perform(Descriptor $descriptor, Action $action, Model $record, array $input, Request $request): mixed
     {
-        $before = $record->getAttributes();
+        $before = History::snapshot($descriptor, $record);
         $message = Fixed::allowing(function () use ($descriptor, $action, $record, $input) {
             if ($action->sets()) {
                 $values = [];

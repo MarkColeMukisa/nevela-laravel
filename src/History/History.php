@@ -34,10 +34,31 @@ final class History
         return SchemaFacts::hasTable(self::TABLE);
     }
 
+    /** What a history compares, by field: the kinds that are plain values. */
+    private const KEPT = ['string', 'text', 'int', 'float', 'boolean', 'date', 'datetime', 'enum', 'belongsTo'];
+
+    /**
+     * A record's values as a history compares them, by column: read through the model's
+     * casts, as they will be read after, so a total of 60000 is not "changed" from "60000.00".
+     *
+     * @return array<string, mixed>
+     */
+    public static function snapshot(Descriptor $descriptor, Model $record): array
+    {
+        $values = [];
+        foreach ($descriptor->fields as $field) {
+            if (in_array($field->kind, self::KEPT, true) && ! $field->private) {
+                $values[$field->column()] = self::plain($record->getAttribute($field->column()));
+            }
+        }
+
+        return $values;
+    }
+
     /**
      * An action was done to a record. Kept with the work it records: if that is undone, so is this.
      *
-     * @param  array<string, mixed>  $before  The record's attributes before it, by column
+     * @param  array<string, mixed>  $before  The record's values before it, from snapshot()
      * @param  array<string, mixed>  $input  What the person filled in, checked
      */
     public static function record(Descriptor $descriptor, Action $action, Model $record, array $before, array $input, ?Model $user): void
@@ -46,16 +67,12 @@ final class History
             return;
         }
         $fresh = $record->fresh() ?? $record;
+        $after = self::snapshot($descriptor, $fresh);
         $changes = [];
         foreach ($descriptor->fields as $name => $field) {
             $column = $field->column();
-            if (! array_key_exists($column, $before) || $field->private || in_array($field->kind, ['file', 'json', 'richtext'], true)) {
-                continue;
-            }
-            $from = self::plain($before[$column]);
-            $to = self::plain($fresh->getAttribute($column));
-            if ($from !== $to) {
-                $changes[$name] = ['from' => $from, 'to' => $to];
+            if (array_key_exists($column, $before) && $before[$column] !== ($after[$column] ?? null)) {
+                $changes[$name] = ['from' => $before[$column], 'to' => $after[$column] ?? null];
             }
         }
         DB::table(self::TABLE)->insert([
@@ -98,8 +115,9 @@ final class History
     }
 
     /**
-     * The person it belongs to hears of it: "Your order JM-0014 is now Ready." Not when they
-     * did it themselves, and never at the cost of the action, which is done by now.
+     * The person it belongs to hears of it: "Your order JM-0014 is now Ready." When they did it
+     * themselves, those who may edit the resource hear instead: "Order JM-0014 is now Cancelled".
+     * Never at the cost of the action, which is done by now.
      *
      * @param  array<string, array{from: mixed, to: mixed}>  $changes
      * @param  array<string, mixed>  $input
@@ -116,7 +134,7 @@ final class History
                 return;
             }
             $owner = $model::query()->where('email', $email)->first();
-            if ($owner === null || ($user !== null && (string) $owner->getAuthIdentifier() === (string) $user->getAuthIdentifier())) {
+            if ($owner === null) {
                 return;
             }
             $what = strtolower($descriptor->label);
@@ -130,12 +148,26 @@ final class History
                     break;
                 }
             }
-            $headline = $status !== null ? "Your {$title} is now {$status}" : "{$action->label}: your {$title}";
             $said = array_values(array_filter($input, fn ($value) => is_string($value) && trim($value) !== ''));
+            $url = "/dashboard/{$descriptor->slug}/{$record->getKey()}";
+
+            // They did it themselves (a customer cancelling): it is the people who run the place
+            // who need to hear, before they start on an order that is off.
+            if ($user !== null && (string) $owner->getAuthIdentifier() === (string) $user->getAuthIdentifier()) {
+                $name = trim((string) $owner->getAttribute('name')) ?: $email;
+                Notices::toPermission("{$descriptor->table}.edit", new Notice(
+                    Str::ucfirst($status !== null ? "{$title} is now {$status}" : "{$action->label}: {$title}"),
+                    body: "By {$name}.".($said === [] ? '' : ' '.Str::limit((string) $said[0], 280)),
+                    url: $url,
+                    kind: 'history',
+                ), except: $user);
+
+                return;
+            }
             Notices::send($owner, new Notice(
-                $headline,
+                $status !== null ? "Your {$title} is now {$status}" : "{$action->label}: your {$title}",
                 body: $said === [] ? null : Str::limit((string) $said[0], 300),
-                url: "/dashboard/{$descriptor->slug}/{$record->getKey()}",
+                url: $url,
                 kind: 'history',
             ));
         } catch (Throwable $e) {
