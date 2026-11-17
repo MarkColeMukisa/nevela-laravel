@@ -136,6 +136,66 @@ final class Nevela
         }, self::all());
     }
 
+    /**
+     * The resources anyone may read, as a signed-out client reads them
+     * (GET public/_nevela/resources): only those with a "public.read", each with only the
+     * fields it opens, and nothing about what it is not open for. The one a shop sells (what
+     * an order's lines point at) says so, `"sold": true`, so the mobile app can open on the
+     * shop for someone who hasn't signed in. The order and its lines are never described.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function publicDescribed(): array
+    {
+        $all = self::all();
+        $sold = [];
+        foreach ($all as $d) {
+            $lines = $d->items === null ? null : self::find($d->items);
+            foreach ($lines?->fields ?? [] as $field) {
+                if ($field->kind === 'belongsTo' && $field->target !== $d->name) {
+                    $sold[$field->target] = true;
+                }
+            }
+        }
+        $currency = config('nevela.currency');
+        $described = [];
+        foreach ($all as $d) {
+            $read = $d->public?->read;
+            if ($read === null) {
+                continue;
+            }
+            $fields = [];
+            foreach ($read as $name) {
+                $field = $d->fields[$name] ?? null;
+                if ($field === null) {
+                    continue;
+                }
+                $array = $field->toArray();
+                // What a field depends on that isn't open would say something about it: dropped.
+                unset($array['when'], $array['from'], $array['auto']);
+                if (($array['kind'] ?? null) === 'float' && ($array['format'] ?? null) === 'money' && ! isset($array['currency']) && is_string($currency) && $currency !== '') {
+                    $array['currency'] = $currency;
+                }
+                $fields[$name] = $array;
+            }
+            $described[] = array_filter([
+                'name' => $d->name,
+                'table' => $d->table,
+                'slug' => $d->slug,
+                'label' => $d->label,
+                'pluralLabel' => $d->pluralLabel,
+                'icon' => $d->icon,
+                'titleField' => $d->titleField !== null && isset($fields[$d->titleField]) ? $d->titleField : null,
+                'by' => $d->public->by,
+                'sold' => isset($sold[$d->name]) ?: null,
+                'open' => true,
+                'fields' => $fields,
+            ], fn ($v) => $v !== null);
+        }
+
+        return $described;
+    }
+
     public static function forget(): void
     {
         self::$descriptors = [];

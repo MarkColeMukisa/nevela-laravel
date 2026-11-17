@@ -321,6 +321,13 @@ final class NevelaServiceProvider extends ServiceProvider
 
         Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
 
+        // What anyone may read, described: the resources with a "public.read", each cut to the
+        // fields it opens. The mobile app reads it to show a shop to someone not signed in, on
+        // every launch: phones on one campus Wi-Fi share an address, so the limit is generous.
+        Route::prefix($prefix)->middleware(['api', 'nevela.throttle:600,1'])->get('public/_nevela/resources', fn () => response()->json([
+            'data' => Nevela::publicDescribed(),
+        ]))->name('nevela.public.resources');
+
         // What a resource's "public" section opens: no sign-in, and each route its own throttle.
         if (is_file($open = base_path('routes/nevela-public.php'))) {
             Route::prefix(trim($prefix.'/public', '/'))->middleware('api')->name('nevela.public.')->group($open);
