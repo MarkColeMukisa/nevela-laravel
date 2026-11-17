@@ -22,6 +22,16 @@ final class LineItemsTest extends TestCase
         return [Descriptor::fromArray(['items' => $items->name] + $order->toArray()), $items, $product];
     }
 
+    public function test_how_many_a_line_has_is_at_least_one_and_a_stock_quantity_may_be_none(): void
+    {
+        [$order, $items, $product] = $this->shop();
+        $stock = Descriptor::fromSpec('Warehouse', 'name:string, quantity:int');
+        $generator = new ResourceGenerator;
+
+        $this->assertStringContainsString("'quantity' => ['required', 'integer', 'min:1']", $generator->request($items, [$order, $items, $product]));
+        $this->assertStringContainsString("'quantity' => ['required', 'integer']", $generator->request($stock, [$order, $items, $product, $stock]));
+    }
+
     public function test_items_reads_the_name_then_the_fields_and_points_the_lines_back(): void
     {
         $order = Descriptor::fromSpec('Order', 'number:string');

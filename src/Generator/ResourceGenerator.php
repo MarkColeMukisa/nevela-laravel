@@ -1386,6 +1386,11 @@ final class ResourceGenerator
             $f->kind === 'enum' => ['Rule::in(['.implode(', ', array_map(fn ($o) => "'{$o}'", $f->options)).'])'],
         };
         $rules = [...$rules, ...$type];
+        // How many of a thing a line has is at least one: a line of minus two would take money off an order. (Only a line's:
+        // a product's own "quantity" is what is in stock, and may be none.)
+        if (in_array($f->kind, ['int', 'float'], true) && preg_match('/^(quantity|qty)$/i', $f->name) && array_filter($all, fn (Descriptor $o) => $o->items === $d->name) !== []) {
+            $rules[] = $f->kind === 'int' ? "'min:1'" : "'gt:0'";
+        }
         if ($f->unique) {
             $rules[] = "Rule::unique('{$d->table}', '{$f->column()}')->ignore(\${$d->variable()})";
         }
