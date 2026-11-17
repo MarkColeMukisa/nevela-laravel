@@ -39,6 +39,17 @@ final class OwnedRecordsTest extends TestCase
         $this->assertStringNotContainsString('Owned', (new ResourceGenerator)->model($plain, ['Order' => $plain]));
     }
 
+    public function test_the_owner_may_be_left_out_of_a_request_because_laravel_fills_it(): void
+    {
+        $required = Descriptor::fromArray(['name' => 'Order', 'owner' => 'email', 'fields' => ['email' => ['kind' => 'string', 'format' => 'email', 'required' => true], 'customer' => ['kind' => 'string', 'required' => true]]]);
+        $generator = new ResourceGenerator;
+
+        $request = $generator->request($required, ['Order' => $required]);
+        $this->assertStringContainsString("'email' => ['nullable'", $request);
+        $this->assertStringContainsString("'customer' => ['required'", $request);
+        $this->assertStringContainsString('email: field.email({ required: false', $generator->typescript($required, ['Order' => $required]));
+    }
+
     public function test_an_owner_that_is_not_a_string_field_is_refused(): void
     {
         foreach (['total', 'nobody'] as $owner) {

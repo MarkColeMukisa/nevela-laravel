@@ -13,7 +13,8 @@ use Illuminate\Database\Eloquent\Model;
  * `"owner": "email"` in the descriptor. The field is matched to the signed-in person's email.
  *
  * - A person who may edit the resource (`orders.edit`) is staff: they see every record and what
- *   they send for the owner is kept.
+ *   they send for the owner is kept. A record they make without one is their own.
+ * - The owner field may be left out of a request: Laravel fills it.
  * - Anyone else sees only the records whose owner is their email, and a record they make is
  *   made theirs, whatever the request said for the owner.
  *
@@ -30,8 +31,16 @@ trait Owned
     {
         static::creating(function (Model $model): void {
             $user = request()->user();
-            // A seeder, the console, a visitor to the public site, staff: whatever was set is kept.
-            if (! $user instanceof Model || $user->can($model->getTable().'.edit')) {
+            // A seeder, the console, a visitor to the public site: whatever was set is kept.
+            if (! $user instanceof Model) {
+                return;
+            }
+            // Staff keep what they send, and a record they make without an owner is their own.
+            if ($user->can($model->getTable().'.edit')) {
+                if ((string) $model->getAttribute($model->owner()) === '') {
+                    $model->setAttribute($model->owner(), $user->getAttribute('email'));
+                }
+
                 return;
             }
             $model->setAttribute($model->owner(), $user->getAttribute('email'));
