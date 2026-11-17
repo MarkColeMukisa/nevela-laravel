@@ -45,6 +45,12 @@ trait Owned
             }
             $model->setAttribute($model->owner(), $user->getAttribute('email'));
         });
+        // A record is never left with nobody: a save that empties the owner leaves it as it was.
+        static::updating(function (Model $model): void {
+            if ((string) $model->getAttribute($model->owner()) === '') {
+                $model->setAttribute($model->owner(), $model->getOriginal($model->owner()));
+            }
+        });
     }
 
     public function scopeVisibleTo(Builder $query, Model $user): void
