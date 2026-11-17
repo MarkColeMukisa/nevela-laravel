@@ -24,6 +24,7 @@ final class Descriptor
      * @param  string|null  $publish  The date-and-time field that says when a record is published: empty is a draft, a time to come is scheduled
      * @param  string|null  $blog  Where on the site its public records are a blog, e.g. "/blog". The pages are written by `nevela:blog`.
      * @param  string|null  $items  The resource its lines are, e.g. "OrderItem": edited in this one's form and saved with it. That resource belongs to this one.
+     * @param  string|null  $owner  The string field that says who a record belongs to, by email: each person sees their own, and those who may edit the resource see all. E.g. an order's "email".
      * @param  list<list<string>>  $unique  Fields whose values go together once only, by name: [["studentId", "courseId"]] is one enrolment for each student and course
      */
     public function __construct(
@@ -44,6 +45,7 @@ final class Descriptor
         public readonly ?string $blog = null,
         public readonly ?string $items = null,
         public readonly array $unique = [],
+        public readonly ?string $owner = null,
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
@@ -105,6 +107,9 @@ final class Descriptor
         }
         if ($items !== null && (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $items) || $items === $name)) {
             throw new InvalidArgumentException("{$name}: \"items\" names the resource its lines are, such as \"OrderItem\": another resource, in PascalCase.");
+        }
+        if ($owner !== null && (! isset($fields[$owner]) || $fields[$owner]->kind !== 'string')) {
+            throw new InvalidArgumentException("{$name}: \"owner\" names the field that holds whose record it is, matched to their email. It has to be a string field of {$name}, such as email:string.");
         }
         foreach ($unique as $set) {
             if (! is_array($set) || ! array_is_list($set) || count($set) < 2 || count(array_unique($set)) !== count($set)) {
@@ -206,6 +211,7 @@ final class Descriptor
             $data['blog'] ?? null,
             $data['items'] ?? null,
             array_values((array) ($data['unique'] ?? [])),
+            $data['owner'] ?? null,
         );
     }
 
@@ -237,6 +243,7 @@ final class Descriptor
             'publish' => $this->publish,
             'blog' => $this->blog,
             'items' => $this->items,
+            'owner' => $this->owner,
             'fields' => array_map(fn (Field $f) => $f->toArray(), $this->fields),
             'unique' => $this->unique ?: null,
             'actions' => $this->actions ? array_map(fn (Action $a) => $a->toArray(), $this->actions) : null,

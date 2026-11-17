@@ -730,6 +730,17 @@ final class ResourceGenerator
                 return [{$numbered}];
             }
         PHP;
+        $owned = $d->owner === null ? '' : <<<PHP
+
+            // Each person sees their own: staff, who may edit {$d->pluralLabel}, see all of them.
+            use \Nevela\Laravel\Concerns\Owned;
+
+            protected function owner(): string
+            {
+                return '{$d->fields[$d->owner]->column()}';
+            }
+        PHP;
+        $confirmable .= $owned;
         $copies = [];
         foreach ($d->fields as $f) {
             if ($f->from === null || ! str_contains($f->from, '.')) {
