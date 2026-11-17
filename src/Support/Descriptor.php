@@ -26,6 +26,7 @@ final class Descriptor
      * @param  string|null  $items  The resource its lines are, e.g. "OrderItem": edited in this one's form and saved with it. That resource belongs to this one.
      * @param  string|null  $owner  The string field that says who a record belongs to, by email: each person sees their own, and those who may edit the resource see all. E.g. an order's "email".
      * @param  list<list<string>>  $unique  Fields whose values go together once only, by name: [["studentId", "courseId"]] is one enrolment for each student and course
+     * @param  bool  $fixed  Once made, a record is not edited or deleted by anyone signed in, its lines included: it changes only through its actions. A placed order.
      */
     public function __construct(
         public readonly string $name,
@@ -46,6 +47,7 @@ final class Descriptor
         public readonly ?string $items = null,
         public readonly array $unique = [],
         public readonly ?string $owner = null,
+        public readonly bool $fixed = false,
     ) {
         if (! preg_match('/^[A-Z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException('Resource name must be PascalCase, e.g. Product or BlogPost.');
@@ -64,6 +66,15 @@ final class Descriptor
             foreach (array_keys($action->when) as $field) {
                 if (! isset($fields[$field])) {
                     throw new InvalidArgumentException("Action \"{$action->name}\" of {$name} depends on \"{$field}\", which is not one of its fields.");
+                }
+            }
+            foreach ($action->set as $field => $value) {
+                $target = $fields[$field] ?? null;
+                if ($target === null || ! in_array($target->kind, Action::KINDS, true)) {
+                    throw new InvalidArgumentException("Action \"{$action->name}\" of {$name} sets \"{$field}\", which has to be one of its fields of these kinds: ".implode(', ', Action::KINDS).'.');
+                }
+                if ($value === null ? $target->required : ($target->kind === 'enum' && ! in_array((string) $value, $target->options, true))) {
+                    throw new InvalidArgumentException("Action \"{$action->name}\" of {$name} sets \"{$field}\" to ".json_encode($value).", which it can't be.".($target->kind === 'enum' ? ' Use one of: '.implode(', ', $target->options).'.' : ''));
                 }
             }
             // sendNow and send_now would be the same permission.
@@ -212,6 +223,7 @@ final class Descriptor
             $data['items'] ?? null,
             array_values((array) ($data['unique'] ?? [])),
             $data['owner'] ?? null,
+            (bool) ($data['fixed'] ?? false),
         );
     }
 
@@ -244,6 +256,7 @@ final class Descriptor
             'blog' => $this->blog,
             'items' => $this->items,
             'owner' => $this->owner,
+            'fixed' => $this->fixed ?: null,
             'fields' => array_map(fn (Field $f) => $f->toArray(), $this->fields),
             'unique' => $this->unique ?: null,
             'actions' => $this->actions ? array_map(fn (Action $a) => $a->toArray(), $this->actions) : null,

@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel;
 
+use Illuminate\Foundation\Http\Events\RequestHandled;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -60,6 +61,7 @@ use Nevela\Laravel\Http\Auth\SocialController;
 use Nevela\Laravel\Http\PublicThrottle;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
+use Nevela\Laravel\Http\HistoryController;
 use Nevela\Laravel\Http\ActivityController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
@@ -68,6 +70,7 @@ use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Notices\Conditions;
 use Nevela\Laravel\Notices\Notice;
 use Nevela\Laravel\Notices\Notices;
+use Nevela\Laravel\Support\Fixed;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
 
@@ -148,6 +151,14 @@ final class NevelaServiceProvider extends ServiceProvider
         }
         $this->app->terminating(fn () => Activity::flush());
 
+        // Records that are fixed once made (a placed order): refused when someone signed in
+        // changes or deletes one, or its lines, outside an action. See Support\Fixed.
+        Event::listen('eloquent.creating: *', fn (string $event, array $payload) => ($payload[0] ?? null) instanceof Model ? Fixed::creating($payload[0]) : null);
+        Event::listen('eloquent.created: *', fn (string $event, array $payload) => ($payload[0] ?? null) instanceof Model ? Fixed::created($payload[0]) : null);
+        Event::listen(['eloquent.updating: *', 'eloquent.deleting: *'], fn (string $event, array $payload) => ($payload[0] ?? null) instanceof Model ? Fixed::changing($payload[0]) : null);
+        // What one request made, it may finish; the next one may not.
+        Event::listen(RequestHandled::class, fn () => Fixed::forget());
+
         // A job that failed for good is something only an administrator can look into.
         // One row per kind of job while unread, however often it fails.
         Event::listen(JobFailed::class, function (JobFailed $event) {
@@ -206,6 +217,7 @@ final class NevelaServiceProvider extends ServiceProvider
     {
         // Anything the last one did that wasn't written when it ended.
         Activity::flush();
+        Fixed::forget();
         Access::forget();
         Uploads::forget();
         SchemaFacts::refresh();
@@ -333,6 +345,8 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/notifications', [NotificationsController::class, 'index'])->name('notifications.index');
             Route::post('_nevela/notifications/read', [NotificationsController::class, 'read'])->name('notifications.read');
             Route::get('_nevela/activity', [ActivityController::class, 'index'])->name('activity.index');
+            // A record's history: each action done to it, for whoever may see the record.
+            Route::get('_nevela/history/{slug}/{id}', [HistoryController::class, 'show'])->name('history.show');
 
             Route::get('_nevela/trash', [TrashController::class, 'index'])->name('trash.index');
             Route::get('_nevela/trash/_status', [TrashController::class, 'status'])->name('trash.status');

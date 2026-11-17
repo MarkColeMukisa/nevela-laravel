@@ -58,6 +58,13 @@ final class ActionsTest extends TestCase
         $this->assertFalse($accept->applies(['acceptedAt' => null, 'status' => null, 'paid' => true]));
         // With no conditions it applies to anything.
         $this->assertTrue(Action::fromArray('archive', [])->applies([]));
+
+        // A list is any one of its values.
+        $cancel = Action::fromArray('cancel', ['when' => ['status' => ['new', 'seen']]]);
+        $this->assertTrue($cancel->applies(['status' => 'new']));
+        $this->assertTrue($cancel->applies(['status' => 'seen']));
+        $this->assertFalse($cancel->applies(['status' => 'hired']));
+        $this->assertFalse($cancel->applies(['status' => null]));
     }
 
     /** @return iterable<string, array{array<string, mixed>, string}> */
@@ -69,7 +76,13 @@ final class ActionsTest extends TestCase
         yield 'a condition on the whole list' => [['announce' => ['on' => 'collection', 'when' => ['status' => 'new']]], 'no one record'];
         yield 'a selection of the whole list' => [['announce' => ['on' => 'collection', 'many' => true]], 'no one record'];
         yield 'a condition on a field it does not have' => [['accept' => ['when' => ['approvedAt' => null]]], 'not one of its fields'];
-        yield 'a condition that is a list' => [['accept' => ['when' => ['status' => ['new', 'seen']]]], 'one value, or with null'];
+        yield 'a condition that is a list of lists' => [['accept' => ['when' => ['status' => [['new'], 'seen']]]], 'a list of values it may be one of'];
+        yield 'a condition that is an empty list' => [['accept' => ['when' => ['status' => []]]], 'a list of values it may be one of'];
+        yield 'setting a field it does not have' => [['accept' => ['set' => ['approved' => true]]], 'sets "approved", which has to be one of its fields'];
+        yield 'setting an option there is not' => [['accept' => ['set' => ['status' => 'hired']]], 'Use one of: new, seen'];
+        yield 'setting a required field to nothing' => [['accept' => ['set' => ['name' => null]]], "which it can't be"];
+        yield 'setting a list' => [['accept' => ['set' => ['status' => ['new']]]], 'one value, or null'];
+        yield 'setting on the whole list' => [['announce' => ['on' => 'collection', 'set' => ['status' => 'seen']]], 'no one record to set'];
         yield 'asking for a file' => [['accept' => ['fields' => ['letter' => ['kind' => 'file', 'accept' => ['pdf']]]]], "isn't something a button asks for"];
         yield 'asking for a relation' => [['accept' => ['fields' => ['reviewerId' => ['kind' => 'belongsTo', 'target' => 'User']]]], "isn't something a button asks for"];
         yield 'two that are the same permission' => [['sendNow' => [], 'sendNOW' => []], 'two actions that come to "send_now"'];
@@ -134,5 +147,35 @@ final class ActionsTest extends TestCase
         $this->assertStringContainsString('export const extras: Record<string, unknown> = {};', $generator->registry([$plain])->contents);
         $this->assertStringContainsString("export const resources = [] as const;\n\n", $generator->registry([])->contents);
         $this->assertStringContainsString('export const extras: Record<string, unknown> = {};', $generator->registry([])->contents);
+    }
+
+    public function test_an_action_that_sets_values_is_kept_and_needs_no_class(): void
+    {
+        $descriptor = $this->application(['markSeen' => ['label' => 'Mark seen', 'when' => ['status' => 'new'], 'set' => ['status' => 'seen']], 'archive' => []]);
+        $action = $descriptor->actions['markSeen'];
+
+        $this->assertSame(['status' => 'seen'], $action->set);
+        $this->assertTrue($action->sets());
+        $this->assertFalse($descriptor->actions['archive']->sets());
+        $this->assertSame(['status' => 'seen'], Descriptor::fromJson($descriptor->toJson())->actions['markSeen']->set);
+        $this->assertArrayNotHasKey('set', $descriptor->actions['archive']->toArray());
+
+        // Only the one with something to do gets a class written.
+        $files = array_map(fn ($file) => $file->path, (new ResourceGenerator)->forResource($descriptor, '2026_11_18_000000', [$descriptor]));
+        $this->assertContains('app/Nevela/Actions/InternshipApplication/Archive.php', $files);
+        $this->assertNotContains('app/Nevela/Actions/InternshipApplication/MarkSeen.php', $files);
+    }
+
+    public function test_a_fixed_resource_is_kept_and_the_dashboard_is_told(): void
+    {
+        $fixed = Descriptor::fromArray(['fixed' => true] + $this->application([])->toArray());
+
+        $this->assertTrue($fixed->fixed);
+        $this->assertTrue($fixed->toArray()['fixed']);
+        $this->assertTrue(Descriptor::fromJson($fixed->toJson())->fixed);
+        $this->assertArrayNotHasKey('fixed', $this->application([])->toArray());
+
+        $index = (new ResourceGenerator)->registry([$fixed])->contents;
+        $this->assertStringContainsString('"fixed":true', str_replace(' ', '', $index));
     }
 }

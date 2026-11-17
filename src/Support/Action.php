@@ -27,9 +27,10 @@ final class Action
     /**
      * @param  string  $name  camelCase, as in the descriptor and the address: accept, sendAnnouncement
      * @param  string|null  $confirm  A question to ask before it runs
-     * @param  array<string, scalar|null>  $when  Field values a record must have for the action to apply to it
+     * @param  array<string, scalar|null|list<scalar>>  $when  Field values a record must have for the action to apply to it: one value, or a list of which it must be one
      * @param  array<string, Field>  $fields  What it asks the person for, in a sheet
      * @param  bool  $many  A record action that can also be run on a selection of rows
+     * @param  array<string, scalar|null>  $set  What it does, when that is only to give fields these values: {"status": "accepted"}. Nevela does it, and no class is written.
      */
     public function __construct(
         public readonly string $name,
@@ -40,6 +41,7 @@ final class Action
         public readonly array $when = [],
         public readonly array $fields = [],
         public readonly bool $many = false,
+        public readonly array $set = [],
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Action \"{$name}\" must be camelCase, e.g. accept or sendAnnouncement.");
@@ -54,8 +56,17 @@ final class Action
             throw new InvalidArgumentException("Action \"{$name}\" is on the collection, so it has no one record to check \"when\" against or to select.");
         }
         foreach ($when as $field => $value) {
+            $list = is_array($value) && array_is_list($value) && $value !== [] && array_filter($value, fn ($one) => ! is_scalar($one)) === [];
+            if (! is_scalar($value) && $value !== null && ! $list) {
+                throw new InvalidArgumentException("Action \"{$name}\": \"when\" compares \"{$field}\" with one value, null, or a list of values it may be one of.");
+            }
+        }
+        if ($on === 'collection' && $set !== []) {
+            throw new InvalidArgumentException("Action \"{$name}\" is on the collection, so it has no one record to set \"set\" on.");
+        }
+        foreach ($set as $field => $value) {
             if (! is_scalar($value) && $value !== null) {
-                throw new InvalidArgumentException("Action \"{$name}\": \"when\" compares \"{$field}\" with one value, or with null.");
+                throw new InvalidArgumentException("Action \"{$name}\": \"set\" gives \"{$field}\" one value, or null.");
             }
         }
         foreach ($fields as $field) {
@@ -85,6 +96,7 @@ final class Action
             (array) ($data['when'] ?? []),
             $fields,
             (bool) ($data['many'] ?? false),
+            (array) ($data['set'] ?? []),
         );
     }
 
@@ -99,7 +111,14 @@ final class Action
             'when' => $this->when ?: null,
             'fields' => $this->fields ? array_map(fn (Field $f) => $f->toArray(), $this->fields) : null,
             'many' => $this->many ?: null,
+            'set' => $this->set ?: null,
         ], fn ($v) => $v !== null);
+    }
+
+    /** Whether Nevela does it from "set", with no class of the app's own. */
+    public function sets(): bool
+    {
+        return $this->set !== [];
     }
 
     /** The second half of its permission: "send_announcement" in "newsletter_subscriptions.send_announcement". */
@@ -123,14 +142,15 @@ final class Action
     {
         foreach ($this->when as $field => $wanted) {
             $value = $values[$field] ?? null;
-            $same = match (true) {
-                $wanted === null => $value === null,
+            $matches = fn (mixed $one): bool => match (true) {
+                $one === null => $value === null,
                 $value === null => false,
                 // A yes/no column comes back from some databases as 1 and 0.
-                is_bool($wanted) => (bool) $value === $wanted,
-                default => (string) $value === (string) $wanted,
+                is_bool($one) => (bool) $value === $one,
+                default => (string) $value === (string) $one,
             };
-            if (! $same) {
+            // A list is any one of its values: a status that is pending, accepted or ready.
+            if (! (is_array($wanted) ? array_filter($wanted, $matches) !== [] : $matches($wanted))) {
                 return false;
             }
         }

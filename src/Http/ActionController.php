@@ -9,11 +9,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use Nevela\Laravel\History\History;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Rules\Phone as PhoneRule;
 use Nevela\Laravel\Support\Action;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Field;
+use Nevela\Laravel\Support\Fixed;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\Phone;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -49,7 +51,7 @@ final class ActionController
         $input = $this->input($request, $definition);
 
         return $this->run($definition, function () use ($descriptor, $definition, $record, $input, $request) {
-            $message = $this->handler($descriptor, $definition)->handle($record, $input);
+            $message = $this->perform($descriptor, $definition, $record, $input, $request);
 
             return ['message' => is_string($message) && $message !== '' ? $message : "{$definition->label}: done.", 'record' => $this->present($descriptor, $record, $request)];
         });
@@ -63,7 +65,7 @@ final class ActionController
 
         if ($definition->on === 'collection') {
             return $this->run($definition, function () use ($descriptor, $definition, $input) {
-                $message = $this->handler($descriptor, $definition)->handle($input);
+                $message = $this->handler($descriptor, $definition)?->handle($input);
 
                 return ['message' => is_string($message) && $message !== '' ? $message : "{$definition->label}: done."];
             });
@@ -78,8 +80,7 @@ final class ActionController
             return response()->json(['error' => 'Send the records as "ids": a list of 1 to '.self::MOST.'.'], 422);
         }
 
-        return $this->run($definition, function () use ($descriptor, $definition, $input, $ids) {
-            $handler = $this->handler($descriptor, $definition);
+        return $this->run($definition, function () use ($descriptor, $definition, $input, $ids, $request) {
             $done = 0;
             $skipped = 0;
             foreach (array_unique(array_map('strval', array_filter($ids, 'is_scalar'))) as $id) {
@@ -90,7 +91,7 @@ final class ActionController
 
                     continue;
                 }
-                $handler->handle($record, $input);
+                $this->perform($descriptor, $definition, $record, $input, $request);
                 $done++;
             }
             $what = strtolower($done === 1 ? $descriptor->label : $descriptor->pluralLabel);
@@ -184,9 +185,38 @@ final class ActionController
         return $validator->validated();
     }
 
-    private function handler(Descriptor $descriptor, Action $action): object
+    /**
+     * Do a record action to one record: what "set" says, then the app's own class if there
+     * is one, with a fixed record open to it. Then it is a step in the record's history.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    private function perform(Descriptor $descriptor, Action $action, Model $record, array $input, Request $request): mixed
+    {
+        $before = $record->getAttributes();
+        $message = Fixed::allowing(function () use ($descriptor, $action, $record, $input) {
+            if ($action->sets()) {
+                $values = [];
+                foreach ($action->set as $name => $value) {
+                    $values[$descriptor->fields[$name]->column()] = $value;
+                }
+                $record->forceFill($values)->save();
+            }
+
+            return $this->handler($descriptor, $action)?->handle($record, $input);
+        });
+        History::record($descriptor, $action, $record, $before, $input, $request->user());
+
+        return $message;
+    }
+
+    private function handler(Descriptor $descriptor, Action $action): ?object
     {
         $class = "App\\Nevela\\Actions\\{$descriptor->name}\\{$action->className()}";
+        // One that only sets values needs no class. One the app wrote anyway runs after.
+        if ($action->sets() && ! class_exists($class)) {
+            return null;
+        }
         if (! class_exists($class) || ! method_exists($class, 'handle')) {
             throw new \LogicException("{$action->label} has no class to do it. Run: php artisan nevela:generate {$descriptor->name}");
         }

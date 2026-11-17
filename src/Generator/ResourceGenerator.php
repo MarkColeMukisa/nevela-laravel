@@ -64,7 +64,8 @@ final class ResourceGenerator
             new GeneratedFile($api, "app/Policies/{$d->name}Policy.php", $this->policy($d), GeneratedFile::MODE_ONCE),
             new GeneratedFile(GeneratedFile::TARGET_WEB, 'resources/'.Naming::kebab($d->name).'.resource.ts', $this->typescript($d, $all)),
             ...$this->pages($d),
-            ...array_values(array_map(fn (Action $action) => new GeneratedFile($api, "app/Nevela/Actions/{$d->name}/{$action->className()}.php", $this->action($d, $action), GeneratedFile::MODE_ONCE), $d->actions)),
+            // One that only sets values ("set") is done by Nevela, with no class to write.
+            ...array_values(array_map(fn (Action $action) => new GeneratedFile($api, "app/Nevela/Actions/{$d->name}/{$action->className()}.php", $this->action($d, $action), GeneratedFile::MODE_ONCE), array_filter($d->actions, fn (Action $action) => ! $action->sets()))),
         ];
     }
 
@@ -432,6 +433,10 @@ final class ResourceGenerator
 
                     return $action;
                 }, $d->actions);
+            }
+            // Not edited or deleted once made: the dashboard offers its actions instead.
+            if ($d->fixed) {
+                $extras[$d->name]['fixed'] = true;
             }
             // The field its records are published by, and where on the site they are a blog.
             if ($d->publish !== null) {

@@ -18,6 +18,7 @@ final class MakeResourceCommand extends Command
         {--id=uuid : What a record\'s id is: uuid, or int for the numbered ids of $table->id()}
         {--items= : Lines edited inside its form and saved with it, as a resource of their own: "OrderItem: product:belongsTo(Product), quantity:int, price:money"}
         {--owner= : The string field that holds whose record it is, by email: each person sees their own, and those who may edit it see all. --owner=email}
+        {--fixed : Once made, a record is not edited or deleted by anyone signed in, its lines included; it changes only through its actions. A placed order}
         {--unique=* : Fields whose values go together once only: --unique=student,course is one enrolment for each student and course}
         {--force : Overwrite an existing descriptor}
         {--migrate : Run the new migration straight away}
@@ -41,6 +42,9 @@ final class MakeResourceCommand extends Command
             }
             if ($this->option('owner') !== null) {
                 $descriptor = Descriptor::fromArray(['owner' => (string) $this->option('owner')] + $descriptor->toArray());
+            }
+            if ($this->option('fixed')) {
+                $descriptor = Descriptor::fromArray(['fixed' => true] + $descriptor->toArray());
             }
             $lines = $this->option('items') === null ? null : self::lines($descriptor, (string) $this->option('items'));
             if ($lines !== null) {
