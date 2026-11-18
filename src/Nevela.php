@@ -148,15 +148,7 @@ final class Nevela
     public static function publicDescribed(): array
     {
         $all = self::all();
-        $sold = [];
-        foreach ($all as $d) {
-            $lines = $d->items === null ? null : self::find($d->items);
-            foreach ($lines?->fields ?? [] as $field) {
-                if ($field->kind === 'belongsTo' && $field->target !== $d->name) {
-                    $sold[$field->target] = true;
-                }
-            }
-        }
+        [$sold, $price] = self::soldOf($all);
         $currency = config('nevela.currency');
         $described = [];
         foreach ($all as $d) {
@@ -187,13 +179,60 @@ final class Nevela
                 'icon' => $d->icon,
                 'titleField' => $d->titleField !== null && isset($fields[$d->titleField]) ? $d->titleField : null,
                 'by' => $d->public->by,
-                'sold' => isset($sold[$d->name]) ?: null,
+                'sold' => $d->name === $sold ?: null,
+                // The price an order's line copies from it: the one charged, so the one to show.
+                'price' => $d->name === $sold && $price !== null && isset($fields[$price]) ? $price : null,
                 'open' => true,
                 'fields' => $fields,
             ], fn ($v) => $v !== null);
         }
 
         return $described;
+    }
+
+    /**
+     * What a shop sells, found as the mobile app finds it for someone signed in: the first
+     * resource whose lines point back at it and at one other resource, by a quantity. That
+     * other resource is what is sold, and nothing else: an order's lines that also point at
+     * a shelf don't sell the shelf. With the field a line's price is copied from, if any.
+     *
+     * @param  list<Descriptor>  $all
+     * @return array{0: string|null, 1: string|null}
+     */
+    private static function soldOf(array $all): array
+    {
+        $names = array_map(fn (Descriptor $d) => $d->name, $all);
+        foreach ($all as $d) {
+            $lines = $d->items === null ? null : self::find($d->items);
+            if ($lines === null) {
+                continue;
+            }
+            $link = null;
+            $bought = null;
+            foreach ($lines->fields as $name => $field) {
+                if ($field->kind !== 'belongsTo') {
+                    continue;
+                }
+                if ($field->target === $d->name) {
+                    $link ??= $name;
+                } elseif ($bought === null && in_array($field->target, $names, true)) {
+                    $bought = [$name, $field->target];
+                }
+            }
+            $quantity = array_filter($lines->fields, fn ($field, $name) => in_array($field->kind, ['int', 'float'], true) && preg_match('/^(quantity|qty)$/i', (string) $name), ARRAY_FILTER_USE_BOTH);
+            if ($link === null || $bought === null || $quantity === []) {
+                continue;
+            }
+            foreach ($lines->fields as $field) {
+                if ($field->kind === 'float' && $field->format === 'money' && is_string($field->from) && str_starts_with($field->from, $bought[0].'.')) {
+                    return [$bought[1], substr($field->from, strlen($bought[0]) + 1)];
+                }
+            }
+
+            return [$bought[1], null];
+        }
+
+        return [null, null];
     }
 
     public static function forget(): void
