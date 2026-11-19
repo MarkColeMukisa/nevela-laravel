@@ -203,6 +203,11 @@ final class NevelaServiceProvider extends ServiceProvider
             Sanctum::authenticateAccessTokensUsing(fn ($token, bool $isValid) => $isValid && Sessions::accepts($token));
         }
 
+        // What the routes refer to by name. Set up on every boot, so a route cache
+        // (`route:cache`, `optimize`) finds them: the cache keeps the routes, not these.
+        $this->limitAttempts();
+        Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
+
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
         }
@@ -244,10 +249,9 @@ final class NevelaServiceProvider extends ServiceProvider
         });
     }
 
+    /** Only routes: anything else here would be missing when the routes come from the cache. */
     private function registerRoutes(): void
     {
-        $this->limitAttempts();
-
         $prefix = config('nevela.prefix', 'api');
 
         if (config('nevela.auth.enabled', true)) {
@@ -318,8 +322,6 @@ final class NevelaServiceProvider extends ServiceProvider
             'nevela' => Nevela::VERSION,
             'app' => Nevela::fingerprint(),
         ]))->name('nevela.ping');
-
-        Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
 
         // What anyone may read, described: the resources with a "public.read", each cut to the
         // fields it opens. The mobile app reads it to show a shop to someone not signed in, on
