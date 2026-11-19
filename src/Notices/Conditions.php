@@ -91,7 +91,7 @@ final class Conditions
         }
         $at = Cache::get(DeployCheckCommand::HEARTBEAT);
         if (! is_int($at) || time() - $at > 15 * 60) {
-            $add('scheduler', "The scheduler isn't running", 'The trash, ended sign-ins and the hourly digest wait for it. Add the cron line, or switch on the scheduler in Laravel Cloud.');
+            $add('scheduler', "The scheduler isn't running", 'The trash, ended sign-ins and the hourly digest wait for it. Add the cron line, switch on the scheduler in Laravel Cloud, or on a host with no cron run php artisan schedule:work beside the web server.', 'warning', 'https://nevela-docs.vercel.app/guides/container-hosts/#the-scheduler');
         }
         $mailer = (string) config('mail.default');
         if (in_array((string) config("mail.mailers.{$mailer}.transport", $mailer), ['log', 'array'], true)) {

@@ -111,8 +111,29 @@ final class DeployCheckCommand extends Command
             $ago !== null && $ago <= 15 * 60,
             $ago === null ? '' : 'ran '.($ago < 60 ? 'under a minute' : intdiv($ago, 60).' min').' ago',
             ($ago === null ? 'no sign of it' : 'last ran '.intdiv($ago, 60).' min ago').
-                ". It removes the trash and ended sign-ins each night and sends the hourly digest. On Laravel Cloud, switch on the scheduler for the app; elsewhere, a cron line: * * * * * php artisan schedule:run. (It leaves a sign every 5 minutes.)",
+                '. It removes the trash and ended sign-ins each night and sends the hourly digest. '.self::howToRunTheScheduler().' (It leaves a sign every 5 minutes.)',
         );
+    }
+
+    /**
+     * The ways to run the scheduler, the likeliest first. A container host (Sevalla, Railway,
+     * Fly.io, Render) often has no cron, and a second process there can't always write where
+     * the web process reads: SQLite or the database cache on a disk only one process holds.
+     * So the scheduler runs in the web process's own container, started beside it.
+     */
+    public static function howToRunTheScheduler(): string
+    {
+        $cloud = 'On Laravel Cloud, switch on the scheduler for the app.';
+        $cron = 'On a server with cron, add the line: * * * * * php artisan schedule:run.';
+        $container = 'On a host with no cron, run it beside the web server in the start command: (php artisan schedule:work &) && <start the web server>.';
+
+        return implode(' ', self::inContainer() ? [$cloud, $container, $cron] : [$cloud, $cron, $container]);
+    }
+
+    /** Whether this runs in a container, where there is seldom a crontab. */
+    private static function inContainer(): bool
+    {
+        return is_file('/.dockerenv') || is_file('/run/.containerenv') || getenv('KUBERNETES_SERVICE_HOST') !== false;
     }
 
     private function queue(): void
