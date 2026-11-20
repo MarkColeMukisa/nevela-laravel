@@ -4,6 +4,7 @@ namespace Nevela\Laravel\Http;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
@@ -58,11 +59,33 @@ final class UploadController
      */
     public static function receive(Request $request, Descriptor $descriptor, Field $definition): Upload|JsonResponse
     {
-        $name = basename(str_replace('\\', '/', (string) $request->query('name', 'file')));
         $limit = Uploads::maxBytes();
         $megabytes = round($limit / 1024 / 1024, 1);
-        if ((int) $request->header('Content-Length', '0') > $limit) {
-            return self::refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
+
+        // The file is the request's body, or a form's "file" part. A phone sends the form:
+        // React Native reads the picture from disk itself, where a body made in JavaScript
+        // arrives altered on Android. PHP reads forms only from a POST, so the app sends
+        // one with _method=PUT, and Laravel routes it as the PUT it stands for.
+        $part = $request->file('file');
+        if ($part instanceof UploadedFile) {
+            $name = basename(str_replace('\\', '/', (string) $request->query('name', $part->getClientOriginalName() ?: 'file')));
+            if (! $part->isValid()) {
+                return in_array($part->getError(), [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                    ? self::refuse(413, "{$name} is larger than this server takes from a form (upload_max_filesize is ".ini_get('upload_max_filesize').').')
+                    : self::refuse(422, "{$name} didn't arrive whole. Try again.");
+            }
+            if ((int) $part->getSize() > $limit) {
+                return self::refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
+            }
+            $declared = $part->getClientMimeType() ?: 'application/octet-stream';
+            $in = fopen($part->getRealPath(), 'rb');
+        } else {
+            $name = basename(str_replace('\\', '/', (string) $request->query('name', 'file')));
+            if ((int) $request->header('Content-Length', '0') > $limit) {
+                return self::refuse(413, "{$name} is larger than the {$megabytes} MB this field takes.");
+            }
+            $declared = (string) $request->header('Content-Type', 'application/octet-stream');
+            $in = $request->getContent(true);
         }
 
         // Copied to a temporary file with the limit enforced while it arrives: the length
@@ -72,7 +95,7 @@ final class UploadController
         try {
             $out = fopen($path, 'wb');
             try {
-                $written = stream_copy_to_stream($request->getContent(true), $out, $limit + 1);
+                $written = stream_copy_to_stream($in, $out, $limit + 1);
             } finally {
                 fclose($out);
             }
@@ -84,7 +107,6 @@ final class UploadController
             }
 
             $mime = FileTypes::sniff($path);
-            $declared = (string) $request->header('Content-Type', 'application/octet-stream');
             // The contents decide. What was declared only has to agree with them.
             $effective = FileTypes::accepts($definition->accept, $mime) ? $mime : $declared;
             if (FileTypes::forbidden($mime) || ! FileTypes::accepts($definition->accept, $effective) || ! FileTypes::consistent($declared, $mime)) {
