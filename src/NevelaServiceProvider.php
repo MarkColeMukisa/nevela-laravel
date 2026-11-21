@@ -38,6 +38,7 @@ use Nevela\Laravel\Console\DisposableCommand;
 use Nevela\Laravel\Console\FieldCommand;
 use Nevela\Laravel\Console\GenerateCommand;
 use Nevela\Laravel\Console\MakeResourceCommand;
+use Nevela\Laravel\Console\OpenApiCommand;
 use Nevela\Laravel\Console\PruneSessionsCommand;
 use Nevela\Laravel\Console\PublishCommand;
 use Nevela\Laravel\Console\RemoveResourceCommand;
@@ -66,6 +67,7 @@ use Nevela\Laravel\Http\ActivityController;
 use Nevela\Laravel\Http\TrashController;
 use Nevela\Laravel\Http\UploadController;
 use Nevela\Laravel\Http\NotificationsController;
+use Nevela\Laravel\Http\OpenApiController;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Notices\Conditions;
 use Nevela\Laravel\Notices\Notice;
@@ -106,7 +108,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, FieldCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class, OpenApiCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -395,6 +397,8 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/resources', fn () => response()->json([
                 'data' => Nevela::described(),
             ]))->name('resources');
+            // The same, as an OpenAPI document: every resource's routes, fields and permissions.
+            Route::get('_nevela/openapi.json', OpenApiController::class)->name('openapi');
 
             // A resource's own actions: on one record, and on the list or a selection from it.
             Route::post('{slug}/_actions/{action}', [ActionController::class, 'collection'])->name('actions.collection');
