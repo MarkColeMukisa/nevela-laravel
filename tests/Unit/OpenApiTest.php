@@ -128,8 +128,8 @@ final class OpenApiTest extends TestCase
         $this->assertSame(['string', 'null'], $p['reason']['type']);
         $this->assertSame('text/html', $p['notes']['contentMediaType']);
         $this->assertSame(['object', 'array', 'null'], $p['extras']['type']);
-        $this->assertSame('#/components/schemas/PrivateFile', $p['contractFile']['oneOf'][0]['$ref']);
-        $this->assertSame('#/components/schemas/File', $p['scansFiles']['items']['oneOf'][0]['$ref']);
+        $this->assertSame('#/components/schemas/NevelaPrivateFile', $p['contractFile']['oneOf'][0]['$ref']);
+        $this->assertSame('#/components/schemas/NevelaFile', $p['scansFiles']['items']['oneOf'][0]['$ref']);
     }
 
     public function test_a_create_requires_what_the_generated_request_does(): void
@@ -174,6 +174,29 @@ final class OpenApiTest extends TestCase
         $this->assertSame(['id', 'name', 'logo', 'logoFile'], array_keys($doc['components']['schemas']['PublicVenue']['properties']));
         $this->assertSame('Its name.', $doc['paths']['/public/venues/{id}']['get']['parameters'][0]['description']);
         $this->assertArrayNotHasKey('post', $doc['paths']['/public/venues']);
+    }
+
+    public function test_names_an_app_chooses_meet_nothing_of_nevela_s_own(): void
+    {
+        // A resource called File, an action called show, and PublicVenue beside Venue's public side.
+        $file = Descriptor::fromArray(['name' => 'File', 'fields' => ['title' => ['kind' => 'string'], 'scan' => ['kind' => 'file', 'accept' => ['pdf'], 'required' => false]], 'actions' => ['show' => ['on' => 'record']]]);
+        $publicVenue = Descriptor::fromArray(['name' => 'PublicVenue', 'fields' => ['name' => ['kind' => 'string']]]);
+        $doc = $this->document($file, $this->venue(), $publicVenue);
+
+        $this->assertSame(['title', 'scan'], array_slice(array_keys($doc['components']['schemas']['File']['properties']), 1, 2));
+        $this->assertSame('#/components/schemas/NevelaFile', $doc['components']['schemas']['File']['properties']['scanFile']['oneOf'][0]['$ref']);
+        $this->assertArrayHasKey('renditions', $doc['components']['schemas']['NevelaFile']['properties']);
+        $ids = [];
+        foreach ($doc['paths'] as $item) {
+            foreach (['get', 'post', 'put', 'patch', 'delete'] as $method) {
+                if (isset($item[$method])) {
+                    $ids[] = $item[$method]['operationId'];
+                }
+            }
+        }
+        $this->assertSame(count($ids), count(array_unique($ids)), 'an operationId is used twice');
+        $this->assertContains('runFileShow', $ids);
+        $this->assertContains('showFile', $ids);
     }
 
     public function test_a_resource_with_lines_takes_them_inline(): void

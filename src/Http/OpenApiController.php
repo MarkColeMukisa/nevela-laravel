@@ -23,7 +23,9 @@ final class OpenApiController
     {
         return (new OpenApi(
             Nevela::all(),
-            url((string) config('nevela.prefix', 'api')),
+            // APP_URL, the address the app is reached at, and not whichever one this request came by:
+            // the dashboard asks Laravel by an address of its own, which may be one only it can reach.
+            rtrim((string) (config('app.url') ?: url('/')), '/').'/'.trim((string) config('nevela.prefix', 'api'), '/'),
             title: (string) config('app.name', 'API'),
             version: Nevela::VERSION,
             perPage: (int) config('nevela.per_page', 25),

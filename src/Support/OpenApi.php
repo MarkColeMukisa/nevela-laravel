@@ -66,6 +66,7 @@ final class OpenApi
             }
         }
         ksort($this->schemas);
+        $this->uniqueOperationIds();
 
         return [
             'openapi' => self::VERSION,
@@ -114,7 +115,7 @@ final class OpenApi
                 'responses' => [
                     '200' => self::json('A page of them.', [
                         'type' => 'object',
-                        'properties' => ['data' => ['type' => 'array', 'items' => self::ref($name)], 'meta' => self::ref('ListMeta')],
+                        'properties' => ['data' => ['type' => 'array', 'items' => self::ref($name)], 'meta' => self::ref('NevelaListMeta')],
                         'required' => ['data', 'meta'],
                         'additionalProperties' => false,
                     ]),
@@ -177,7 +178,7 @@ final class OpenApi
                     '401' => self::use('SignIn'),
                     '403' => self::use('Forbidden'),
                     '404' => self::use('NotFound'),
-                    '409' => self::json('Other records belong to it: move or delete them first.', self::ref('Error')),
+                    '409' => self::json('Other records belong to it: move or delete them first.', self::ref('NevelaError')),
                 ],
             ] + $permission('delete'),
         ];
@@ -193,7 +194,7 @@ final class OpenApi
                 $choices === [] ? null : ['name' => 'field', 'in' => 'query', 'schema' => ['type' => 'string', 'enum' => $choices]],
             ])),
             'responses' => [
-                '200' => self::json('The counts.', self::ref('Stats')),
+                '200' => self::json('The counts.', self::ref('NevelaStats')),
                 '400' => self::use('QueryRefused'),
                 '401' => self::use('SignIn'),
                 '403' => self::use('Forbidden'),
@@ -210,7 +211,7 @@ final class OpenApi
                 ...array_values(array_filter($this->listParameters($d), fn (array $p) => ! in_array($p['name'], ['page', 'perPage', 'sort'], true))),
             ],
             'responses' => [
-                '200' => self::json('The series and the breakdowns.', self::ref('Insights')),
+                '200' => self::json('The series and the breakdowns.', self::ref('NevelaInsights')),
                 '400' => self::use('QueryRefused'),
                 '401' => self::use('SignIn'),
                 '403' => self::use('Forbidden'),
@@ -236,7 +237,7 @@ final class OpenApi
                 ]),
                 '401' => self::use('SignIn'),
                 '403' => self::use('Forbidden'),
-                '422' => self::json('Nothing was created: the rows that need fixing, by number from 1.', self::ref('RowsRefused')),
+                '422' => self::json('Nothing was created: the rows that need fixing, by number from 1.', self::ref('NevelaRowsRefused')),
             ],
         ] + $permission('create')];
 
@@ -260,7 +261,7 @@ final class OpenApi
             '401' => self::use('SignIn'),
             '403' => self::use('Forbidden'),
             '404' => self::use('NotFound'),
-            '409' => self::json('Someone else saved it after the updatedAt that was sent ("code": "CHANGED_SINCE_READ", with the record as it is now as "current"), or a value another record has.', self::ref('Conflict')),
+            '409' => self::json('Someone else saved it after the updatedAt that was sent ("code": "CHANGED_SINCE_READ", with the record as it is now as "current"), or a value another record has.', self::ref('NevelaConflict')),
             '422' => self::use('Invalid'),
         ];
     }
@@ -329,11 +330,11 @@ final class OpenApi
             'tags' => [$d->pluralLabel],
             'x-nevela-permission' => "{$d->table}.{$action->key()}",
         ] + ($action->confirm !== null ? ['x-nevela-confirm' => $action->confirm] : []);
-        $failed = self::json("{$action->label} didn't work, and nothing was changed.", self::ref('Error'));
+        $failed = self::json("{$action->label} didn't work, and nothing was changed.", self::ref('NevelaError'));
 
         if ($action->on === 'record') {
             $this->paths["/{$d->slug}/{id}/_actions/{$action->name}"] = ['post' => $common + [
-                'operationId' => "{$action->name}{$name}",
+                'operationId' => "run{$name}".ucfirst($action->name),
                 'summary' => $action->label,
                 'description' => trim(($action->confirm !== null ? "The dashboard asks first: \"{$action->confirm}\"" : '').$when),
                 'parameters' => [['name' => 'id', 'in' => 'path', 'required' => true, 'schema' => $this->idSchema($d)]],
@@ -348,7 +349,7 @@ final class OpenApi
                     '401' => self::use('SignIn'),
                     '403' => self::use('Forbidden'),
                     '404' => self::use('NotFound'),
-                    '409' => self::json("It can't be done to this record as it is now.", self::ref('Error')),
+                    '409' => self::json("It can't be done to this record as it is now.", self::ref('NevelaError')),
                     '422' => self::use('Invalid'),
                     '500' => $failed,
                 ],
@@ -357,7 +358,7 @@ final class OpenApi
         if ($action->on === 'collection' || $action->many) {
             $many = $action->on === 'record';
             $this->paths["/{$d->slug}/_actions/{$action->name}"] = ['post' => $common + [
-                'operationId' => ($many ? "{$action->name}Many" : $action->name).$name,
+                'operationId' => "run{$name}".ucfirst($action->name).($many ? 'Many' : ''),
                 'summary' => $many ? "{$action->label}, on several" : $action->label,
                 'description' => $many ? 'On each record "ids" names. One it no longer applies to, or that has gone, is passed over and counted as skipped.' : ($action->confirm !== null ? "The dashboard asks first: \"{$action->confirm}\"" : ''),
                 'requestBody' => self::body([
@@ -407,13 +408,13 @@ final class OpenApi
     {
         $accepts = implode(', ', $field->accept ?: ['any']);
         $what = $field->isImage() ? 'An image, optimised as it arrives' : "A file ({$accepts})";
-        $answer = self::json('Stored. Put its "key" in the record\'s "'.$field->name.'".', self::ref('File'));
+        $answer = self::json('Stored. Put its "key" in the record\'s "'.$field->name.'".', self::ref('NevelaFile'));
         $tag = [$d->pluralLabel];
         $responses = [
             '201' => $answer,
             '403' => self::use('Forbidden'),
-            '413' => self::json('Larger than the field takes, or than PHP takes from a form.', self::ref('Error')),
-            '422' => self::json('Not a kind of file the field takes.', self::ref('Error')),
+            '413' => self::json('Larger than the field takes, or than PHP takes from a form.', self::ref('NevelaError')),
+            '422' => self::json('Not a kind of file the field takes.', self::ref('NevelaError')),
         ] + ($open ? ['429' => self::use('TooMany')] : ['401' => self::use('SignIn')]);
         $name = ['name' => 'name', 'in' => 'query', 'description' => 'The file\'s name, as it is shown. A form\'s part says it otherwise.', 'schema' => ['type' => 'string']];
         $security = $open ? ['security' => []] : ['x-nevela-permission' => "{$d->table}.create"];
@@ -470,7 +471,7 @@ final class OpenApi
                 'responses' => [
                     '200' => self::json('A page of them.', [
                         'type' => 'object',
-                        'properties' => ['data' => ['type' => 'array', 'items' => self::ref("Public{$d->name}")], 'meta' => self::ref('ListMeta')],
+                        'properties' => ['data' => ['type' => 'array', 'items' => self::ref("Public{$d->name}")], 'meta' => self::ref('NevelaListMeta')],
                         'required' => ['data', 'meta'],
                         'additionalProperties' => false,
                     ]),
@@ -544,7 +545,7 @@ final class OpenApi
                     ],
                     'responses' => [
                         '200' => self::json('Proved.', ['type' => 'object', 'properties' => ['confirmed' => ['type' => 'boolean']], 'required' => ['confirmed']]),
-                        '404' => self::json('The link is no longer good.', self::ref('Error')),
+                        '404' => self::json('The link is no longer good.', self::ref('NevelaError')),
                         '429' => self::use('TooMany'),
                     ],
                 ]];
@@ -561,7 +562,7 @@ final class OpenApi
         foreach ($d->fields as $key => $field) {
             $properties[$key] = $this->value($field, ! $field->alwaysRequired(), 'output');
             if ($field->kind === 'file') {
-                $file = self::ref($field->private ? 'PrivateFile' : 'File');
+                $file = self::ref($field->private ? 'NevelaPrivateFile' : 'NevelaFile');
                 $field->multiple
                     ? $properties["{$key}Files"] = ['type' => 'array', 'items' => ['oneOf' => [$file, ['type' => 'null']]], 'description' => 'Each file\'s details, in the order of the keys.']
                     : $properties["{$key}File"] = ['oneOf' => [$file, ['type' => 'null']], 'description' => 'The file\'s details: what a page needs to show it.'];
@@ -595,7 +596,7 @@ final class OpenApi
             $field = $d->fields[$key];
             $properties[$key] = $this->value($field, ! $field->alwaysRequired(), 'output');
             if ($field->kind === 'file') {
-                $properties["{$key}File"] = ['oneOf' => [self::ref('File'), ['type' => 'null']]];
+                $properties["{$key}File"] = ['oneOf' => [self::ref('NevelaFile'), ['type' => 'null']]];
             }
         }
 
@@ -810,9 +811,9 @@ final class OpenApi
             ]),
             'responses' => [
                 '200' => self::json('A second step is needed.', ['type' => 'object', 'properties' => ['twoFactor' => ['type' => 'boolean'], 'challenge' => ['type' => 'string'], 'methods' => ['type' => 'array', 'items' => ['type' => 'string']]]]),
-                '201' => self::json('Signed in.', self::ref('Token')),
-                '401' => self::json('The email and password don\'t match.', self::ref('Error')),
-                '403' => self::json('The email isn\'t verified yet.', self::ref('Error')),
+                '201' => self::json('Signed in.', self::ref('NevelaToken')),
+                '401' => self::json('The email and password don\'t match.', self::ref('NevelaError')),
+                '403' => self::json('The email isn\'t verified yet.', self::ref('NevelaError')),
                 '422' => self::use('Invalid'),
                 '429' => self::use('TooMany'),
             ],
@@ -840,22 +841,22 @@ final class OpenApi
         ];
 
         return [
-            'Error' => [
+            'NevelaError' => [
                 'type' => 'object',
                 'properties' => ['error' => ['type' => 'string', 'description' => 'Written to be shown to the person.'], 'code' => ['type' => 'string'], 'detail' => ['type' => 'string']],
                 'required' => ['error'],
             ],
-            'ValidationError' => [
+            'NevelaValidationError' => [
                 'type' => 'object',
                 'properties' => ['error' => ['type' => 'string'], 'issues' => ['type' => 'array', 'items' => $issue('path'), 'description' => 'Each field\'s problem, by its name ("items.0.quantity" for a line\'s).']],
                 'required' => ['error', 'issues'],
             ],
-            'QueryError' => [
+            'NevelaQueryError' => [
                 'type' => 'object',
                 'properties' => ['error' => ['type' => 'string'], 'issues' => ['type' => 'array', 'items' => $issue('param')]],
                 'required' => ['error', 'issues'],
             ],
-            'RowsRefused' => [
+            'NevelaRowsRefused' => [
                 'type' => 'object',
                 'properties' => [
                     'error' => ['type' => 'string'],
@@ -863,7 +864,7 @@ final class OpenApi
                 ],
                 'required' => ['error'],
             ],
-            'Conflict' => [
+            'NevelaConflict' => [
                 'type' => 'object',
                 'properties' => [
                     'error' => ['type' => 'string'],
@@ -873,13 +874,13 @@ final class OpenApi
                 ],
                 'required' => ['error'],
             ],
-            'ListMeta' => [
+            'NevelaListMeta' => [
                 'type' => 'object',
                 'properties' => ['page' => ['type' => 'integer'], 'perPage' => ['type' => 'integer'], 'total' => ['type' => 'integer'], 'totalPages' => ['type' => 'integer']],
                 'required' => ['page', 'perPage', 'total', 'totalPages'],
                 'additionalProperties' => false,
             ],
-            'Stats' => [
+            'NevelaStats' => [
                 'type' => 'object',
                 'properties' => [
                     'total' => ['type' => 'integer'],
@@ -890,7 +891,7 @@ final class OpenApi
                 'required' => ['total', 'current', 'previous', 'values'],
                 'additionalProperties' => false,
             ],
-            'Insights' => [
+            'NevelaInsights' => [
                 'type' => 'object',
                 'properties' => [
                     'total' => ['type' => 'integer'],
@@ -910,7 +911,7 @@ final class OpenApi
                 'required' => ['total', 'unit', 'series', 'breakdown'],
                 'additionalProperties' => false,
             ],
-            'File' => [
+            'NevelaFile' => [
                 'type' => 'object',
                 'description' => 'A stored file. An image also has its size in pixels and its smaller renditions.',
                 'properties' => [
@@ -932,7 +933,7 @@ final class OpenApi
                 'required' => ['key', 'url'],
                 'additionalProperties' => false,
             ],
-            'PrivateFile' => [
+            'NevelaPrivateFile' => [
                 'type' => 'object',
                 'description' => 'A file only someone who may view the record can fetch, from "url". Its key opens nothing.',
                 'properties' => [
@@ -946,7 +947,7 @@ final class OpenApi
                 'required' => ['url'],
                 'additionalProperties' => false,
             ],
-            'Token' => [
+            'NevelaToken' => [
                 'type' => 'object',
                 'properties' => [
                     'token' => ['type' => 'string'],
@@ -965,14 +966,37 @@ final class OpenApi
     private static function responses(): array
     {
         return [
-            'SignIn' => self::json('Not signed in, or the token has run out.', self::ref('Error')),
-            'Forbidden' => self::json('Signed in, without the permission this takes.', self::ref('Error')),
-            'NotFound' => self::json('No such record, or not one this person may see.', self::ref('Error')),
-            'Invalid' => self::json('What was sent needs fixing: each problem by field.', self::ref('ValidationError')),
-            'QueryRefused' => self::json('A query parameter that can\'t be used: each by name.', self::ref('QueryError')),
-            'Taken' => self::json('A value another record has.', self::ref('Conflict')),
-            'TooMany' => self::json('Too many requests from one address: wait a minute.', self::ref('Error')),
+            'SignIn' => self::json('Not signed in, or the token has run out.', self::ref('NevelaError')),
+            'Forbidden' => self::json('Signed in, without the permission this takes.', self::ref('NevelaError')),
+            'NotFound' => self::json('No such record, or not one this person may see.', self::ref('NevelaError')),
+            'Invalid' => self::json('What was sent needs fixing: each problem by field.', self::ref('NevelaValidationError')),
+            'QueryRefused' => self::json('A query parameter that can\'t be used: each by name.', self::ref('NevelaQueryError')),
+            'Taken' => self::json('A value another record has.', self::ref('NevelaConflict')),
+            'TooMany' => self::json('Too many requests from one address: wait a minute.', self::ref('NevelaError')),
         ];
+    }
+
+    /**
+     * No two operations with one id, which OpenAPI forbids and client generators trip on.
+     * The names are made not to meet (an action's start "run"), but resource names are the
+     * app's own: a PublicFoo's list and Foo's public list would both be listPublicFoo.
+     */
+    private function uniqueOperationIds(): void
+    {
+        $seen = [];
+        foreach ($this->paths as $path => $item) {
+            foreach (['get', 'post', 'put', 'patch', 'delete'] as $method) {
+                if (! isset($item[$method]['operationId'])) {
+                    continue;
+                }
+                $id = $item[$method]['operationId'];
+                for ($n = 2; isset($seen[$id]); $n++) {
+                    $id = $item[$method]['operationId'].$n;
+                }
+                $seen[$id] = true;
+                $this->paths[$path][$method]['operationId'] = $id;
+            }
+        }
     }
 
     /** "a product", "an order". */
