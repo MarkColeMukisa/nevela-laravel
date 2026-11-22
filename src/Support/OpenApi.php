@@ -303,12 +303,54 @@ final class OpenApi
             $parameters[] = array_filter([
                 'name' => "filter[{$key}]",
                 'in' => 'query',
-                'description' => 'Only those where it is this.'.($field->alwaysRequired() ? '' : ' "null" for those where it is empty.'),
+                'description' => 'Only those where it is this.'
+                    .($field->alwaysRequired() ? '' : ' "null" for those where it is empty.')
+                    .(in_array($field->kind, ListQuery::COMMA_LISTS, true) ? ' Several, separated by commas, for those where it is any of them.' : ''),
                 'schema' => $schema,
             ]);
+            array_push($parameters, ...self::operatorParameters($key, $field->kind, $schema));
+        }
+        foreach (ListQuery::TIMESTAMPS as $key => $column) {
+            array_push($parameters, ...self::operatorParameters($key, 'datetime', ['type' => 'string']));
         }
         if ($d->public?->confirm !== null) {
             $parameters[] = ['name' => 'filter[confirmed]', 'in' => 'query', 'description' => 'Whether the address has been proved.', 'schema' => ['type' => 'boolean']];
+        }
+        if ($d->items !== null) {
+            $parameters[] = ['name' => 'include', 'in' => 'query', 'description' => 'Each record with its lines, as "items".', 'schema' => ['type' => 'string', 'enum' => ['items']]];
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * filter[field][op] for each operator the field's kind takes.
+     *
+     * @param  array<string, mixed>  $schema  What one of its values is
+     * @return list<array<string, mixed>>
+     */
+    private static function operatorParameters(string $key, string $kind, array $schema): array
+    {
+        $dates = in_array($kind, ['date', 'datetime'], true);
+        $one = $dates ? ['type' => 'string', 'description' => $kind === 'date' ? 'YYYY-MM-DD' : 'YYYY-MM-DD for the whole day, or an ISO 8601 time'] : $schema;
+        $parameters = [];
+        foreach (ListQuery::OPERATORS[$kind] ?? [] as $op) {
+            $parameters[] = [
+                'name' => "filter[{$key}][{$op}]",
+                'in' => 'query',
+                'description' => match ($op) {
+                    'in' => 'Only those where it is any of these, separated by commas (at most '.ListQuery::MAX_IN.').',
+                    'contains' => 'Only those where it contains these words, in any case.',
+                    'gt' => $dates ? 'Only those after this.' : 'Only those larger than this.',
+                    'lt' => $dates ? 'Only those before this.' : 'Only those smaller than this.',
+                    default => 'Only those from the first to the second, both included, separated by a comma.',
+                },
+                'schema' => match ($op) {
+                    'gt', 'lt' => array_diff_key($one, ['description' => true]),
+                    'contains' => ['type' => 'string', 'maxLength' => 200],
+                    default => ['type' => 'string'],
+                },
+            ];
         }
 
         return $parameters;
@@ -570,7 +612,7 @@ final class OpenApi
         }
         $lines = $this->lines($d);
         if ($lines !== null) {
-            $properties['items'] = ['type' => 'array', 'items' => self::ref($lines['resource']->name), 'description' => 'Its lines. On a record\'s own page and in what a save answers; not in a list.'];
+            $properties['items'] = ['type' => 'array', 'items' => self::ref($lines['resource']->name), 'description' => 'Its lines. On a record\'s own page, in what a save answers, and in a list asked for them with ?include=items.'];
         }
         if ($d->public?->confirm !== null) {
             $properties['confirmedAt'] = ['type' => ['string', 'null'], 'format' => 'date-time', 'description' => 'When the address was proved. Empty until it is.'];

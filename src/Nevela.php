@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Nevela\Laravel\Access\Visibility;
+use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Support\Descriptor;
 use Nevela\Laravel\Support\Insights;
@@ -262,12 +263,18 @@ final class Nevela
      */
     public static function listFor(Builder $query, Descriptor $resource, Request $request, string $resourceClass): JsonResponse
     {
-        $list = ListQuery::parse($resource, $request->query(), (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100));
+        $list = ListQuery::parse($resource, $request->query(), (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100), (string) config('app.timezone', 'UTC'));
         if (! $list->ok()) {
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
         }
 
         self::narrow($query, $resource, $list);
+
+        // ?include=items: each record with its lines, loaded for the whole page in one query.
+        $lines = in_array('items', $list->include, true) ? (new ResourceGenerator)->lineItems($resource, self::all()) : null;
+        if ($lines !== null && method_exists($query->getModel(), $lines['name'])) {
+            $query->with($lines['name']);
+        }
 
         $query->reorder()
             ->orderBy($list->sort['column'], $list->sort['direction'])
@@ -280,6 +287,14 @@ final class Nevela
             if ($field->kind === 'file') {
                 // A gallery's column is a list of keys: every key of every record.
                 Uploads::preload($page->getCollection()->pluck($field->column())->flatten());
+            }
+        }
+        if ($lines !== null && $page->getCollection()->first()?->relationLoaded($lines['name'])) {
+            $all = $page->getCollection()->pluck($lines['name'])->flatten(1);
+            foreach ($lines['resource']->fields as $field) {
+                if ($field->kind === 'file') {
+                    Uploads::preload($all->pluck($field->column())->flatten());
+                }
             }
         }
 
@@ -326,6 +341,28 @@ final class Nevela
                 continue;
             }
             $field = $resource->fields[$filter['field']] ?? null;
+            $op = $filter['op'] ?? null;
+            if ($op === 'contains') {
+                $query->whereLike($filter['column'], '%'.addcslashes((string) $filter['value'], '%_\\').'%');
+
+                continue;
+            }
+            if ($op === 'range') {
+                foreach ($filter['value'] as [$comparison, $bound]) {
+                    // A time is compared as one in the app's timezone, which is how Laravel saves them.
+                    $query->where($filter['column'], $comparison, $bound instanceof \DateTimeInterface ? $bound->format('Y-m-d H:i:s') : $bound);
+                }
+
+                continue;
+            }
+            if ($op === 'in') {
+                $values = $field?->kind === 'belongsTo'
+                    ? array_values(array_filter($filter['value'], fn ($id) => self::couldBeId((string) $field->target, (string) $id)))
+                    : $filter['value'];
+                $values === [] ? $query->whereRaw('1 = 0') : $query->whereIn($filter['column'], $values);
+
+                continue;
+            }
             if ($filter['value'] !== null && $field?->kind === 'belongsTo' && ! self::couldBeId((string) $field->target, (string) $filter['value'])) {
                 // Nothing belongs to a record that can't exist. Asked anyway, some databases
                 // answer a number column given letters with an error instead of with no rows.
@@ -382,8 +419,8 @@ final class Nevela
             return response()->json(['error' => 'Invalid query.', 'issues' => [['param' => 'unit', 'message' => 'Must be day, week or month.']]], 400);
         }
         // The same parameters as the list. Where in the list someone is makes no difference to a count.
-        $params = array_diff_key($request->query(), array_flip(['unit', 'page', 'perPage', 'sort', 'columns']));
-        $list = ListQuery::parse($resource, $params, (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100));
+        $params = array_diff_key($request->query(), array_flip(['unit', 'page', 'perPage', 'sort', 'columns', 'include']));
+        $list = ListQuery::parse($resource, $params, (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100), (string) config('app.timezone', 'UTC'));
         if (! $list->ok()) {
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
         }

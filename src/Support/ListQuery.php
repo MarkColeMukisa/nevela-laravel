@@ -31,15 +31,45 @@ final class ListQuery
     /** The filter that isn't a field: whether a record's address has been proved ("confirm"). */
     public const CONFIRMED = 'confirmed';
 
+    /** filter[field][operator]: what each kind of field can be asked, beyond being equal to one value. */
+    public const OPERATORS = [
+        'string' => ['in', 'contains'],
+        'int' => ['in', 'gt', 'lt', 'between'],
+        'float' => ['in', 'gt', 'lt', 'between'],
+        'enum' => ['in'],
+        'belongsTo' => ['in'],
+        'date' => ['gt', 'lt', 'between'],
+        'datetime' => ['gt', 'lt', 'between'],
+        'boolean' => [],
+    ];
+
+    /** The kinds whose values never hold a comma, so filter[field]=a,b can mean "a or b". */
+    public const COMMA_LISTS = ['enum', 'belongsTo', 'int'];
+
+    /** The times every record has, filtered by range only: filter[createdAt][gt]=2026-11-01. */
+    public const TIMESTAMPS = ['createdAt' => 'created_at', 'updatedAt' => 'updated_at'];
+
+    /** The most values "in" takes: enough for any screen, well short of what a database allows in one query. */
+    public const MAX_IN = 100;
+
     /**
      * A filter on the field a resource is published by carries `state` in place of a value.
+     * One with an operator carries `op`: "in" with a list of values, "range" with a list of
+     * [comparison, value] (a date given for a time stands for the whole day), "contains"
+     * with words to find. One without is equal to its value.
      *
-     * @var list<array{field: string, column: string, value: string|int|float|bool|null, state?: string, confirmed?: bool}>
+     * @var list<array{field: string, column: string, value: mixed, state?: string, confirmed?: bool, op?: 'in'|'range'|'contains'}>
      */
     public array $filters = [];
 
-    /** @param array<string, mixed> $params */
-    public static function parse(Descriptor $resource, array $params, int $defaultPerPage = 25, int $maxPerPage = 100): self
+    /** @var list<'items'> ?include=items: each record with its lines. */
+    public array $include = [];
+
+    /**
+     * @param  array<string, mixed>  $params
+     * @param  string  $timezone  The app's: what a date or a time without an offset is read in.
+     */
+    public static function parse(Descriptor $resource, array $params, int $defaultPerPage = 25, int $maxPerPage = 100, string $timezone = 'UTC'): self
     {
         $query = new self;
         $query->perPage = $defaultPerPage;
@@ -94,18 +124,51 @@ final class ListQuery
 
                 continue;
             }
+            // filter[createdAt][gt]=2026-11-01: when it was made or last changed, by range.
+            if ($field === null && isset(self::TIMESTAMPS[$key])) {
+                is_array($value)
+                    ? $query->operators($param, $key, self::TIMESTAMPS[$key], 'datetime', null, $value, $timezone)
+                    : $query->issue($param, "Use filter[{$key}][gt], [lt] or [between].");
+
+                continue;
+            }
             if ($field === null || ! $field->filterable()) {
                 $query->issue($param, "Can't filter by \"{$key}\".");
 
                 continue;
             }
-            $coerced = self::coerce($field, is_array($value) ? null : $value);
+            if (is_array($value)) {
+                // filter[status][]=a&filter[status][]=b: one of these.
+                array_is_list($value)
+                    ? $query->operators($param, $key, $field->column(), $field->kind, $field, ['in' => $value], $timezone)
+                    : $query->operators($param, $key, $field->column(), $field->kind, $field, $value, $timezone);
+
+                continue;
+            }
+            // filter[status]=a,b: one of these, where a value can't hold a comma of its own.
+            if (is_string($value) && str_contains($value, ',') && in_array($field->kind, self::COMMA_LISTS, true)) {
+                $query->operators($param, $key, $field->column(), $field->kind, $field, ['in' => $value], $timezone);
+
+                continue;
+            }
+            $coerced = self::coerce($field, $value);
             if ($coerced instanceof Issue) {
                 $query->issue($param, $coerced->message);
 
                 continue;
             }
             $query->filters[] = ['field' => $key, 'column' => $field->column(), 'value' => $coerced];
+        }
+
+        $include = $params['include'] ?? null;
+        if ($include !== null && $include !== '') {
+            foreach (is_string($include) ? array_filter(array_map('trim', explode(',', $include))) : [null] as $name) {
+                match (true) {
+                    $name !== 'items' => $query->issue('include', 'Only "items" can be included.'),
+                    $resource->items === null => $query->issue('include', "{$resource->pluralLabel} have no lines to include."),
+                    default => $query->include = ['items'],
+                };
+            }
         }
 
         return $query;
@@ -119,6 +182,146 @@ final class ListQuery
     private function issue(string $param, string $message): void
     {
         $this->issues[] = ['param' => $param, 'message' => $message];
+    }
+
+    /**
+     * filter[price][gt]=10&filter[price][lt]=100: each operator one more thing the records
+     * have to be. Every one is checked; a field is never asked what its kind can't answer.
+     *
+     * @param  array<array-key, mixed>  $operators
+     */
+    private function operators(string $param, string $key, string $column, string $kind, ?Field $field, array $operators, string $timezone): void
+    {
+        $allowed = self::OPERATORS[$kind] ?? [];
+        foreach ($operators as $op => $value) {
+            $at = "{$param}[{$op}]";
+            if (! in_array($op, $allowed, true)) {
+                $this->issue($at, $allowed === []
+                    ? "\"{$key}\" is matched by one value only: filter[{$key}]=…"
+                    : "Can't use \"{$op}\" on \"{$key}\". Use ".implode(', ', $allowed).'.');
+
+                continue;
+            }
+            if ($op === 'contains') {
+                $words = is_string($value) ? trim($value) : '';
+                $words === ''
+                    ? $this->issue($at, 'Give the words to find.')
+                    : $this->filters[] = ['field' => $key, 'column' => $column, 'op' => 'contains', 'value' => mb_substr($words, 0, 200)];
+
+                continue;
+            }
+            $values = self::listOf($value);
+            if ($op === 'in') {
+                if ($values === [] || count($values) > self::MAX_IN) {
+                    $this->issue($at, 'Give between 1 and '.self::MAX_IN.' values, separated by commas.');
+
+                    continue;
+                }
+                $coerced = [];
+                foreach ($values as $one) {
+                    $one = $field === null || $one === 'null' ? new Issue('Each has to be a value; leave out "null".') : self::coerce($field, $one);
+                    if ($one instanceof Issue) {
+                        $this->issue($at, $one->message);
+
+                        continue 2;
+                    }
+                    $coerced[] = $one;
+                }
+                $this->filters[] = ['field' => $key, 'column' => $column, 'op' => 'in', 'value' => array_values(array_unique($coerced, SORT_REGULAR))];
+
+                continue;
+            }
+            // gt, lt, between: compared, so numbers and dates only.
+            if ($op === 'between' && count($values) !== 2) {
+                $this->issue($at, 'Give two values, the lowest first, separated by a comma.');
+
+                continue;
+            }
+            if ($op !== 'between' && count($values) !== 1) {
+                $this->issue($at, 'Give one value.');
+
+                continue;
+            }
+            $bounds = [];
+            foreach ($values as $i => $one) {
+                $bound = self::bound($kind, $one, $timezone);
+                if ($bound instanceof Issue) {
+                    $this->issue($at, $bound->message);
+
+                    continue 2;
+                }
+                $bounds[$i] = $bound;
+            }
+            if ($op === 'between' && $bounds[0]['from'] > $bounds[1]['until']) {
+                $this->issue($at, 'The first has to be no later or larger than the second.');
+
+                continue;
+            }
+            // A day stands for all of it: after it is from the next one, before it is before it starts.
+            $this->filters[] = ['field' => $key, 'column' => $column, 'op' => 'range', 'value' => match ($op) {
+                'gt' => [[$bounds[0]['day'] ? '>=' : '>', $bounds[0]['day'] ? $bounds[0]['next'] : $bounds[0]['from']]],
+                'lt' => [['<', $bounds[0]['from']]],
+                default => [
+                    ['>=', $bounds[0]['from']],
+                    $bounds[1]['day'] ? ['<', $bounds[1]['next']] : ['<=', $bounds[1]['until']],
+                ],
+            }];
+        }
+    }
+
+    /**
+     * "a,b", or a list of values sent as filter[field][op][]=…
+     *
+     * @return list<string>
+     */
+    private static function listOf(mixed $value): array
+    {
+        $values = is_array($value) ? $value : (is_scalar($value) ? explode(',', (string) $value) : []);
+        $values = array_map(fn ($one) => is_scalar($one) ? trim((string) $one) : '', $values);
+
+        return array_values(array_filter($values, fn (string $one) => $one !== ''));
+    }
+
+    /**
+     * One end of a range. A number is itself. A date on a date field is that day; on a time
+     * field it is the whole day, so it also says where the next begins. A time is read in
+     * the app's timezone unless it carries an offset, and given back in it.
+     *
+     * @return array{from: int|float|string|\DateTimeImmutable, until: int|float|string|\DateTimeImmutable, day: bool, next: string|\DateTimeImmutable|null}|Issue
+     */
+    private static function bound(string $kind, string $value, string $timezone): array|Issue
+    {
+        if ($kind === 'int' || $kind === 'float') {
+            $number = $kind === 'int'
+                ? (filter_var($value, FILTER_VALIDATE_INT) !== false ? (int) $value : null)
+                : (is_numeric($value) ? (float) $value : null);
+
+            return $number === null
+                ? new Issue($kind === 'int' ? 'Must be a whole number.' : 'Must be a number.')
+                : ['from' => $number, 'until' => $number, 'day' => false, 'next' => null];
+        }
+        $zone = new \DateTimeZone($timezone);
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) === 1 && checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+            if ($kind === 'date') {
+                return ['from' => $value, 'until' => $value, 'day' => false, 'next' => null];
+            }
+            $start = new \DateTimeImmutable($value.' 00:00:00', $zone);
+
+            return ['from' => $start, 'until' => $start, 'day' => true, 'next' => $start->modify('+1 day')];
+        }
+        if ($kind === 'date') {
+            return new Issue('Must be a date, written YYYY-MM-DD.');
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/', $value) !== 1) {
+            return new Issue('Must be a date (YYYY-MM-DD) or a time (ISO 8601).');
+        }
+        try {
+            $time = (new \DateTimeImmutable($value, $zone))->setTimezone($zone);
+        } catch (\Exception) {
+            return new Issue('Must be a date (YYYY-MM-DD) or a time (ISO 8601).');
+        }
+
+        return ['from' => $time, 'until' => $time, 'day' => false, 'next' => null];
     }
 
     private static function sortableColumn(Descriptor $resource, string $key): ?string

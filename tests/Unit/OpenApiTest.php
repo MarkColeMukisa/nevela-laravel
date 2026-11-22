@@ -163,6 +163,16 @@ final class OpenApiTest extends TestCase
         $this->assertArrayNotHasKey('filter[notes]', $byName);
         $this->assertArrayNotHasKey('filter[extras]', $byName);
         $this->assertStringContainsString('guest', $byName['q']['description']);
+        // The operators each kind takes, and only those.
+        $this->assertSame(['type' => 'number'], $byName['filter[amount][gt]']['schema']);
+        $this->assertArrayHasKey('filter[amount][between]', $byName);
+        $this->assertArrayHasKey('filter[day][lt]', $byName);
+        $this->assertArrayHasKey('filter[guest][contains]', $byName);
+        $this->assertArrayHasKey('filter[status][in]', $byName);
+        $this->assertArrayHasKey('filter[createdAt][gt]', $byName);
+        $this->assertArrayNotHasKey('filter[status][gt]', $byName);
+        $this->assertArrayNotHasKey('filter[paid][in]', $byName);
+        $this->assertArrayNotHasKey('include', $byName);
     }
 
     public function test_the_public_side_is_only_what_it_opens_and_needs_no_token(): void
@@ -211,5 +221,7 @@ final class OpenApiTest extends TestCase
         // A record's own page has them; a list doesn't, so they aren't required.
         $this->assertArrayHasKey('items', $schemas['Order']['properties']);
         $this->assertNotContains('items', $schemas['Order']['required']);
+        $include = array_column($this->document($order, $line)['paths']['/orders']['get']['parameters'], null, 'name')['include'];
+        $this->assertSame(['items'], $include['schema']['enum']);
     }
 }
