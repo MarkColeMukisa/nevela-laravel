@@ -97,12 +97,24 @@ final class Conditions
         if (in_array((string) config("mail.mailers.{$mailer}.transport", $mailer), ['log', 'array'], true)) {
             $add('mail', "Emails aren't being sent", "MAIL_MAILER is {$mailer}: sign-in links, codes and password resets go to the log instead of arriving.");
         }
+        $web = rtrim((string) config('nevela.auth.web_url'), '/');
+        if (self::isLocal($web)) {
+            $add('web-url', 'Email links point at this computer', "NEVELA_WEB_URL is {$web}: the buttons in sign-in, verification and reset emails, and Google and GitHub sign-in, lead nowhere for anyone else. Set it to the dashboard's address as people reach it.", 'warning', 'https://nevela-docs.vercel.app/guides/deploying/');
+        }
         $store = (string) config('cache.default');
         if (in_array((string) config("cache.stores.{$store}.driver"), ['array', 'null'], true)) {
             $add('cache', 'The cache keeps nothing', "CACHE_STORE is {$store}: sign-in codes and links can't work, and rate limits don't count.");
         }
 
         return $found;
+    }
+
+    /** Whether an address is one only this machine reaches: localhost, 127.x, 0.0.0.0, ::1, or none at all. */
+    public static function isLocal(string $url): bool
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+
+        return $host === '' || $host === 'localhost' || str_ends_with($host, '.localhost') || $host === '0.0.0.0' || $host === '[::1]' || str_starts_with($host, '127.');
     }
 
     private static function pendingMigrations(): int

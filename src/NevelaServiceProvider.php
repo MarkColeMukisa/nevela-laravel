@@ -75,6 +75,7 @@ use Nevela\Laravel\Notices\Notices;
 use Nevela\Laravel\Support\Fixed;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
+use Nevela\Laravel\Support\SqliteDefaults;
 
 final class NevelaServiceProvider extends ServiceProvider
 {
@@ -89,6 +90,10 @@ final class NevelaServiceProvider extends ServiceProvider
             $config = $this->app->make('config');
             $config->set('nevela', PublishedConfig::merge(require __DIR__.'/../config/nevela.php', (array) $config->get('nevela', [])));
         }
+        // SQLite that waits for a write instead of failing with "database is locked" (Support\SqliteDefaults).
+        // A cached config is set again on each request, so this goes in either way.
+        $config = $this->app->make('config');
+        $config->set('database.connections', SqliteDefaults::apply((array) $config->get('database.connections', []), fn (string $name) => ($value = env($name)) === null ? null : (string) $value));
     }
 
     public function boot(): void

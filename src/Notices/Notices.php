@@ -7,6 +7,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Events\NoticeSent;
 use Nevela\Laravel\Support\SchemaFacts;
 use Throwable;
 
@@ -51,13 +52,20 @@ final class Notices
             foreach ($ids as $id) {
                 self::write($id, $notice);
             }
-
-            return count($ids);
         } catch (Throwable $e) {
             report($e);
 
             return 0;
         }
+        if ($ids !== []) {
+            try {
+                NoticeSent::dispatch($ids, $notice);
+            } catch (Throwable $e) {
+                report($e); // a listener's problem, not the work's
+            }
+        }
+
+        return count($ids);
     }
 
     /** Tell everyone who may do something ("products.view"), apart from whoever did it. */

@@ -53,7 +53,7 @@ final class DeployCheckCommand extends Command
 
         $this->section('Signing in');
         $web = rtrim((string) config('nevela.auth.web_url'), '/');
-        $local = preg_match('#^https?://(localhost|127\.0\.0\.1)(:\d+)?$#', $web) === 1;
+        $local = \Nevela\Laravel\Notices\Conditions::isLocal($web);
         $this->check('NEVELA_WEB_URL', ! $production || (! $local && str_starts_with($web, 'https://')), $web, $local ? "{$web}: set it to the dashboard's address, as people reach it. Links in emails and passkeys use it" : "{$web}: the dashboard must be served over https in production");
         $secret = (string) config('nevela.auth.proxy_secret');
         $this->check('NEVELA_PROXY_SECRET', $secret !== '' || ! $production, $secret !== '' ? 'set' : 'not set (fine here)', 'not set: without it every device is listed with the dashboard server\'s address, and public forms count every visitor as one. Set the same value in both apps');
