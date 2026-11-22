@@ -286,7 +286,9 @@ final class UpdateCommand extends Command
         }
 
         try {
-            $next = TemplateSource::fetch($to)['files'];
+            $fetched = TemplateSource::fetch($to);
+            $next = $fetched['files'];
+            $shared = $fetched['shared'];
             // What the app is on: its recorded fingerprints, or for an older app the old template itself.
             if ($state->files === null) {
                 $state->adopt($from, TemplateSource::fetch($from)['files']);
@@ -310,6 +312,8 @@ final class UpdateCommand extends Command
 
         $plan = DashboardUpdate::plan($base, $nextHashes, $yours);
         $this->components->info(($check ? 'Dashboard: what would change, ' : 'Dashboard: ')."template {$from} → {$to}");
+        // First: the dashboard's new files may import from it.
+        $this->updateShared($web, $shared, $check);
 
         $done = [DashboardUpdate::UPDATE => [], DashboardUpdate::ADD => [], DashboardUpdate::CONFLICT => [], DashboardUpdate::REMOVED => []];
         $backup = '.nevela/backups/'.gmdate('Ymd-His')."-{$from}-to-{$to}";
@@ -387,6 +391,7 @@ final class UpdateCommand extends Command
                 $this->line("  Every file this replaced or removed was copied to <fg=cyan>{$this->relative($web)}/{$backup}</> first. To put it all back: <fg=cyan>php nevela upgrade --undo</>");
             }
         }
+        $this->warnAboutRoot($web, $next, $plan);
         if ($done[DashboardUpdate::CONFLICT] !== []) {
             $count = count($done[DashboardUpdate::CONFLICT]);
             $this->components->warn("{$count} file(s) changed in the template and in your app. Yours were kept.".($check ? '' : " The template's new versions are in {$this->relative($web)}/{$incoming} for you to compare."));
@@ -465,6 +470,49 @@ final class UpdateCommand extends Command
         $this->line('  The nevela/laravel package was not changed by this. To go back a version there too: <fg=cyan>composer require nevela/laravel:'.$last['from'].'</>');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * packages/shared, beside apps/: the brand, the themes and the layout the dashboard and
+     * the mobile app both import (from 0.37). A file the app hasn't got is added; one it has
+     * is never touched, since brand.ts and layout.ts are the app's own to edit. And the
+     * dashboard has to be built with the project as its root to reach the folder: an app
+     * that made next.config.ts its own keeps it, so it is told the line to add.
+     *
+     * @param  array<string, string>  $shared  path => contents, from the template
+     */
+    private function updateShared(string $web, array $shared, bool $check): void
+    {
+        if ($shared === []) {
+            return;
+        }
+        $dir = dirname($web, 2).'/packages/shared';
+        foreach ($shared as $path => $contents) {
+            if (is_file("{$dir}/{$path}")) {
+                continue;
+            }
+            if (! $check) {
+                $this->put("{$dir}/{$path}", $contents);
+            }
+            $this->components->twoColumnDetail("packages/shared/{$path}", $check ? '<fg=green>would add</>' : '<fg=green>added</>');
+        }
+    }
+
+    /**
+     * The dashboard reaches packages/shared only when it is built with the project folder as
+     * its root. The template's next.config.ts says so; an app that made the file its own keeps
+     * it, so it is told the lines to add.
+     *
+     * @param  array<string, string>  $next  the dashboard's template files
+     * @param  array<string, string>  $plan  path => what this update does to it
+     */
+    private function warnAboutRoot(string $web, array $next, array $plan): void
+    {
+        $config = (string) @file_get_contents("{$web}/next.config.ts");
+        $replaced = in_array($plan['next.config.ts'] ?? null, [DashboardUpdate::UPDATE, DashboardUpdate::ADD], true);
+        if (str_contains($next['next.config.ts'] ?? '', 'turbopack') && ! str_contains($config, 'turbopack') && ! $replaced) {
+            $this->components->warn('apps/web/next.config.ts is yours, so it was kept, and it has to build with the project folder as its root, or the dashboard can\'t import packages/shared. Add this to its config: turbopack: { root: path.join(__dirname, "..", "..") }, outputFileTracingRoot: path.join(__dirname, "..", ".."), with import path from "node:path" at the top.');
+        }
     }
 
     /** The dashboard's folder, with forward slashes, or null when there isn't one. */

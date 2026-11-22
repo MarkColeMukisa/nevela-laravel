@@ -10,7 +10,8 @@ use RuntimeException;
 use Throwable;
 
 /**
- * The dashboard as it shipped in a given version of Nevela.
+ * The dashboard as it shipped in a given version of Nevela, and the shared folder beside it
+ * (packages/shared: the brand, the themes and the layout both apps import), from 0.37.
  *
  * Tried in order, so an update never depends on one place being up to date:
  *
@@ -30,7 +31,7 @@ final class TemplateSource
     private const NEVER = ['node_modules', '.next', '.env.local', 'tsconfig.tsbuildinfo', 'next-env.d.ts', 'AGENTS.md', 'CLAUDE.md'];
 
     /**
-     * @return array{files: array<string, string>, from: string} path => contents, and where it came from
+     * @return array{files: array<string, string>, shared: array<string, string>, from: string} path => contents of the dashboard and of packages/shared (empty before 0.37), and where they came from
      */
     public static function fetch(string $version): array
     {
@@ -44,10 +45,12 @@ final class TemplateSource
             if ($local !== '' && is_file("{$local}/create-nevela-{$version}.tgz")) {
                 copy("{$local}/create-nevela-{$version}.tgz", $archive);
 
-                return ['files' => self::read($archive, $dir, 'package/template/web', false), 'from' => 'NEVELA_TEMPLATE_DIR'];
+                $files = self::read($archive, $dir, 'package/template/web', false);
+
+                return ['files' => $files, 'shared' => self::folder($dir, 'package/template/shared'), 'from' => 'NEVELA_TEMPLATE_DIR'];
             }
 
-            foreach (['npm' => [self::NPM, 'package/template/web', false], 'GitHub' => [self::GITHUB, "nevela-{$version}/apps/web", true]] as $name => [$url, $root, $filter]) {
+            foreach (['npm' => [self::NPM, 'package/template/web', false, 'package/template/shared'], 'GitHub' => [self::GITHUB, "nevela-{$version}/apps/web", true, "nevela-{$version}/packages/shared"]] as $name => [$url, $root, $filter, $sharedRoot]) {
                 try {
                     $response = Http::timeout(60)->get(sprintf($url, $version));
                     if (! $response->successful()) {
@@ -57,7 +60,10 @@ final class TemplateSource
                     }
                     file_put_contents($archive, $response->body());
 
-                    return ['files' => self::read($archive, $dir.DIRECTORY_SEPARATOR.strtolower($name), $root, $filter), 'from' => $name];
+                    $into = $dir.DIRECTORY_SEPARATOR.strtolower($name);
+                    $files = self::read($archive, $into, $root, $filter);
+
+                    return ['files' => $files, 'shared' => self::folder($into, $sharedRoot), 'from' => $name];
                 } catch (Throwable $e) {
                     $tried[] = "{$name}: ".$e->getMessage();
                 }
@@ -86,6 +92,26 @@ final class TemplateSource
             throw new RuntimeException('the archive has no dashboard in it');
         }
 
+        $files = self::filesIn($base);
+
+        return $filter ? self::withoutExamples($files) : $files;
+    }
+
+    /**
+     * A folder of an archive already unpacked into $into, or nothing when it hasn't one.
+     *
+     * @return array<string, string>
+     */
+    private static function folder(string $into, string $root): array
+    {
+        $base = $into.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $root);
+
+        return is_dir($base) ? self::filesIn($base) : [];
+    }
+
+    /** @return array<string, string> */
+    private static function filesIn(string $base): array
+    {
         $files = [];
         foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, RecursiveDirectoryIterator::SKIP_DOTS)) as $file) {
             $path = str_replace('\\', '/', substr($file->getPathname(), strlen($base) + 1));
@@ -97,7 +123,7 @@ final class TemplateSource
             $files[$path] = (string) file_get_contents($file->getPathname());
         }
 
-        return $filter ? self::withoutExamples($files) : $files;
+        return $files;
     }
 
     /**
