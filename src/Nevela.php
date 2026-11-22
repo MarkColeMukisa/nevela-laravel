@@ -202,6 +202,28 @@ final class Nevela
      */
     private static function soldOf(array $all): array
     {
+        $shop = self::shopIn($all);
+
+        return [$shop['sold'] ?? null, $shop['price'] ?? null];
+    }
+
+    /**
+     * The shop in this app, or null: the order resource, what it sells, and the field a line's
+     * price is copied from. The same rule the mobile app finds its shop by.
+     *
+     * @return array{orders: Descriptor, sold: string, price: string|null}|null
+     */
+    public static function shop(): ?array
+    {
+        return self::shopIn(self::all());
+    }
+
+    /**
+     * @param  list<Descriptor>  $all
+     * @return array{orders: Descriptor, sold: string, price: string|null}|null
+     */
+    private static function shopIn(array $all): ?array
+    {
         $names = array_map(fn (Descriptor $d) => $d->name, $all);
         foreach ($all as $d) {
             $lines = $d->items === null ? null : self::find($d->items);
@@ -226,14 +248,14 @@ final class Nevela
             }
             foreach ($lines->fields as $field) {
                 if ($field->kind === 'float' && $field->format === 'money' && is_string($field->from) && str_starts_with($field->from, $bought[0].'.')) {
-                    return [$bought[1], substr($field->from, strlen($bought[0]) + 1)];
+                    return ['orders' => $d, 'sold' => $bought[1], 'price' => substr($field->from, strlen($bought[0]) + 1)];
                 }
             }
 
-            return [$bought[1], null];
+            return ['orders' => $d, 'sold' => $bought[1], 'price' => null];
         }
 
-        return [null, null];
+        return null;
     }
 
     public static function forget(): void

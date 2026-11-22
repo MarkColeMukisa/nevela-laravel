@@ -361,6 +361,8 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/notifications', [NotificationsController::class, 'index'])->name('notifications.index');
             Route::post('_nevela/notifications/read', [NotificationsController::class, 'read'])->name('notifications.read');
             Route::get('_nevela/activity', [ActivityController::class, 'index'])->name('activity.index');
+            // The shop at a glance, for the home screen: only in an app with a shop.
+            Route::get('_nevela/shop-figures', Http\ShopFiguresController::class)->name('shop-figures');
             // A record's history: each action done to it, for whoever may see the record.
             Route::get('_nevela/history/{slug}/{id}', [HistoryController::class, 'show'])->name('history.show');
 
