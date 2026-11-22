@@ -179,7 +179,7 @@ final class StatusCommand extends Command
                 $row('Last dashboard update', "{$last['from']} → {$last['to']} on ".substr((string) ($last['at'] ?? ''), 0, 10));
             }
             // packages/shared is reached only with the project as the build's root (next.config.ts, from 0.37).
-            if (is_dir(dirname((string) realpath($web), 2).'/packages/shared') && ! str_contains((string) @file_get_contents("{$web}/next.config.ts"), 'turbopack')) {
+            if (is_dir(dirname((string) realpath($web), 2).'/packages/shared') && ! UpdateCommand::setsRoot((string) @file_get_contents("{$web}/next.config.ts"))) {
                 $row('Shared folder', $bad('apps/web/next.config.ts builds without the project as its root, so "@shared/…" can\'t be imported. Add turbopack: { root } and outputFileTracingRoot: https://nevela-docs.vercel.app/guides/updating/#the-shared-folder'));
             }
         }

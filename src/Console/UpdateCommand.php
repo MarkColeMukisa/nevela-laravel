@@ -507,13 +507,21 @@ final class UpdateCommand extends Command
      */
     public static function brandFrom(string $site, string $brand): string
     {
+        // A string in either quote, escapes and all: kept exactly as written, which TypeScript reads the same.
+        $string = '("(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\')';
         foreach (['name', 'tagline'] as $key) {
-            if (preg_match('/^\s*'.$key.':\s*("(?:[^"\\\\]|\\\\.)*"),/m', $site, $m) === 1) {
-                $brand = (string) preg_replace('/^(\s*'.$key.':\s*)"(?:[^"\\\\]|\\\\.)*",/m', '${1}'.str_replace(['\\', '$'], ['\\\\', '\\$'], $m[1]).',', $brand, 1);
+            if (preg_match('/^\s*'.$key.':\s*'.$string.',/m', $site, $m) === 1) {
+                $brand = (string) preg_replace('/^(\s*'.$key.':\s*)'.$string.',/m', '${1}'.str_replace(['\\', '$'], ['\\\\', '\\$'], $m[1]).',', $brand, 1);
             }
         }
 
         return $brand;
+    }
+
+    /** Whether a next.config.ts builds with a root of its own set: turbopack.root and outputFileTracingRoot both. */
+    public static function setsRoot(string $config): bool
+    {
+        return preg_match('/turbopack\s*:\s*\{[^}]*\broot\b/', $config) === 1 && str_contains($config, 'outputFileTracingRoot');
     }
 
     /**
@@ -528,7 +536,7 @@ final class UpdateCommand extends Command
     {
         $config = (string) @file_get_contents("{$web}/next.config.ts");
         $replaced = in_array($plan['next.config.ts'] ?? null, [DashboardUpdate::UPDATE, DashboardUpdate::ADD], true);
-        if (str_contains($next['next.config.ts'] ?? '', 'turbopack') && ! str_contains($config, 'turbopack') && ! $replaced) {
+        if (self::setsRoot($next['next.config.ts'] ?? '') && ! self::setsRoot($config) && ! $replaced) {
             $this->components->warn('apps/web/next.config.ts is yours, so it was kept, and it has to build with the project folder as its root, or the dashboard can\'t import packages/shared. Add this to its config: turbopack: { root: path.join(__dirname, "..", "..") }, outputFileTracingRoot: path.join(__dirname, "..", ".."), with import path from "node:path" at the top.');
         }
     }
