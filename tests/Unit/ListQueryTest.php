@@ -142,6 +142,19 @@ final class ListQueryTest extends TestCase
         $this->assertSame([], $q->filters);
     }
 
+    public function test_the_edges_of_ranges_and_lists(): void
+    {
+        $q = ListQuery::parse($this->order(), ['filter' => [
+            'reference' => ['in' => '01,1,01'],
+            // Noon on the 2nd to the end of the 2nd.
+            'paidAt' => ['between' => '2026-11-02T12:00,2026-11-02'],
+        ]]);
+        $this->assertTrue($q->ok(), json_encode($q->issues));
+        $this->assertSame(['01', '1'], $q->filters[0]['value']);
+
+        $this->assertSame(['filter[paidAt][gt]'], array_column(ListQuery::parse($this->order(), ['filter' => ['paidAt' => ['gt' => '2026-02-30T12:00']]])->issues, 'param'));
+    }
+
     public function test_items_are_included_only_where_there_are_lines(): void
     {
         $order = Descriptor::fromJson((string) json_encode([...$this->order()->toArray(), 'items' => 'OrderItem']));

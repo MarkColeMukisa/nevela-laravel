@@ -228,7 +228,12 @@ final class ListQuery
                     }
                     $coerced[] = $one;
                 }
-                $this->filters[] = ['field' => $key, 'column' => $column, 'op' => 'in', 'value' => array_values(array_unique($coerced, SORT_REGULAR))];
+                // Each once, by what it is: "01" and "1" are two references, not one.
+                $unique = [];
+                foreach ($coerced as $one) {
+                    $unique[get_debug_type($one).':'.var_export($one, true)] = $one;
+                }
+                $this->filters[] = ['field' => $key, 'column' => $column, 'op' => 'in', 'value' => array_values($unique)];
 
                 continue;
             }
@@ -253,7 +258,8 @@ final class ListQuery
                 }
                 $bounds[$i] = $bound;
             }
-            if ($op === 'between' && $bounds[0]['from'] > $bounds[1]['until']) {
+            // A whole day as the end runs to the next midnight: noon on the 2nd to the 2nd is a range.
+            if ($op === 'between' && ($bounds[1]['day'] ? $bounds[0]['from'] >= $bounds[1]['next'] : $bounds[0]['from'] > $bounds[1]['until'])) {
                 $this->issue($at, 'The first has to be no later or larger than the second.');
 
                 continue;
@@ -317,7 +323,13 @@ final class ListQuery
             return new Issue('Must be a date (YYYY-MM-DD) or a time (ISO 8601).');
         }
         try {
-            $time = (new \DateTimeImmutable($value, $zone))->setTimezone($zone);
+            $time = new \DateTimeImmutable($value, $zone);
+            // The 30th of February is read as the 2nd of March, with a warning; it isn't a date.
+            $errors = \DateTimeImmutable::getLastErrors();
+            if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
+                return new Issue('Must be a date (YYYY-MM-DD) or a time (ISO 8601).');
+            }
+            $time = $time->setTimezone($zone);
         } catch (\Exception) {
             return new Issue('Must be a date (YYYY-MM-DD) or a time (ISO 8601).');
         }

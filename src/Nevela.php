@@ -349,7 +349,19 @@ final class Nevela
             if ($op === 'range') {
                 foreach ($filter['value'] as [$comparison, $bound]) {
                     // A time is compared as one in the app's timezone, which is how Laravel saves them.
-                    $query->where($filter['column'], $comparison, $bound instanceof \DateTimeInterface ? $bound->format('Y-m-d H:i:s') : $bound);
+                    if ($bound instanceof \DateTimeInterface) {
+                        // Times are saved to the second. A bound part-way through one compares as
+                        // that second: before 12:00:00.5 takes in 12:00:00, from it leaves it out.
+                        if ((int) $bound->format('u') !== 0) {
+                            $comparison = match ($comparison) {
+                                '<' => '<=',
+                                '>=' => '>',
+                                default => $comparison,
+                            };
+                        }
+                        $bound = $bound->format('Y-m-d H:i:s');
+                    }
+                    $query->where($filter['column'], $comparison, $bound);
                 }
 
                 continue;
@@ -382,8 +394,10 @@ final class Nevela
      */
     private static function whereContains(Builder $query, string $column, string $words, string $boolean = 'and'): void
     {
-        $pattern = '%'.addcslashes($words, '%_\\').'%';
-        if (in_array($query->getConnection()->getDriverName(), ['sqlite', 'sqlsrv'], true)) {
+        $driver = $query->getConnection()->getDriverName();
+        // SQL Server also reads [a-z] as a set of characters.
+        $pattern = '%'.addcslashes($words, $driver === 'sqlsrv' ? '%_[\\' : '%_\\').'%';
+        if (in_array($driver, ['sqlite', 'sqlsrv'], true)) {
             $query->whereRaw($query->getQuery()->getGrammar()->wrap($column)." LIKE ? ESCAPE '\\'", [$pattern], $boolean);
 
             return;
