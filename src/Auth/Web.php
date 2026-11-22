@@ -17,6 +17,12 @@ final class Web
 {
     private const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
+    /** Whether the app has a dashboard at all (nevela.dashboard): an API with only a mobile app has none. */
+    public static function exists(): bool
+    {
+        return (bool) config('nevela.dashboard', true);
+    }
+
     public static function configured(): string
     {
         return self::originOf((string) config('nevela.auth.web_url', 'http://localhost:3000')) ?? 'http://localhost:3000';

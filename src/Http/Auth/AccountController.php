@@ -91,6 +91,12 @@ final class AccountController
         }
         [$code, $hash] = Challenges::code();
         Challenges::put('verify-email', mb_strtolower($user->email), ['user' => (string) $user->getAuthIdentifier(), 'code' => $hash], self::VERIFY_SECONDS);
+        if (! Web::exists()) {
+            // No dashboard page to link to: the code is typed into the app.
+            AuthMail::send($user->email, 'Verify your email for '.AuthMail::app(), ["Your verification code is {$code}.", 'Enter it in the app. It expires in an hour.'], null, $code);
+
+            return;
+        }
         $url = Web::url('/verify-email', ['email' => $user->email, 'code' => $code, 'next' => Web::path($next, '/dashboard/account')], $request);
         AuthMail::send($user->email, 'Verify your email for '.AuthMail::app(), ["Your verification code is {$code}.", 'Or use the button. Both expire in an hour.'], ['Verify email', $url], "{$code}  {$url}");
     }

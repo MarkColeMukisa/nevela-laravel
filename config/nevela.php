@@ -14,6 +14,14 @@ return [
     'web_path' => env('NEVELA_WEB_PATH', base_path('../web')),
 
     /*
+    | Whether the app has a dashboard: false for an API and a mobile app alone
+    | (`nevela new --tier mobile`). Emails then carry codes and no links to dashboard
+    | pages, and `deploy:check` doesn't ask where the dashboard is. A setting, not a
+    | look for the folder, because a server has the API without the dashboard beside it.
+    */
+    'dashboard' => (bool) env('NEVELA_DASHBOARD', true),
+
+    /*
     | The Expo mobile app, when the project has one (nevela new my-app --mobile). While
     | it exists, `nevela dev` opens the API to your network so a phone can reach it.
     | Set to null if you never want that.

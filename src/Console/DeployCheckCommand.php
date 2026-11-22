@@ -52,15 +52,20 @@ final class DeployCheckCommand extends Command
         $this->mail($production);
 
         $this->section('Signing in');
-        $web = rtrim((string) config('nevela.auth.web_url'), '/');
-        $local = \Nevela\Laravel\Notices\Conditions::isLocal($web);
-        $this->check('NEVELA_WEB_URL', ! $production || (! $local && str_starts_with($web, 'https://')), $web, $local ? "{$web}: set it to the dashboard's address, as people reach it. Links in emails and passkeys use it" : "{$web}: the dashboard must be served over https in production");
-        $secret = (string) config('nevela.auth.proxy_secret');
-        $this->check('NEVELA_PROXY_SECRET', $secret !== '' || ! $production, $secret !== '' ? 'set' : 'not set (fine here)', 'not set: without it every device is listed with the dashboard server\'s address, and public forms count every visitor as one. Set the same value in both apps');
+        if (! \Nevela\Laravel\Auth\Web::exists()) {
+            // An API and a mobile app: emails carry codes, and nothing stands between the phone and the API.
+            $this->check('Dashboard', true, 'none (NEVELA_DASHBOARD=false): emails carry codes, not links', '');
+        } else {
+            $web = rtrim((string) config('nevela.auth.web_url'), '/');
+            $local = \Nevela\Laravel\Notices\Conditions::isLocal($web);
+            $this->check('NEVELA_WEB_URL', ! $production || (! $local && str_starts_with($web, 'https://')), $web, $local ? "{$web}: set it to the dashboard's address, as people reach it. Links in emails and passkeys use it" : "{$web}: the dashboard must be served over https in production");
+            $secret = (string) config('nevela.auth.proxy_secret');
+            $this->check('NEVELA_PROXY_SECRET', $secret !== '' || ! $production, $secret !== '' ? 'set' : 'not set (fine here)', 'not set: without it every device is listed with the dashboard server\'s address, and public forms count every visitor as one. Set the same value in both apps');
+        }
         $admins = Access::ready() ? Access::administratorEmails() : [];
         $this->check('Administrators', $admins !== [], implode(', ', array_slice($admins, 0, 3)).(count($admins) > 3 ? ' and '.(count($admins) - 3).' more' : ''), 'none can sign in: php artisan nevela:user --role=ADMIN owner@example.com');
 
-        if (! $this->option('no-dashboard')) {
+        if (isset($web, $secret) && ! $this->option('no-dashboard')) {
             $this->section('The dashboard');
             $this->dashboard($web, $secret);
         }
@@ -187,6 +192,10 @@ final class DeployCheckCommand extends Command
             $this->check('Mail', false, '', "{$mailer} writes emails to the log instead of sending them: sign-in links, codes and password resets never arrive. Set MAIL_MAILER and its settings");
         } elseif ($transport === 'smtp' && (string) config("mail.mailers.{$mailer}.host") === '') {
             $this->check('Mail', false, '', 'smtp, with no MAIL_HOST');
+        } elseif ($transport === 'resend' && (string) (config("mail.mailers.{$mailer}.key") ?? config('services.resend.key')) === '') {
+            $this->check('Mail', false, '', 'resend, with no RESEND_API_KEY: get one at resend.com/api-keys');
+        } elseif ($transport === 'resend' && ! class_exists(\Resend::class)) {
+            $this->check('Mail', false, '', 'resend, without its package: composer require resend/resend-php');
         } else {
             $this->check('Mail', true, $transport.($from !== '' ? ", from {$from}" : ''), '');
         }

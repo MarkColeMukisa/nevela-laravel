@@ -98,7 +98,8 @@ final class Conditions
             $add('mail', "Emails aren't being sent", "MAIL_MAILER is {$mailer}: sign-in links, codes and password resets go to the log instead of arriving.");
         }
         $web = rtrim((string) config('nevela.auth.web_url'), '/');
-        if (self::isLocal($web)) {
+        // With no dashboard there are no email links to it to go astray.
+        if (\Nevela\Laravel\Auth\Web::exists() && self::isLocal($web)) {
             $add('web-url', 'Email links point at this computer', "NEVELA_WEB_URL is {$web}: the buttons in sign-in, verification and reset emails, and Google and GitHub sign-in, lead nowhere for anyone else. Set it to the dashboard's address as people reach it.", 'warning', 'https://nevela-docs.vercel.app/guides/deploying/');
         }
         $store = (string) config('cache.default');

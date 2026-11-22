@@ -57,6 +57,7 @@ final class PublishedConfig
         'mobile_path' => '0.30.0',
         'auth.social.app_redirects' => '0.31.0',
         'sqlite' => '0.34.1',
+        'dashboard' => '0.36.0',
     ];
 
     /**

@@ -10,6 +10,7 @@ use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Auth\Social;
+use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
@@ -149,8 +150,9 @@ final class StatusCommand extends Command
 
         // --- dashboard ---
         $web = config('nevela.web_path');
-        if (! $web || ! is_dir($web)) {
-            $row('Dashboard', '<fg=gray>not found at nevela.web_path</>');
+        $hasWeb = $web && is_dir($web);
+        if (! $hasWeb) {
+            $row('Dashboard', Web::exists() ? '<fg=gray>not found at nevela.web_path</>' : 'none: an API and a mobile app (NEVELA_DASHBOARD=false)');
         } else {
             $state = DashboardState::read($web);
             $row('Dashboard', $state->template !== null ? "template {$state->template}" : '<fg=gray>template version not recorded</>');
@@ -176,10 +178,14 @@ final class StatusCommand extends Command
             if ($last = end($state->history)) {
                 $row('Last dashboard update', "{$last['from']} → {$last['to']} on ".substr((string) ($last['at'] ?? ''), 0, 10));
             }
+        }
 
-            // `php nevela dev` may have put the API on another port and told the dashboard so,
-            // which is fine. Look for this app wherever it is running before judging.
-            $url = self::apiUrl($web);
+        // --- the API, as what talks to it sees it ---
+        // `php nevela dev` may have put the API on another port and told the dashboard (or the
+        // mobile app) so, which is fine. Look for this app wherever it is running before judging.
+        $mobile = DevCommand::mobilePath();
+        if ($hasWeb || $mobile !== null) {
+            $url = $hasWeb ? self::apiUrl($web) : self::mobileApiUrl($mobile);
             $who = self::whoAnswers($url);
             $running = $who === 'this' ? $url : self::findRunning();
 
@@ -219,6 +225,15 @@ final class StatusCommand extends Command
         }
 
         return 'http://127.0.0.1:8000/api';
+    }
+
+    /** Where the mobile app looks for the API: the port `nevela dev` wrote to its .env.local, on this computer. */
+    public static function mobileApiUrl(string $mobile): string
+    {
+        $env = (string) @file_get_contents(rtrim($mobile, '/\\').'/.env.local');
+        $port = preg_match('/^\s*EXPO_PUBLIC_API_PORT\s*=\s*["\']?(\d+)/m', $env, $m) ? $m[1] : '8000';
+
+        return "http://127.0.0.1:{$port}/api";
     }
 
     /** Who answers at an API address: 'this' app, another 'nevela' app, some 'other' program, or 'nobody'. */
