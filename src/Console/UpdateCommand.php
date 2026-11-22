@@ -491,11 +491,29 @@ final class UpdateCommand extends Command
             if (is_file("{$dir}/{$path}")) {
                 continue;
             }
+            if ($path === 'brand.ts') {
+                $contents = self::brandFrom((string) @file_get_contents("{$web}/lib/site.ts"), $contents);
+            }
             if (! $check) {
                 $this->put("{$dir}/{$path}", $contents);
             }
             $this->components->twoColumnDetail("packages/shared/{$path}", $check ? '<fg=green>would add</>' : '<fg=green>added</>');
         }
+    }
+
+    /**
+     * The template's brand.ts with the app's own name and tagline, as its lib/site.ts has them:
+     * an app named "My Shop" is not renamed "Nevela" by getting the file.
+     */
+    public static function brandFrom(string $site, string $brand): string
+    {
+        foreach (['name', 'tagline'] as $key) {
+            if (preg_match('/^\s*'.$key.':\s*("(?:[^"\\\\]|\\\\.)*"),/m', $site, $m) === 1) {
+                $brand = (string) preg_replace('/^(\s*'.$key.':\s*)"(?:[^"\\\\]|\\\\.)*",/m', '${1}'.str_replace(['\\', '$'], ['\\\\', '\\$'], $m[1]).',', $brand, 1);
+            }
+        }
+
+        return $brand;
     }
 
     /**
