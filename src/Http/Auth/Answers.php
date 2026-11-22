@@ -19,7 +19,8 @@ trait Answers
     /** A method switched off in config/nevela.php is refused, not just hidden. */
     private function enabled(string $setting): void
     {
-        if (! config("nevela.auth.{$setting}", true)) {
+        // A sign-in link opens a dashboard page: with no dashboard there is none to open.
+        if (! config("nevela.auth.{$setting}", true) || ($setting === 'magic_link' && ! \Nevela\Laravel\Auth\Web::exists())) {
             throw new NotFoundHttpException("This sign-in method isn't enabled.");
         }
     }

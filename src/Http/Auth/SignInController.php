@@ -65,7 +65,7 @@ final class SignInController
             'registration' => (bool) config('nevela.auth.registration', false),
             // The role someone who signs up starts with, so an app can tell its customers from its staff.
             'defaultRole' => config('nevela.auth.default_role', 'USER') ?: null,
-            'magicLink' => (bool) config('nevela.auth.magic_link', true),
+            'magicLink' => (bool) config('nevela.auth.magic_link', true) && Web::exists(),
             'emailCode' => (bool) config('nevela.auth.email_code', true),
             'passkeys' => (bool) config('nevela.auth.passkeys', true),
             'twoFactor' => [

@@ -166,8 +166,10 @@ final class UserCommand extends Command
                 return self::FAILURE;
             }
         }
-        if ($link && ! config('nevela.auth.magic_link', true)) {
-            $this->components->error('Sign-in links are switched off in this app (auth.magic_link). Give the account a password instead: --reset');
+        if ($link && (! config('nevela.auth.magic_link', true) || ! Web::exists())) {
+            $this->components->error(Web::exists()
+                ? 'Sign-in links are switched off in this app (auth.magic_link). Give the account a password instead: --reset'
+                : 'A sign-in link opens the dashboard, and this app has none (NEVELA_DASHBOARD=false). Give the account a password instead: --reset');
 
             return self::FAILURE;
         }

@@ -211,6 +211,10 @@ final class AccountController
     public function forgotPassword(Request $request): JsonResponse
     {
         $input = $request->validate(['email' => ['required', 'email']]);
+        if (! Web::exists()) {
+            // The link would open a dashboard page this app hasn't got. Said the same for every address.
+            return $this->refuse('NO_DASHBOARD', 'This app has no page to choose a new password on. Sign in with a code sent by email, or ask an administrator to set a new password.', 404);
+        }
         if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user)) {
             $token = Challenges::start('reset-password', ['user' => (string) $user->getAuthIdentifier()], self::RESET_SECONDS);
             $url = Web::url('/reset-password', ['token' => $token], $request);
