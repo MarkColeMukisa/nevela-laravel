@@ -275,6 +275,20 @@ return [
     'bulk_max' => 500,
 
     /*
+    | SQLite, set up for many requests at once (Support\SqliteDefaults): writes wait up to
+    | 5000 ms for each other, readers carry on while something is written (wal), and a
+    | transaction takes the write lock when it starts (IMMEDIATE). These change them, for
+    | every SQLite connection that doesn't set its own in config/database.php. Read here,
+    | so they are kept when the config is cached.
+    */
+    'sqlite' => [
+        'busy_timeout' => env('DB_BUSY_TIMEOUT'),
+        'journal_mode' => env('DB_JOURNAL_MODE'),
+        'synchronous' => env('DB_SYNCHRONOUS'),
+        'transaction_mode' => env('DB_TRANSACTION_MODE'),
+    ],
+
+    /*
     | File and image fields (image:image, manual:file(pdf)).
     |
     | Files go on a disk from config/filesystems.php and are handed out by Nevela's own

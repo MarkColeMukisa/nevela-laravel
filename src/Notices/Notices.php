@@ -58,11 +58,16 @@ final class Notices
             return 0;
         }
         if ($ids !== []) {
-            try {
-                NoticeSent::dispatch($ids, $notice);
-            } catch (Throwable $e) {
-                report($e); // a listener's problem, not the work's
-            }
+            // Now when no transaction is open, after the commit when one is, never if it is rolled
+            // back. The try is inside: a listener throwing after the commit would otherwise come
+            // out of DB::transaction() and fail work that was saved.
+            DB::afterCommit(function () use ($ids, $notice) {
+                try {
+                    event(NoticeSent::of($ids, $notice));
+                } catch (Throwable $e) {
+                    report($e); // a listener's problem, not the work's
+                }
+            });
         }
 
         return count($ids);

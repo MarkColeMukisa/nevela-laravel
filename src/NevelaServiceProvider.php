@@ -93,7 +93,7 @@ final class NevelaServiceProvider extends ServiceProvider
         // SQLite that waits for a write instead of failing with "database is locked" (Support\SqliteDefaults).
         // A cached config is set again on each request, so this goes in either way.
         $config = $this->app->make('config');
-        $config->set('database.connections', SqliteDefaults::apply((array) $config->get('database.connections', []), fn (string $name) => ($value = env($name)) === null ? null : (string) $value));
+        $config->set('database.connections', SqliteDefaults::apply((array) $config->get('database.connections', []), (array) $config->get('nevela.sqlite', [])));
     }
 
     public function boot(): void

@@ -17,35 +17,30 @@ namespace Nevela\Laravel\Support;
  *   that read and then write can't each wait for the other.
  *
  * Only where the app hasn't set its own: a value in config/database.php other than
- * Laravel's default is kept, and DB_BUSY_TIMEOUT, DB_JOURNAL_MODE, DB_SYNCHRONOUS and
- * DB_TRANSACTION_MODE change any of them.
+ * Laravel's default is kept. config('nevela.sqlite'), read from DB_BUSY_TIMEOUT,
+ * DB_JOURNAL_MODE, DB_SYNCHRONOUS and DB_TRANSACTION_MODE, changes any of them.
  */
 final class SqliteDefaults
 {
-    public const DEFAULTS = [
-        'busy_timeout' => ['DB_BUSY_TIMEOUT', 5000],
-        'journal_mode' => ['DB_JOURNAL_MODE', 'wal'],
-        'synchronous' => ['DB_SYNCHRONOUS', 'normal'],
-        'transaction_mode' => ['DB_TRANSACTION_MODE', 'IMMEDIATE'],
-    ];
+    public const DEFAULTS = ['busy_timeout' => 5000, 'journal_mode' => 'wal', 'synchronous' => 'normal', 'transaction_mode' => 'IMMEDIATE'];
 
     /**
      * The connections with the defaults filled in.
      *
      * @param  array<string, mixed>  $connections  config('database.connections')
-     * @param  callable(string): (string|null)  $env  An environment variable, or null when it isn't set
+     * @param  array<string, mixed>  $chosen  config('nevela.sqlite'): what the environment asks for, null where it says nothing
      * @return array<string, mixed>
      */
-    public static function apply(array $connections, callable $env): array
+    public static function apply(array $connections, array $chosen = []): array
     {
         foreach ($connections as $name => $connection) {
             if (! is_array($connection) || ($connection['driver'] ?? null) !== 'sqlite') {
                 continue;
             }
-            foreach (self::DEFAULTS as $key => [$variable, $default]) {
-                $set = $env($variable);
+            foreach (self::DEFAULTS as $key => $default) {
+                $set = $chosen[$key] ?? null;
                 if ($set !== null && $set !== '') {
-                    $connections[$name][$key] = $key === 'busy_timeout' ? (int) $set : $set;
+                    $connections[$name][$key] = $key === 'busy_timeout' ? (int) $set : (string) $set;
                 } elseif (! isset($connection[$key]) || ($key === 'transaction_mode' && strtoupper((string) $connection[$key]) === 'DEFERRED')) {
                     // DEFERRED is what Laravel's config/database.php writes, so it says nothing of the app's own wishes.
                     $connections[$name][$key] = $default;

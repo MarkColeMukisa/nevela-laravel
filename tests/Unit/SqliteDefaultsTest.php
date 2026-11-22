@@ -15,7 +15,7 @@ final class SqliteDefaultsTest extends TestCase
 
     public function test_sqlite_as_laravel_leaves_it_waits_for_writes_and_lets_readers_through(): void
     {
-        $connections = SqliteDefaults::apply(self::LARAVEL, fn () => null);
+        $connections = SqliteDefaults::apply(self::LARAVEL);
 
         $this->assertSame(5000, $connections['sqlite']['busy_timeout']);
         $this->assertSame('wal', $connections['sqlite']['journal_mode']);
@@ -31,7 +31,7 @@ final class SqliteDefaultsTest extends TestCase
         $own['sqlite']['busy_timeout'] = 20000;
         $own['sqlite']['journal_mode'] = 'delete';
         $own['sqlite']['transaction_mode'] = 'EXCLUSIVE';
-        $connections = SqliteDefaults::apply($own, fn (string $name) => ['DB_SYNCHRONOUS' => 'full', 'DB_BUSY_TIMEOUT' => '9000'][$name] ?? null);
+        $connections = SqliteDefaults::apply($own, ['busy_timeout' => '9000', 'journal_mode' => null, 'synchronous' => 'full', 'transaction_mode' => '']);
 
         $this->assertSame(9000, $connections['sqlite']['busy_timeout']);
         $this->assertSame('delete', $connections['sqlite']['journal_mode']);
