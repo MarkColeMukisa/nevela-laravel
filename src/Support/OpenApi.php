@@ -267,7 +267,7 @@ final class OpenApi
     }
 
     /** @return list<array<string, mixed>> */
-    private function listParameters(Descriptor $d): array
+    private function listParameters(Descriptor $d, bool $timestamps = true): array
     {
         $sortable = ['createdAt', 'updatedAt', ...array_keys(array_filter($d->fields, fn (Field $f) => $f->sortable()))];
         $sorts = [];
@@ -310,7 +310,7 @@ final class OpenApi
             ]);
             array_push($parameters, ...self::operatorParameters($key, $field->kind, $schema));
         }
-        foreach (ListQuery::TIMESTAMPS as $key => $column) {
+        foreach ($timestamps ? ListQuery::TIMESTAMPS : [] as $key => $column) {
             array_push($parameters, ...self::operatorParameters($key, 'datetime', ['type' => 'string']));
         }
         if ($d->public?->confirm !== null) {
@@ -509,7 +509,7 @@ final class OpenApi
                 'summary' => "List {$many}, signed out",
                 'description' => 'Only the fields anyone may read, which are also all that can be sorted, filtered and searched by.'.$throttle($public->readThrottle),
                 'security' => [],
-                'parameters' => $this->listParameters($seen),
+                'parameters' => $this->listParameters($seen, false),
                 'responses' => [
                     '200' => self::json('A page of them.', [
                         'type' => 'object',

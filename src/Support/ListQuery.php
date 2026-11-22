@@ -68,8 +68,9 @@ final class ListQuery
     /**
      * @param  array<string, mixed>  $params
      * @param  string  $timezone  The app's: what a date or a time without an offset is read in.
+     * @param  bool  $timestamps  Whether createdAt and updatedAt can be filtered by. Not on the public list, whose records don't show them.
      */
-    public static function parse(Descriptor $resource, array $params, int $defaultPerPage = 25, int $maxPerPage = 100, string $timezone = 'UTC'): self
+    public static function parse(Descriptor $resource, array $params, int $defaultPerPage = 25, int $maxPerPage = 100, string $timezone = 'UTC', bool $timestamps = true): self
     {
         $query = new self;
         $query->perPage = $defaultPerPage;
@@ -125,7 +126,7 @@ final class ListQuery
                 continue;
             }
             // filter[createdAt][gt]=2026-11-01: when it was made or last changed, by range.
-            if ($field === null && isset(self::TIMESTAMPS[$key])) {
+            if ($field === null && $timestamps && isset(self::TIMESTAMPS[$key])) {
                 is_array($value)
                     ? $query->operators($param, $key, self::TIMESTAMPS[$key], 'datetime', null, $value, $timezone)
                     : $query->issue($param, "Use filter[{$key}][gt], [lt] or [between].");

@@ -47,8 +47,9 @@ final class PublicController
         [$descriptor, $public] = $this->open($request, 'read');
         $resourceClass = $this->resourceClass($descriptor);
 
-        // Sorting, filtering and search are the signed-in list's, over the listed fields only.
-        $response = Nevela::listFor($this->readable($descriptor), $descriptor->only($public->read), $request, $resourceClass);
+        // Sorting, filtering and search are the signed-in list's, over the listed fields only:
+        // not by when a record was made, which a narrowing range would give away.
+        $response = Nevela::listFor($this->readable($descriptor), $descriptor->only($public->read), $request, $resourceClass, timestamps: false);
         if ($response->getStatusCode() !== 200) {
             return $response;
         }

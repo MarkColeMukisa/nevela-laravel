@@ -257,13 +257,13 @@ final class Nevela
     /**
      * The same, for a descriptor that was handed over and not looked up: the public list
      * is the resource with only the fields anyone may see, so nothing else can be sorted,
-     * filtered or searched by.
+     * filtered or searched by, and not when a record was made or changed ($timestamps false).
      *
      * @param  class-string<\Illuminate\Http\Resources\Json\JsonResource>  $resourceClass
      */
-    public static function listFor(Builder $query, Descriptor $resource, Request $request, string $resourceClass): JsonResponse
+    public static function listFor(Builder $query, Descriptor $resource, Request $request, string $resourceClass, bool $timestamps = true): JsonResponse
     {
-        $list = ListQuery::parse($resource, $request->query(), (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100), (string) config('app.timezone', 'UTC'));
+        $list = ListQuery::parse($resource, $request->query(), (int) config('nevela.per_page', 25), (int) config('nevela.max_per_page', 100), (string) config('app.timezone', 'UTC'), $timestamps);
         if (! $list->ok()) {
             return response()->json(['error' => 'Invalid query.', 'issues' => $list->issues], 400);
         }
@@ -315,10 +315,9 @@ final class Nevela
         if ($list->q !== null) {
             $columns = array_map(fn ($f) => $f->column(), array_values(array_filter($resource->fields, fn ($f) => $f->searchable())));
             if ($columns !== []) {
-                $pattern = '%'.addcslashes($list->q, '%_\\').'%';
-                $query->where(function (Builder $where) use ($columns, $pattern) {
+                $query->where(function (Builder $where) use ($columns, $list) {
                     foreach ($columns as $column) {
-                        $where->orWhereLike($column, $pattern);
+                        self::whereContains($where, $column, (string) $list->q, 'or');
                     }
                 });
             }
@@ -343,7 +342,7 @@ final class Nevela
             $field = $resource->fields[$filter['field']] ?? null;
             $op = $filter['op'] ?? null;
             if ($op === 'contains') {
-                $query->whereLike($filter['column'], '%'.addcslashes((string) $filter['value'], '%_\\').'%');
+                self::whereContains($query, $filter['column'], (string) $filter['value']);
 
                 continue;
             }
@@ -374,6 +373,22 @@ final class Nevela
                 ? $query->whereNull($filter['column'])
                 : $query->where($filter['column'], $filter['value']);
         }
+    }
+
+    /**
+     * Where a column contains these words, in any case. A % or _ in them is a character to
+     * find, not a wildcard: escaped with a backslash, which SQLite and SQL Server only take
+     * as the escape when told so (MySQL and Postgres always do).
+     */
+    private static function whereContains(Builder $query, string $column, string $words, string $boolean = 'and'): void
+    {
+        $pattern = '%'.addcslashes($words, '%_\\').'%';
+        if (in_array($query->getConnection()->getDriverName(), ['sqlite', 'sqlsrv'], true)) {
+            $query->whereRaw($query->getQuery()->getGrammar()->wrap($column)." LIKE ? ESCAPE '\\'", [$pattern], $boolean);
+
+            return;
+        }
+        $query->whereLike($column, $pattern, false, $boolean);
     }
 
     /**
