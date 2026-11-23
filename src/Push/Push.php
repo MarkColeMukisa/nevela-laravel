@@ -4,6 +4,7 @@ namespace Nevela\Laravel\Push;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Support\SchemaFacts;
 use RuntimeException;
 use Throwable;
@@ -56,7 +57,7 @@ final class Push
             if ($ids->isEmpty() || ! self::ready()) {
                 return [];
             }
-            $tokens = DB::table(self::TABLE)->whereIn('user_id', $ids)->pluck('token')->all();
+            $tokens = self::live($ids->all());
             $tickets = [];
             foreach (array_chunk($tokens, self::BATCH) as $batch) {
                 array_push($tickets, ...self::deliver($batch, $title, $body, $url));
@@ -88,6 +89,25 @@ final class Push
         }
 
         return (array) $answer->json('data', []);
+    }
+
+    /**
+     * The phones of these people whose sign-in is still live. One that has ended (revoked,
+     * past its time limit, or unused too long) hears nothing, even before the nightly clean-up
+     * removes it: a phone signed out offline, which couldn't tell the server, stops once its
+     * sign-in lapses.
+     *
+     * @param  list<string>  $userIds
+     * @return list<string>
+     */
+    public static function live(array $userIds): array
+    {
+        $rows = DB::table(self::TABLE)
+            ->leftJoin(Sessions::TABLE, Sessions::TABLE.'.id', '=', self::TABLE.'.session_id')
+            ->whereIn(self::TABLE.'.user_id', $userIds)
+            ->get([self::TABLE.'.token', Sessions::TABLE.'.id as session', Sessions::TABLE.'.revoked_at', Sessions::TABLE.'.expires_at', Sessions::TABLE.'.last_seen_at']);
+
+        return $rows->filter(fn ($row) => $row->session !== null && Sessions::ended($row) === null)->pluck('token')->values()->all();
     }
 
     /** Forget the phones of a sign-in that has ended. */

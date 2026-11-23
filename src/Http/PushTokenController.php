@@ -28,12 +28,18 @@ final class PushTokenController
         if (! Push::ready()) {
             return response()->json(['error' => 'Push notifications need their table first: php artisan migrate.', 'code' => 'NOT_MIGRATED'], 503);
         }
+        // Only a sign-in Nevela can end: a phone is forgotten when its sign-in ends, and a token
+        // that belongs to none (an app's own) has no end to be forgotten at.
+        $session = Sessions::of($request->user()->currentAccessToken());
+        if ($session === null || ! $this->live($session)) {
+            return response()->json(['error' => 'Push notifications need a sign-in of the app\'s own: sign in again.', 'code' => 'NO_SESSION'], 409);
+        }
         $now = now();
         DB::table(Push::TABLE)->upsert(
             [[
                 'token' => $data['token'],
                 'user_id' => (string) $request->user()->getAuthIdentifier(),
-                'session_id' => Sessions::of($request->user()->currentAccessToken()),
+                'session_id' => $session,
                 'platform' => $data['platform'] ?? null,
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -41,8 +47,21 @@ final class PushTokenController
             ['token'],
             ['user_id', 'session_id', 'platform', 'updated_at'],
         );
+        // Revoked while this was being saved: revoking forgot the phone before it was written.
+        if (! $this->live($session)) {
+            Push::forgetSession($session);
+
+            return response()->json(['error' => 'This sign-in has ended: sign in again.', 'code' => 'SESSION_REVOKED'], 409);
+        }
 
         return response()->json(['registered' => true]);
+    }
+
+    private function live(string $session): bool
+    {
+        $row = DB::table(Sessions::TABLE)->where('id', $session)->first();
+
+        return $row !== null && Sessions::ended($row) === null;
     }
 
     public function destroy(Request $request, string $token): JsonResponse

@@ -149,7 +149,11 @@ final class NevelaServiceProvider extends ServiceProvider
         // Every bell notice also goes to the phones of the people it is for, as a push. After the
         // answer is sent: nobody waits on Expo. Nothing is asked of Expo for people with no phone.
         // always(): the notice is in the bell whatever the answer was, so its push goes too.
-        Event::listen(Events\NoticeSent::class, fn (Events\NoticeSent $sent) => \Illuminate\Support\defer(fn () => Push\Push::send($sent->userIds, $sent->title, $sent->body, $sent->url))->always());
+        // Laravel before 11.24 has no defer(): the push is sent there and then.
+        Event::listen(Events\NoticeSent::class, function (Events\NoticeSent $sent) {
+            $send = fn () => Push\Push::send($sent->userIds, $sent->title, $sent->body, $sent->url);
+            function_exists('Illuminate\Support\defer') ? \Illuminate\Support\defer($send)->always() : $send();
+        });
 
         // The activity log: every write to a resource's records by someone signed in, from
         // Eloquent's own events, written once the response has gone (Activity\Activity).

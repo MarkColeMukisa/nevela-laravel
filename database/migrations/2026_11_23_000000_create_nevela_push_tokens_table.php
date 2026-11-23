@@ -18,8 +18,8 @@ return new class extends Migration
             $table->id();
             // As the roles table keeps ids: text, whatever kind of id the users table has.
             $table->string('user_id');
-            // The nevela_sessions row it was registered with; null for a token from before sessions.
-            $table->uuid('session_id')->nullable();
+            // The nevela_sessions row it was registered with: when that sign-in ends, the phone is forgotten.
+            $table->uuid('session_id');
             // "ExponentPushToken[…]": Expo's address for one install of the app on one phone.
             $table->string('token')->unique();
             $table->string('platform', 16)->nullable();
