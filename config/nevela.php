@@ -297,6 +297,15 @@ return [
     ],
 
     /*
+    | Push notifications to the phone app, through Expo (Push\Push). Every bell notice is
+    | also sent as a push to the phones of the people it is for. Nothing to set for that:
+    | the access token is only for an Expo project with "enhanced push security" on.
+    */
+    'push' => [
+        'access_token' => env('EXPO_ACCESS_TOKEN'),
+    ],
+
+    /*
     | File and image fields (image:image, manual:file(pdf)).
     |
     | Files go on a disk from config/filesystems.php and are handed out by Nevela's own

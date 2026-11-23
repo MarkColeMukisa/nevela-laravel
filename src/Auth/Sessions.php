@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
+use Nevela\Laravel\Push\Push;
 use Nevela\Laravel\Support\SchemaFacts;
 
 /**
@@ -259,6 +260,8 @@ final class Sessions
     {
         DB::table(self::TABLE)->where('id', $id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
         DB::table('personal_access_tokens')->where('name', self::TOKEN_PREFIX.$id)->delete();
+        // Its phone hears nothing more: a sign-out, or a device revoked from the Devices screen, is the end of its pushes.
+        Push::forgetSession($id);
     }
 
     /**
@@ -378,6 +381,11 @@ final class Sessions
                 DB::table('personal_access_tokens')->whereIn('name', array_map(fn ($id) => self::TOKEN_PREFIX.$id, $ids))->delete();
             }
         });
+
+        // The phones of sessions that are gone: one that lapsed is still told, until it is removed here.
+        if (Push::ready()) {
+            DB::table(Push::TABLE)->whereNotNull('session_id')->whereNotExists(fn ($query) => $query->from(self::TABLE)->whereColumn(self::TABLE.'.id', Push::TABLE.'.session_id'))->delete();
+        }
 
         // The spent tokens of sessions that are gone, by this or by an account being deleted.
         if (SchemaFacts::hasTable(self::SPENT)) {

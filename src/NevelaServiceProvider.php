@@ -113,7 +113,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, FieldCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class, OpenApiCommand::class,
+                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class, OpenApiCommand::class, Console\PushCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -146,6 +146,9 @@ final class NevelaServiceProvider extends ServiceProvider
         Event::listen([MigrationsStarted::class, MigrationsEnded::class], fn () => SchemaFacts::forget());
         // The bell's "migrations haven't been run" goes once they have.
         Event::listen(MigrationsEnded::class, fn () => Conditions::forget());
+        // Every bell notice also goes to the phones of the people it is for, as a push. After the
+        // answer is sent: nobody waits on Expo. Nothing is asked of Expo for people with no phone.
+        Event::listen(Events\NoticeSent::class, fn (Events\NoticeSent $sent) => \Illuminate\Support\defer(fn () => Push\Push::send($sent->userIds, $sent->title, $sent->body, $sent->url)));
 
         // The activity log: every write to a resource's records by someone signed in, from
         // Eloquent's own events, written once the response has gone (Activity\Activity).
@@ -363,6 +366,9 @@ final class NevelaServiceProvider extends ServiceProvider
             Route::get('_nevela/activity', [ActivityController::class, 'index'])->name('activity.index');
             // The shop at a glance, for the home screen: only in an app with a shop.
             Route::get('_nevela/shop-figures', Http\ShopFiguresController::class)->name('shop-figures');
+            // The phone the app runs on, for push notifications: registered on signing in, forgotten on signing out.
+            Route::put('_nevela/push-tokens', [Http\PushTokenController::class, 'store'])->name('push-tokens.store');
+            Route::delete('_nevela/push-tokens/{token}', [Http\PushTokenController::class, 'destroy'])->name('push-tokens.destroy');
             // A record's history: each action done to it, for whoever may see the record.
             Route::get('_nevela/history/{slug}/{id}', [HistoryController::class, 'show'])->name('history.show');
 

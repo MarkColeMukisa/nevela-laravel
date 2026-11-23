@@ -58,6 +58,7 @@ final class PublishedConfig
         'auth.social.app_redirects' => '0.31.0',
         'sqlite' => '0.34.1',
         'dashboard' => '0.36.0',
+        'push' => '0.38.0',
     ];
 
     /**

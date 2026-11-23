@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\Sessions;
+use Nevela\Laravel\Push\Push;
 use Nevela\Laravel\Support\Key;
 use Nevela\Laravel\Support\SchemaFacts;
 
@@ -191,6 +192,7 @@ final class ClosedAccounts
         DB::transaction(function () use ($user, $key) {
             Account::revokeTokens($user);
             DB::table('nevela_role_user')->where('user_id', $key)->delete();
+            Push::forgetUser($key);
             if (SchemaFacts::hasTable(Sessions::SPENT)) {
                 DB::table(Sessions::SPENT)->whereIn('session_id', DB::table(Sessions::TABLE)->where('user_id', $key)->select('id'))->delete();
             }
