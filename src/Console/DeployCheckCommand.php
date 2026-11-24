@@ -43,6 +43,8 @@ final class DeployCheckCommand extends Command
         }
 
         $this->section('This app');
+        // The server's PHP, which can differ from the one the app was built and tested with.
+        $this->check('PHP', version_compare(PHP_VERSION, \Nevela\Laravel\Nevela::PHP_MINIMUM, '>='), PHP_VERSION, PHP_VERSION.': Nevela runs on PHP '.substr(\Nevela\Laravel\Nevela::PHP_MINIMUM, 0, 3).' or newer. On Laravel Cloud, choose it under the environment\'s Runtime; on Sevalla, "php": "^8.5" in composer.json');
         $this->check('APP_KEY', (string) config('app.key') !== '', 'set', 'not set: php artisan key:generate --show, and put it in the environment');
         $this->check('APP_DEBUG', ! ($production && config('app.debug')), $production ? 'off' : (config('app.debug') ? 'on (fine here, never in production)' : 'off'), 'on in production: every error page shows the code and settings behind it. Set APP_DEBUG=false');
         $this->migrations();

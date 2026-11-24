@@ -41,7 +41,9 @@ final class StatusCommand extends Command
             version_compare($latest, Nevela::VERSION, '>') => " <fg=yellow>({$latest} is out: php nevela upgrade)</>",
             default => ' <fg=green>(latest)</>',
         });
-        $row('Laravel / PHP', app()->version().' / '.PHP_VERSION);
+        $row('Laravel / PHP', app()->version().' / '.(version_compare(PHP_VERSION, Nevela::PHP_MINIMUM, '>=')
+            ? PHP_VERSION
+            : $bad(PHP_VERSION.': Nevela runs on PHP '.substr(Nevela::PHP_MINIMUM, 0, 3).' or newer')));
 
         // --- database ---
         try {
