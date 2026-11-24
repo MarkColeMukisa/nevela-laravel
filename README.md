@@ -35,7 +35,7 @@ class User extends Authenticatable
 }
 ```
 
-Needs PHP 8.5 or newer (Nevela runs on the latest PHP) and Laravel 11, 12 or 13.
+Needs PHP 8.5 or newer and Laravel 13: Nevela runs on the latest of both.
 
 ## Commands
 
