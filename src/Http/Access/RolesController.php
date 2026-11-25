@@ -11,6 +11,7 @@ use Illuminate\Validation\Rule;
 use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
+use Nevela\Laravel\Auth\Confirmation;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Support\Key;
@@ -67,6 +68,8 @@ final class RolesController
         if ($refused = $this->beyondCaller($request, $input['grants'])) {
             return $refused;
         }
+        // What a role allows decides who can do what: confirmed, where the app asks for it (Auth\Confirmation).
+        Confirmation::requireForAccess($request);
         $role = Role::query()->create(['name' => $input['name'], 'description' => $input['description'] ?? null, 'grants' => $input['grants'], 'is_system' => false]);
 
         return response()->json(self::present($role, 0, Access::grantsFor($request->user())), 201);
@@ -96,6 +99,9 @@ final class RolesController
             }
         }
 
+        if (array_key_exists('grants', $input)) {
+            Confirmation::requireForAccess($request);
+        }
         $role->fill(array_intersect_key($input, array_flip(['name', 'description', 'grants'])))->save();
         Access::forget();
 
@@ -117,6 +123,7 @@ final class RolesController
         if (($users = $this->users($role)) > 0) {
             return $this->refuse('IN_USE', $users === 1 ? 'One user has this role. Give them another before deleting it.' : "{$users} users have this role. Give them another before deleting it.", 409);
         }
+        Confirmation::requireForAccess($request);
         $role->delete();
         Access::forget();
 

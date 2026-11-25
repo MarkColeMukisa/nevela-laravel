@@ -31,6 +31,7 @@ final class Action
      * @param  array<string, Field>  $fields  What it asks the person for, in a sheet
      * @param  bool  $many  A record action that can also be run on a selection of rows
      * @param  array<string, scalar|null>  $set  What it does, when that is only to give fields these values: {"status": "accepted"}. Nevela does it, and no class is written.
+     * @param  bool  $sensitive  It matters enough to ask whoever does it to confirm it's them, each time (Auth\Confirmation): a transfer, a refund
      */
     public function __construct(
         public readonly string $name,
@@ -42,6 +43,7 @@ final class Action
         public readonly array $fields = [],
         public readonly bool $many = false,
         public readonly array $set = [],
+        public readonly bool $sensitive = false,
     ) {
         if (! preg_match('/^[a-z][A-Za-z0-9]*$/', $name)) {
             throw new InvalidArgumentException("Action \"{$name}\" must be camelCase, e.g. accept or sendAnnouncement.");
@@ -97,6 +99,7 @@ final class Action
             $fields,
             (bool) ($data['many'] ?? false),
             (array) ($data['set'] ?? []),
+            (bool) ($data['sensitive'] ?? false),
         );
     }
 
@@ -112,6 +115,7 @@ final class Action
             'fields' => $this->fields ? array_map(fn (Field $f) => $f->toArray(), $this->fields) : null,
             'many' => $this->many ?: null,
             'set' => $this->set ?: null,
+            'sensitive' => $this->sensitive ?: null,
         ], fn ($v) => $v !== null);
     }
 

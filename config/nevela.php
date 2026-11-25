@@ -108,6 +108,18 @@ return [
         'staff_two_factor' => env('NEVELA_STAFF_TWO_FACTOR'),
 
         /*
+        | Confirming it's you again, with the password, an emailed code, the authenticator app or
+        | a passkey. A resource action marked "sensitive" always asks, each time. `access`: changing
+        | who can sign in asks too (people, roles, deleted accounts, blocked emails), once every
+        | `window` minutes on a sign-in. New apps switch it on; an older dashboard or phone app
+        | can't answer the question, so turn it on once both are up to date.
+        */
+        'confirm' => [
+            'access' => env('NEVELA_CONFIRM_ACCESS', false),
+            'window' => env('NEVELA_CONFIRM_WINDOW', 5),
+        ],
+
+        /*
         | Let anyone create their own account at /sign-up. Off by default, and accounts come
         | from `php nevela user`: a generated policy lets every signed-in user do everything
         | until you tighten it, so open sign-up on an untouched app would hand the dashboard

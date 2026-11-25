@@ -15,6 +15,7 @@ use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
+use Nevela\Laravel\Auth\Confirmation;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Media\Uploads;
@@ -116,6 +117,9 @@ final class UsersController
             return $refused;
         }
 
+        // Who can sign in is changing: confirmed, where the app asks for it (Auth\Confirmation).
+        Confirmation::requireForAccess($request);
+
         $attributes = ['name' => $input['name'], 'email' => mb_strtolower(trim($input['email'])), 'password' => Hash::make($input['password'])];
         if (SchemaFacts::hasColumn($user->getTable(), 'active')) {
             $attributes['active'] = (bool) ($input['active'] ?? true);
@@ -172,6 +176,11 @@ final class UsersController
         $demoting = $roles !== null && $wasAdmin && ! $roles->contains(fn (Role $role) => Permissions::hasAll($role->grants));
         if (($deactivating || $demoting) && $wasAdmin && Access::active($user) && Access::otherAdmins($user) === 0) {
             return $this->refuse('LAST_ADMIN', 'This is the only administrator. Make someone else an administrator first.', 409);
+        }
+
+        // A new address, password, role or switch is a change to who can sign in. A name isn't.
+        if (array_intersect_key($input, array_flip(['email', 'password', 'roles', 'active'])) !== []) {
+            Confirmation::requireForAccess($request);
         }
 
         $attributes = [];
@@ -237,6 +246,8 @@ final class UsersController
             return $this->refuse('LAST_ADMIN', 'This is the only administrator. Make someone else an administrator first.', 409);
         }
 
+        Confirmation::requireForAccess($request);
+
         if (ClosedAccounts::ready()) {
             ClosedAccounts::close($user, $caller);
         } else {
@@ -254,6 +265,10 @@ final class UsersController
         $self = (string) $request->user()->getAuthIdentifier() === (string) $user->getAuthIdentifier();
         if (! $self && ($refused = $this->aboveCaller($request->user(), $user, 'sign out'))) {
             return $refused;
+        }
+
+        if (! $self) {
+            Confirmation::requireForAccess($request);
         }
 
         return response()->json(['revoked' => Account::revokeTokens($user, $self ? $request->user()->currentAccessToken()?->getKey() : null)]);

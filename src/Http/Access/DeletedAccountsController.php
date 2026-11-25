@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Gate;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\AuthMail;
+use Nevela\Laravel\Auth\Confirmation;
 use Nevela\Laravel\Http\Auth\Answers;
 use Nevela\Laravel\Notices\Announce;
 use Nevela\Laravel\Support\Key;
@@ -85,6 +86,8 @@ final class DeletedAccountsController
         if ($refused = $this->aboveCaller($request->user(), $user, 'restore')) {
             return $refused;
         }
+        // Someone can sign in again: confirmed, where the app asks for it (Auth\Confirmation).
+        Confirmation::requireForAccess($request);
         ClosedAccounts::restore($user);
         Announce::toSelf($user, 'Your account was restored', 'It has everything it had when it was closed.', url: '/dashboard/account');
         AuthMail::send($user->email, 'Your '.AuthMail::app().' account is open again', ['Your account has been restored, with everything it had.', 'Sign in the way you did before: your password is the one you last used.']);
@@ -103,6 +106,7 @@ final class DeletedAccountsController
         if ($refused = $this->aboveCaller($request->user(), $user, 'remove')) {
             return $refused;
         }
+        Confirmation::requireForAccess($request);
         ClosedAccounts::purge($user);
 
         return response()->noContent();
@@ -132,12 +136,13 @@ final class DeletedAccountsController
     }
 
     /** DELETE _nevela/blocked-emails/{id}: let that email have an account again. */
-    public function allow(string $id): JsonResponse|Response
+    public function allow(Request $request, string $id): JsonResponse|Response
     {
         Gate::authorize('users.delete');
         if ($refused = $this->notReady()) {
             return $refused;
         }
+        Confirmation::requireForAccess($request);
         if (! ClosedAccounts::allow($id)) {
             throw new NotFoundHttpException('No such blocked email.');
         }

@@ -56,6 +56,7 @@ use Nevela\Laravel\Http\Access\UsersController;
 use Nevela\Laravel\Http\FlareErrors;
 use Nevela\Laravel\Http\FormsController;
 use Nevela\Laravel\Http\Auth\AccountController;
+use Nevela\Laravel\Http\Auth\ConfirmController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\Auth\SocialController;
@@ -303,6 +304,12 @@ final class NevelaServiceProvider extends ServiceProvider
                     Route::delete('token', [TokenController::class, 'destroy'])->name('destroy');
                     Route::post('password', [AccountController::class, 'changePassword'])->middleware('throttle:nevela-auth')->name('password.change');
                     Route::post('close', [AccountController::class, 'close'])->middleware('throttle:nevela-auth')->name('close');
+                    // Confirming it's you again, for a request that answered 428 (Auth\Confirmation).
+                    Route::middleware('throttle:nevela-auth')->group(function () {
+                        Route::post('confirm', [ConfirmController::class, 'confirm'])->name('confirm');
+                        Route::post('confirm/send', [ConfirmController::class, 'send'])->name('confirm.send');
+                        Route::post('confirm/passkey/options', [ConfirmController::class, 'passkeyOptions'])->name('confirm.passkey');
+                    });
 
                     Route::get('sessions', [AccountController::class, 'sessions'])->name('sessions');
                     Route::delete('sessions', [AccountController::class, 'revokeOtherSessions'])->name('sessions.revoke-others');

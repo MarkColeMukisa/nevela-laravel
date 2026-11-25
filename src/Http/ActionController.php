@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
+use Nevela\Laravel\Auth\Confirmation;
 use Nevela\Laravel\History\History;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Rules\Phone as PhoneRule;
@@ -49,6 +50,10 @@ final class ActionController
             return response()->json(['error' => "{$definition->label} can't be done to this ".strtolower($descriptor->label).' as it is now.', 'code' => 'NOT_APPLICABLE'], 409);
         }
         $input = $this->input($request, $definition);
+        // Allowed, and asked for properly: only now is the person asked to confirm it's them.
+        if ($definition->sensitive) {
+            Confirmation::requireForRequest($request);
+        }
 
         return $this->run($definition, function () use ($descriptor, $definition, $record, $input, $request) {
             $message = $this->perform($descriptor, $definition, $record, $input, $request);
@@ -62,6 +67,9 @@ final class ActionController
         [$descriptor, $definition] = $this->find($slug, $action, null);
         $this->authorize($request, $descriptor, $definition);
         $input = $this->input($request, $definition);
+        if ($definition->sensitive) {
+            Confirmation::requireForRequest($request);
+        }
 
         if ($definition->on === 'collection') {
             return $this->run($definition, function () use ($descriptor, $definition, $input) {
