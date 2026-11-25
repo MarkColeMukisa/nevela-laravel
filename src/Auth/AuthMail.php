@@ -38,6 +38,19 @@ final class AuthMail
             @file_put_contents('php://stderr', "Nevela mail to {$email}: {$subject}\n    {$secret}\n");
         }
 
+        // Sent after the answer, not before it. An email for a real account would otherwise make
+        // the answer slower than one for an address with no account, and the difference would
+        // say which addresses have one, however alike the answers read. always(): an answer
+        // that ends badly after this still sends what was promised.
+        \Illuminate\Support\defer(fn () => self::deliver($email, $subject, $lines, $action))->always();
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @param  array{0: string, 1: string}|null  $action
+     */
+    private static function deliver(string $email, string $subject, array $lines, ?array $action): void
+    {
         try {
             Notifications::route('mail', $email)->notify(new class($subject, $lines, $action) extends Notification
             {
