@@ -88,6 +88,14 @@ final class Account
         return collect($roles)->contains(fn ($role) => strcasecmp((string) $role, $customer) !== 0);
     }
 
+    /** Whether this account is staff, by isStaff()'s rule. */
+    public static function staff(mixed $user): bool
+    {
+        $roles = Access::ready() ? Access::rolesOf($user)->pluck('name')->all() : [];
+
+        return self::isStaff($roles, Permissions::hasAll(Access::grantsFor($user)));
+    }
+
     public static function twoFactor(mixed $user): ?TwoFactor
     {
         return TwoFactor::query()->where('user_id', (string) $user->getAuthIdentifier())->first();

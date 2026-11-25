@@ -238,7 +238,7 @@ final class SignInController
         // The answer is the same whether or not the address has an account. A closed one gets no link.
         if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user)) {
             $token = Challenges::start('magic-link', ['user' => (string) $user->getAuthIdentifier()], self::EMAILED);
-            $url = Web::url('/api/auth/magic-link', ['token' => $token, 'next' => Web::path($input['next'] ?? null)], $request);
+            $url = Web::url('/api/auth/magic-link', ['token' => $token, 'next' => Web::path($input['next'] ?? null, Web::home(Account::staff($user)))], $request);
             AuthMail::send($user->email, 'Sign in to '.AuthMail::app(), ['Use this link to sign in. It works once and expires in 5 minutes.'], ['Sign in', $url], $url);
         }
 

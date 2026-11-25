@@ -86,6 +86,28 @@ final class Web
         return $origin.$path.($query === [] ? '' : '?'.http_build_query($query));
     }
 
+    /**
+     * Where someone goes once signed in, with no other place asked for: the customer area on
+     * the site for a customer of a project with an admin app beside the site, the dashboard
+     * for everyone else.
+     */
+    public static function home(bool $staff): string
+    {
+        return ! $staff && self::admin() !== null ? '/account' : '/dashboard';
+    }
+
+    /**
+     * A link for a reader no request speaks for (one printed by `nevela user`, say): on the
+     * app they use, the admin for staff and the site for a customer, by the reader's `staff`
+     * (Account::staff). When the person who asked is the reader, use url() with the request.
+     */
+    public static function urlFor(bool $staff, string $path, array $query = []): string
+    {
+        $origin = $staff && self::admin() !== null ? self::admin() : self::configured();
+
+        return $origin.'/'.ltrim($path, '/').($query === [] ? '' : '?'.http_build_query($query));
+    }
+
     /** The host a passkey is bound to: the dashboard's, without scheme or port. */
     public static function host(?Request $request = null): string
     {

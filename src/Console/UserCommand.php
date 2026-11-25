@@ -219,7 +219,9 @@ final class UserCommand extends Command
             // prove the address, and an emailed second step is still asked for.
             $token = Challenges::start('magic-link', ['user' => (string) $user->getAuthIdentifier(), 'handed' => true], self::LINK_MINUTES * 60);
             $this->components->info('A sign-in link for '.$email.'. It works once, within '.self::LINK_MINUTES.' minutes:');
-            $this->line('  '.Web::url('/api/auth/magic-link', ['token' => $token, 'next' => '/dashboard']));
+            // On the app they use: the admin for staff, the site for a customer (the triple tier).
+            $staff = Account::staff($user);
+            $this->line('  '.Web::urlFor($staff, '/api/auth/magic-link', ['token' => $token, 'next' => Web::home($staff)]));
             $this->newLine();
             $this->line('  <fg=gray>Whoever opens it is signed in as this account. Send it only to them.</>');
         }

@@ -97,7 +97,9 @@ final class AccountController
 
             return;
         }
-        $url = Web::url('/verify-email', ['email' => $user->email, 'code' => $code, 'next' => Web::path($next, '/dashboard/account')], $request);
+        // Their own account's page, with no other asked for: the site's for a customer of the triple tier.
+        $account = Web::home(Account::staff($user)) === '/account' ? '/account' : '/dashboard/account';
+        $url = Web::url('/verify-email', ['email' => $user->email, 'code' => $code, 'next' => Web::path($next, $account)], $request);
         AuthMail::send($user->email, 'Verify your email for '.AuthMail::app(), ["Your verification code is {$code}.", 'Or use the button. Both expire in an hour.'], ['Verify email', $url], "{$code}  {$url}");
     }
 
