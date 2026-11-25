@@ -26,6 +26,59 @@ final class WriterTest extends TestCase
         return (new Writer(['api' => $this->dir], $force))->write([$file])[0]['status'];
     }
 
+    public function test_with_an_admin_app_each_web_file_goes_where_it_belongs(): void
+    {
+        mkdir("{$this->dir}/web");
+        mkdir("{$this->dir}/admin");
+        $roots = ['web' => "{$this->dir}/web", 'admin' => "{$this->dir}/admin"];
+        $page = new GeneratedFile('web', 'app/dashboard/products/page.tsx', "export {};
+", GeneratedFile::MODE_ONCE);
+        $descriptor = new GeneratedFile('web', 'resources/product.resource.ts', "// nevela:generated:start
+export {};
+// nevela:generated:end
+");
+        $blog = new GeneratedFile('web', 'app/blog/page.tsx', "export {};
+", GeneratedFile::MODE_ONCE);
+        $latest = new GeneratedFile('web', 'resources/latest-posts.tsx', "// nevela:generated:start
+export {};
+// nevela:generated:end
+");
+
+        (new Writer($roots))->write([$page, $descriptor, $blog, $latest]);
+
+        // The dashboard's pages in the admin alone; the descriptors in both; the site's parts in the site.
+        $this->assertFileExists("{$this->dir}/admin/app/dashboard/products/page.tsx");
+        $this->assertFileDoesNotExist("{$this->dir}/web/app/dashboard/products/page.tsx");
+        $this->assertFileExists("{$this->dir}/web/resources/product.resource.ts");
+        $this->assertFileExists("{$this->dir}/admin/resources/product.resource.ts");
+        $this->assertFileExists("{$this->dir}/web/app/blog/page.tsx");
+        $this->assertFileDoesNotExist("{$this->dir}/admin/app/blog/page.tsx");
+        $this->assertFileExists("{$this->dir}/web/resources/latest-posts.tsx");
+        $this->assertFileDoesNotExist("{$this->dir}/admin/resources/latest-posts.tsx");
+    }
+
+    public function test_without_an_admin_app_everything_web_goes_to_the_one_web_app(): void
+    {
+        mkdir("{$this->dir}/web");
+        $page = new GeneratedFile('web', 'app/dashboard/products/page.tsx', "export {};
+", GeneratedFile::MODE_ONCE);
+        $this->assertSame('created', (new Writer(['web' => "{$this->dir}/web"]))->write([$page])[0]['status']);
+        $this->assertFileExists("{$this->dir}/web/app/dashboard/products/page.tsx");
+    }
+
+    public function test_an_admin_only_project_gets_the_dashboard_and_skips_the_site(): void
+    {
+        mkdir("{$this->dir}/admin");
+        $report = (new Writer(['admin' => "{$this->dir}/admin"]))->write([
+            new GeneratedFile('web', 'app/dashboard/products/page.tsx', "export {};
+", GeneratedFile::MODE_ONCE),
+            new GeneratedFile('web', 'app/blog/page.tsx', "export {};
+", GeneratedFile::MODE_ONCE),
+        ]);
+        $this->assertSame(['created', 'skipped'], array_column($report, 'status'));
+        $this->assertFileExists("{$this->dir}/admin/app/dashboard/products/page.tsx");
+    }
+
     public function test_creates_updates_and_keeps_code_outside_the_block(): void
     {
         $this->assertSame('created', $this->write($this->file('$a = 1;')));

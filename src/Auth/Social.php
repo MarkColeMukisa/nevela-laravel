@@ -20,6 +20,9 @@ use Laravel\Socialite\Two\GoogleProvider;
  * the code to Laravel. So the address registered with the provider is the dashboard's:
  *
  *     {NEVELA_WEB_URL}/api/auth/oauth/{provider}/callback
+ *
+ * With an admin app beside the public site (NEVELA_ADMIN_URL), register its address as well:
+ * each app's sign-in comes back to the app it began on.
  */
 final class Social
 {

@@ -49,16 +49,18 @@ final class Removal
     {
         $files = [['path' => $descriptorFile, 'action' => self::DELETE]];
         foreach ($generator->forResource($resource, null, $all) as $file) {
-            $root = $roots[$file->target] ?? null;
             // The create-table migration is found by its glob; the others are what this run would write.
-            if ($root === null || str_starts_with($file->path, 'database/migrations/')) {
+            if (str_starts_with($file->path, 'database/migrations/')) {
                 continue;
             }
-            $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $file->path);
-            if (is_file($absolute)) {
-                // One that can't be read (another program has it to itself) can't be judged: it is left.
-                $current = @file_get_contents($absolute);
-                $files[] = ['path' => $absolute, 'action' => $current === false ? self::YOURS : self::judge($file, $current, $resource)];
+            // A web file may be in the admin app, or in both apps, where the project has one.
+            foreach (Writer::rootsFor($file, $roots) as $root) {
+                $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $file->path);
+                if (is_file($absolute)) {
+                    // One that can't be read (another program has it to itself) can't be judged: it is left.
+                    $current = @file_get_contents($absolute);
+                    $files[] = ['path' => $absolute, 'action' => $current === false ? self::YOURS : self::judge($file, $current, $resource)];
+                }
             }
         }
         if (isset($roots[GeneratedFile::TARGET_API])) {
@@ -157,6 +159,8 @@ final class Removal
             // Its dashboard, and what reads or posts to its public section: the blog's lib/blog.ts, a site's form.
             GeneratedFile::TARGET_WEB => [['app', 'components', 'lib'], '/\.(ts|tsx)$/', "/{$kebab}\\.resource\\b|\\/dashboard\\/{$slug}\\b|laravelPublic\\(\\s*[`'\"]{$slug}\\b|\\/api\\/public\\/{$slug}\\b|resourceTag\\(\\s*['\"]{$name}['\"]/"],
         ];
+        // The staff's admin app, where the project has one: looked through as the web app is.
+        $looks[GeneratedFile::TARGET_ADMIN] = $looks[GeneratedFile::TARGET_WEB];
         // Regenerated without it straight after: not the app's to fix.
         $regenerated = ['routes/nevela.php', 'routes/nevela-public.php', 'resources/index.ts'];
 

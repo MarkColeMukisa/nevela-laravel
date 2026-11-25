@@ -54,6 +54,8 @@ final class Account
             // permission up. Laravel decides each request for itself whatever a client shows.
             'permissions' => Permissions::expand($grants),
             'isAdmin' => Permissions::hasAll($grants),
+            // Staff or a customer (self::isStaff): which of the app's faces they are given.
+            'staff' => self::isStaff($roles, Permissions::hasAll($grants)),
             'emailVerified' => ($user->email_verified_at ?? null) !== null,
             'twoFactorEnabled' => self::twoFactor($user)?->enabled_at !== null,
             // The key is what is stored; "image" is the small rendition, ready for an <img>.
@@ -61,6 +63,29 @@ final class Account
             'avatarFile' => $file,
             'image' => $file ? ($file['renditions']->thumb['url'] ?? $file['url']) : null,
         ];
+    }
+
+    /**
+     * Whether someone is staff, the one rule every app goes by: the phone's staff app, the
+     * admin app that lets staff alone in, and the public site's customer area.
+     *
+     * An account that holds only the role people sign up with (nevela.auth.default_role,
+     * USER unless the app sets it) is a customer. Anyone who holds another role as well, such
+     * as an editor or a role of your own for staff, and every administrator, is staff. An app
+     * that gives sign-ups no role has no customers: everyone is staff, as before there were any.
+     *
+     * Who may do what is still each permission, checked on every request.
+     *
+     * @param  list<string>  $roles
+     */
+    public static function isStaff(array $roles, bool $administrator): bool
+    {
+        $customer = config('nevela.auth.default_role', 'USER');
+        if ($administrator || ! is_string($customer) || $customer === '') {
+            return true;
+        }
+
+        return collect($roles)->contains(fn ($role) => strcasecmp((string) $role, $customer) !== 0);
     }
 
     public static function twoFactor(mixed $user): ?TwoFactor

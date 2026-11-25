@@ -29,17 +29,35 @@ final class Writer
     {
         $report = [];
         foreach ($files as $file) {
-            $root = $this->roots[$file->target] ?? null;
-            if ($root === null) {
+            $roots = self::rootsFor($file, $this->roots);
+            if ($roots === []) {
                 $report[] = ['status' => 'skipped', 'path' => "{$file->target}:{$file->path}"];
 
                 continue;
             }
-            $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.$file->path;
-            $report[] = ['status' => $this->writeOne($file, $root, $absolute), 'path' => $absolute];
+            foreach ($roots as $root) {
+                $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.$file->path;
+                $report[] = ['status' => $this->writeOne($file, $root, $absolute), 'path' => $absolute];
+            }
         }
 
         return $report;
+    }
+
+    /**
+     * Where a file goes. A web file in a project with an admin app goes to the app (or both)
+     * it belongs in (GeneratedFile::frontends); every other file to its own target.
+     *
+     * @param  array<string, string>  $roots  target => absolute directory
+     * @return list<string>
+     */
+    public static function rootsFor(GeneratedFile $file, array $roots): array
+    {
+        if ($file->target !== GeneratedFile::TARGET_WEB || ! isset($roots[GeneratedFile::TARGET_ADMIN])) {
+            return isset($roots[$file->target]) ? [$roots[$file->target]] : [];
+        }
+
+        return array_values(array_filter(array_map(fn (string $target) => $roots[$target] ?? null, GeneratedFile::frontends($file->path))));
     }
 
     private function writeOne(GeneratedFile $file, string $root, string $absolute): string

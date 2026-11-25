@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Console;
 
+use Nevelaaravelsupportfrontends;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -9,6 +10,7 @@ use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Models\Role;
 use Nevela\Laravel\Nevela;
+use Nevela\Laravel\Support\Frontends;
 use Nevela\Laravel\Support\Naming;
 use Nevela\Laravel\Support\Numbering;
 use Nevela\Laravel\Support\Removal;
@@ -44,10 +46,7 @@ final class RemoveResourceCommand extends Command
             return self::FAILURE;
         }
 
-        $roots = ['api' => base_path()];
-        if (($web = config('nevela.web_path')) && is_dir($web)) {
-            $roots['web'] = rtrim((string) realpath($web), '/\\');
-        }
+        $roots = ['api' => base_path(), ...Frontends::roots()];
         $descriptorFile = rtrim((string) config('nevela.descriptors_path'), '/\\').DIRECTORY_SEPARATOR.Naming::kebab($resource->name).'.json';
         $plan = Removal::plan($resource, $all, $roots, $descriptorFile, new ResourceGenerator(config('nevela.currency') ?: null, config('nevela.phone_country') ?: null));
         $force = (bool) $this->option('force');
@@ -84,8 +83,8 @@ final class RemoveResourceCommand extends Command
             }
         }
         // The folders its pages and actions were in, once there is nothing left in them.
-        if (isset($roots['web'])) {
-            $this->prune($roots['web'].DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'dashboard'.DIRECTORY_SEPARATOR.$resource->slug);
+        foreach (array_intersect_key($roots, ['web' => true, 'admin' => true]) as $frontend) {
+            $this->prune($frontend.DIRECTORY_SEPARATOR.'app'.DIRECTORY_SEPARATOR.'dashboard'.DIRECTORY_SEPARATOR.$resource->slug);
         }
         $this->prune(base_path('app'.DIRECTORY_SEPARATOR.'Nevela'.DIRECTORY_SEPARATOR.'Actions'.DIRECTORY_SEPARATOR.$resource->name));
 

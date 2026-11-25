@@ -3,6 +3,7 @@
 namespace Nevela\Laravel\Console;
 
 use Illuminate\Console\Command;
+use Nevela\Laravel\Support\Frontends;
 use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
@@ -11,6 +12,9 @@ final class DevCommand extends Command
     protected $signature = 'nevela:dev
         {--port=8000 : The first port to try for the API}
         {--api-only : Start the API without the dashboard}';
+
+    /** Where the staff's admin app runs, beside the public site on 3000. Next moves on if it is taken. */
+    public const ADMIN_PORT = 3001;
 
     protected $description = 'Run the API and the dashboard together, and open the API to a mobile app if the project has one';
 
@@ -48,6 +52,12 @@ final class DevCommand extends Command
             // The dashboard is told where the API really is, whatever its .env.local says.
             $web = Process::fromShellCommandline(self::packageManager($webPath).' run dev', $webPath, ['NEVELA_API_URL' => "{$url}/api"], null, null);
         }
+        // The staff's admin app, in a project with the triple tier: on a port of its own.
+        $admin = null;
+        $adminPath = config('nevela.admin_path');
+        if (! $this->option('api-only') && is_string($adminPath) && $adminPath !== '' && Frontends::isNextApp($adminPath)) {
+            $admin = Process::fromShellCommandline(self::packageManager($adminPath).' run dev', $adminPath, ['NEVELA_API_URL' => "{$url}/api", 'PORT' => (string) self::ADMIN_PORT], null, null);
+        }
 
         // Mail a public form causes is queued, and a queue with nobody working it sends
         // nothing: a confirmation link would never arrive. So the queue is worked here too,
@@ -56,10 +66,13 @@ final class DevCommand extends Command
             ? null
             : new Process([$php, 'artisan', 'queue:listen', '--tries=1', '--sleep=2'], base_path(), null, null, null);
 
-        $this->components->info('Starting '.($web ? 'the API and the dashboard' : 'the API').'. Press Ctrl+C to stop.');
+        $this->components->info('Starting '.($admin ? ($web ? 'the API, the site and the admin' : 'the API and the admin') : ($web ? 'the API and the dashboard' : 'the API')).'. Press Ctrl+C to stop.');
         $this->components->twoColumnDetail('API', $url);
         if ($web) {
-            $this->components->twoColumnDetail('Dashboard', 'http://localhost:3000/sign-in (see below if that port is taken)');
+            $this->components->twoColumnDetail($admin ? 'Site' : 'Dashboard', ($admin ? 'http://localhost:3000' : 'http://localhost:3000/sign-in').' (see below if that port is taken)');
+        }
+        if ($admin) {
+            $this->components->twoColumnDetail('Admin', 'http://localhost:'.self::ADMIN_PORT.'/sign-in (see below if that port is taken)');
         }
         if ($mobile) {
             $this->components->twoColumnDetail('Mobile app', 'in another terminal: cd apps/mobile && npx expo start');
@@ -69,15 +82,17 @@ final class DevCommand extends Command
 
         $api->start($this->printer('api', 35));
         $web?->start($this->printer('web', 36));
+        $admin?->start($this->printer('admin', 32));
         $queue?->start($this->printer('queue', 33));
 
         try {
-            while ($api->isRunning() && ($web === null || $web->isRunning())) {
+            while ($api->isRunning() && ($web === null || $web->isRunning()) && ($admin === null || $admin->isRunning())) {
                 usleep(200_000);
             }
         } finally {
-            // Whichever stopped, or Ctrl+C: don't leave the other one running behind.
+            // Whichever stopped, or Ctrl+C: don't leave the others running behind.
             $queue?->stop(3);
+            $admin?->stop(3);
             $web?->stop(3);
             $api->stop(3);
         }

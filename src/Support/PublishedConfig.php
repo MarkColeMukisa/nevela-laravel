@@ -59,6 +59,8 @@ final class PublishedConfig
         'sqlite' => '0.34.1',
         'dashboard' => '0.36.0',
         'push' => '0.38.0',
+        'admin_path' => '0.41.0',
+        'auth.admin_url' => '0.41.0',
     ];
 
     /**

@@ -28,12 +28,31 @@ final class Web
         return self::originOf((string) config('nevela.auth.web_url', 'http://localhost:3000')) ?? 'http://localhost:3000';
     }
 
-    /** The dashboard's origin for this request: "https://app.example.com", no path. */
-    public static function origin(?Request $request = null): string
+    /**
+     * The staff's admin app, in a project that has one beside the public site
+     * (nevela.auth.admin_url): "https://admin.example.com". Null where the dashboard is at web_url.
+     */
+    public static function admin(): ?string
+    {
+        return self::originOf((string) config('nevela.auth.admin_url', ''));
+    }
+
+    /** The origin the app making this request says it is at, when it is one of the app's own. */
+    public static function claimed(?Request $request = null): ?string
     {
         $claimed = self::originOf((string) ($request ?? request())->header('X-Nevela-Origin', ''));
 
-        return $claimed !== null && self::allowed($claimed) ? $claimed : self::configured();
+        return $claimed !== null && self::allowed($claimed) ? $claimed : null;
+    }
+
+    /**
+     * The origin of the app this request came from: "https://app.example.com", no path. With
+     * two web apps, each says which it is, so a link in an email goes back to the one the
+     * person was using, and a passkey is tied to it.
+     */
+    public static function origin(?Request $request = null): string
+    {
+        return self::claimed($request) ?? self::configured();
     }
 
     public static function allowed(string $origin): bool
@@ -42,17 +61,29 @@ final class Web
         if ($origin === null) {
             return false;
         }
-        if ($origin === self::configured()) {
+        if ($origin === self::configured() || $origin === self::admin()) {
             return true;
         }
 
         return app()->environment('local', 'testing') && in_array(parse_url($origin, PHP_URL_HOST), self::LOCAL_HOSTS, true);
     }
 
-    /** A page of the dashboard, e.g. url('/reset-password', ['token' => …]). */
+    /**
+     * A page of the dashboard, e.g. url('/reset-password', ['token' => …]). On the app the
+     * request came from; with none (a queued email, a nightly digest), on the public site.
+     * Where there is an admin app, a dashboard page is always on it.
+     */
     public static function url(string $path, array $query = [], ?Request $request = null): string
     {
-        return self::origin($request).'/'.ltrim($path, '/').($query === [] ? '' : '?'.http_build_query($query));
+        $path = '/'.ltrim($path, '/');
+        $origin = self::claimed($request);
+        // The dashboard's pages are only on the admin app, whichever app asked.
+        if (self::admin() !== null && preg_match('#^/dashboard(/|$|\?)#', $path) === 1 && ($origin === null || $origin === self::configured())) {
+            $origin = self::admin();
+        }
+        $origin ??= self::configured();
+
+        return $origin.$path.($query === [] ? '' : '?'.http_build_query($query));
     }
 
     /** The host a passkey is bound to: the dashboard's, without scheme or port. */

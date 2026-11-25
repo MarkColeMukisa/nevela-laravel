@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Console;
 
+use Nevelaaravelsupportfrontends;
 use Illuminate\Console\Command;
 use InvalidArgumentException;
 use Nevela\Laravel\Generator\GeneratedFile;
@@ -10,6 +11,7 @@ use Nevela\Laravel\Generator\Writer;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Adoption;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Frontends;
 use Nevela\Laravel\Support\Naming;
 
 final class AdoptCommand extends Command
@@ -121,16 +123,14 @@ final class AdoptCommand extends Command
      */
     private function ownFiles(Descriptor $descriptor, array $all): array
     {
-        $roots = [GeneratedFile::TARGET_API => base_path()];
-        if (($web = config('nevela.web_path')) && is_dir($web)) {
-            $roots[GeneratedFile::TARGET_WEB] = $web;
-        }
+        $roots = [GeneratedFile::TARGET_API => base_path(), ...Frontends::roots()];
         $taken = [];
         foreach ((new ResourceGenerator(config('nevela.currency') ?: null, config('nevela.phone_country') ?: null))->forResource($descriptor, null, $all) as $file) {
-            $root = $roots[$file->target] ?? null;
-            $absolute = $root === null ? null : rtrim($root, '/\\').DIRECTORY_SEPARATOR.$file->path;
-            if ($file->mode === GeneratedFile::MODE_BLOCK && $absolute !== null && is_file($absolute) && Writer::block((string) file_get_contents($absolute)) === null) {
-                $taken[] = $file->path;
+            foreach (Writer::rootsFor($file, $roots) as $root) {
+                $absolute = rtrim($root, '/\\').DIRECTORY_SEPARATOR.$file->path;
+                if ($file->mode === GeneratedFile::MODE_BLOCK && is_file($absolute) && Writer::block((string) file_get_contents($absolute)) === null) {
+                    $taken[] = $file->path;
+                }
             }
         }
 

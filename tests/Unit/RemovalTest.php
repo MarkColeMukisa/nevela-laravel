@@ -55,6 +55,20 @@ final class RemovalTest extends TestCase
         return str_replace('/', DIRECTORY_SEPARATOR, $this->dir.'/'.$relative);
     }
 
+    public function test_with_an_admin_app_its_pages_go_and_the_descriptor_goes_from_both(): void
+    {
+        $this->roots['admin'] = $this->dir.DIRECTORY_SEPARATOR.'admin';
+        $gadget = $this->gadget();
+        $this->written($gadget, [$gadget]);
+        $deleted = $this->plan($gadget, [$gadget])->paths(Removal::DELETE);
+
+        foreach (['web/resources/gadget.resource.ts', 'admin/resources/gadget.resource.ts', 'admin/app/dashboard/gadgets/[id]/edit/page.tsx'] as $file) {
+            $this->assertContains($this->path($file), $deleted, $file);
+        }
+        // The site never had the dashboard's pages.
+        $this->assertFileDoesNotExist($this->path('web/app/dashboard/gadgets/[id]/edit/page.tsx'));
+    }
+
     public function test_what_nevela_wrote_and_nobody_touched_is_all_deleted_and_the_migration_kept(): void
     {
         $gadget = $this->gadget();

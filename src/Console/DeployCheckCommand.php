@@ -61,6 +61,16 @@ final class DeployCheckCommand extends Command
             $web = rtrim((string) config('nevela.auth.web_url'), '/');
             $local = \Nevela\Laravel\Notices\Conditions::isLocal($web);
             $this->check('NEVELA_WEB_URL', ! $production || (! $local && str_starts_with($web, 'https://')), $web, $local ? "{$web}: set it to the dashboard's address, as people reach it. Links in emails and passkeys use it" : "{$web}: the dashboard must be served over https in production");
+            // The staff's admin app, where the project has one beside the public site.
+            $admin = rtrim((string) config('nevela.auth.admin_url'), '/');
+            if ($admin !== '') {
+                $adminLocal = \Nevela\Laravel\Notices\Conditions::isLocal($admin);
+                $this->check('NEVELA_ADMIN_URL', ! $production || (! $adminLocal && str_starts_with($admin, 'https://') && $admin !== $web), $admin, match (true) {
+                    $adminLocal => "{$admin}: set it to the admin app's address, as staff reach it",
+                    $admin === $web => "{$admin}: the same as NEVELA_WEB_URL. The admin app has an address of its own, such as https://admin.example.com",
+                    default => "{$admin}: the admin app must be served over https in production",
+                });
+            }
             $secret = (string) config('nevela.auth.proxy_secret');
             $this->check('NEVELA_PROXY_SECRET', $secret !== '' || ! $production, $secret !== '' ? 'set' : 'not set (fine here)', 'not set: without it every device is listed with the dashboard server\'s address, and public forms count every visitor as one. Set the same value in both apps');
         }

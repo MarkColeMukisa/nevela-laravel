@@ -2,6 +2,7 @@
 
 namespace Nevela\Laravel\Console;
 
+use Nevelaaravelsupportfrontends;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
@@ -10,6 +11,7 @@ use Nevela\Laravel\Generator\ResourceGenerator;
 use Nevela\Laravel\Generator\Writer;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\Descriptor;
+use Nevela\Laravel\Support\Frontends;
 use Nevela\Laravel\Support\Naming;
 
 final class GenerateCommand extends Command
@@ -237,10 +239,7 @@ final class GenerateCommand extends Command
         array_push($files, ...BlogPages::homePage($all));
         $files[] = $generator->authConfig((array) config('nevela.auth', []));
 
-        $roots = ['api' => base_path()];
-        if (($web = config('nevela.web_path')) && is_dir($web)) {
-            $roots['web'] = $web;
-        }
+        $roots = ['api' => base_path(), ...Frontends::roots()];
         if ($root = self::projectRoot()) {
             $roots['root'] = $root;
             $apiFromRoot = ltrim(str_replace('\\', '/', substr(base_path(), strlen($root))), '/');

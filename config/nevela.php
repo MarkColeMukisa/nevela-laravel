@@ -14,6 +14,14 @@ return [
     'web_path' => env('NEVELA_WEB_PATH', base_path('../web')),
 
     /*
+    | The staff's own Next.js app, when the project has one (the triple tier: the public
+    | site and customer area in web_path, the admin here). While it exists, the dashboard's
+    | pages are generated here instead of in web_path, and the descriptors in both.
+    | Set to null if the project has none.
+    */
+    'admin_path' => env('NEVELA_ADMIN_PATH', base_path('../admin')),
+
+    /*
     | Whether the app has a dashboard: false for an API and a mobile app alone
     | (`nevela new --tier mobile`). Emails then carry codes and no links to dashboard
     | pages, and `deploy:check` doesn't ask where the dashboard is. A setting, not a
@@ -179,6 +187,13 @@ return [
         | the dashboard moves to another port when 3000 is taken.
         */
         'web_url' => env('NEVELA_WEB_URL', 'http://localhost:3000'),
+
+        /*
+        | Where the staff's admin app is, when the project has one beside the public site
+        | (admin.example.com). Links to dashboard pages go there, and a passkey made there
+        | is tied to its address. Null: the dashboard is at web_url.
+        */
+        'admin_url' => env('NEVELA_ADMIN_URL'),
 
         /*
         | A secret the dashboard's server and Laravel share, so Laravel can believe what the
