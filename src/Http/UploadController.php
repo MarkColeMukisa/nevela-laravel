@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use InvalidArgumentException;
 use Nevela\Laravel\Media\FileTypes;
 use Nevela\Laravel\Media\UploadRejected;
@@ -186,6 +187,64 @@ final class UploadController
      */
     public function download(string $slug, string $id, string $field): Response
     {
+        [$record, $definition] = $this->privateRecord($slug, $id, $field);
+        Gate::authorize('view', $record);
+
+        return $this->privateFile($record, $definition);
+    }
+
+    /** How long a private file's link works: long enough to open it, too short to pass around. */
+    public const LINK_SECONDS = 300;
+
+    /**
+     * An address for a private file that works for a few minutes without signing in.
+     *
+     *   POST {prefix}/_nevela/private/{slug}/{id}/{field}/link   → { path, expiresAt }
+     *
+     * For a phone, which opens the file in its browser, and a browser can't send the app's
+     * token. Given only to someone who may view the record. The link names the file it was
+     * made for: once the record is trashed or the file replaced, it opens nothing.
+     */
+    public function link(string $slug, string $id, string $field): JsonResponse
+    {
+        [$record, $definition] = $this->privateRecord($slug, $id, $field);
+        Gate::authorize('view', $record);
+        $this->privateFile($record, $definition);
+        $expires = now()->addSeconds(self::LINK_SECONDS);
+        $file = self::fingerprint((string) $record->getAttribute($definition->column()));
+
+        return response()->json([
+            // The path alone is signed, as the API's own address can read differently behind a proxy.
+            // The phone puts it after the address it reaches the API by.
+            'path' => URL::temporarySignedRoute('nevela.private.signed', $expires, ['slug' => $slug, 'id' => $id, 'field' => $field, 'file' => $file], absolute: false),
+            'expiresAt' => $expires->toAtomString(),
+        ]);
+    }
+
+    /** GET {prefix}/_nevela/private-link/{slug}/{id}/{field}?file=…&expires=…&signature=…: the file behind a link. */
+    public function signed(Request $request, string $slug, string $id, string $field): Response
+    {
+        [$record, $definition] = $this->privateRecord($slug, $id, $field);
+        if (! hash_equals(self::fingerprint((string) $record->getAttribute($definition->column())), (string) $request->query('file'))) {
+            abort(404);
+        }
+
+        return $this->privateFile($record, $definition);
+    }
+
+    /** Which file a link was made for, without putting its key in the address. */
+    private static function fingerprint(string $key): string
+    {
+        return substr(hash_hmac('sha256', $key, (string) config('app.key')), 0, 32);
+    }
+
+    /**
+     * The record a private file belongs to, and the field. 404 for anything else.
+     *
+     * @return array{0: \Illuminate\Database\Eloquent\Model, 1: Field}
+     */
+    private function privateRecord(string $slug, string $id, string $field): array
+    {
         $descriptor = null;
         foreach (Nevela::all() as $candidate) {
             if ($candidate->slug === $slug) {
@@ -199,8 +258,12 @@ final class UploadController
         }
         // A record in the trash is found by nobody here: trashing it exposes nothing.
         $record = $model::query()->find($id) ?? abort(404);
-        Gate::authorize('view', $record);
 
+        return [$record, $definition];
+    }
+
+    private function privateFile(mixed $record, Field $definition): Response
+    {
         $key = $record->getAttribute($definition->column());
         $upload = Uploads::isPrivate($key) ? Upload::query()->where('key', $key)->first() : null;
         $disk = $upload === null ? null : Storage::disk($upload->disk);

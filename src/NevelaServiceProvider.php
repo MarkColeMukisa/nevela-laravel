@@ -349,11 +349,15 @@ final class NevelaServiceProvider extends ServiceProvider
         // Stored files. Open, like any image on a website: the key is the secret.
         Route::prefix($prefix)->middleware('api')->get('_nevela/files/{path}', [UploadController::class, 'show'])
             ->where('path', '.*')->name('nevela.files.show');
+        // A private file by a link that works for a few minutes, for a phone's browser (UploadController::link).
+        Route::prefix($prefix)->middleware(['api', 'signed:relative', 'throttle:60,1'])->get('_nevela/private-link/{slug}/{id}/{field}', [UploadController::class, 'signed'])
+            ->name('nevela.private.signed');
 
         Route::prefix($prefix)->middleware(config('nevela.middleware', ['api', 'auth:sanctum']))->name('nevela.')->group(function () {
             Route::put('_nevela/uploads/{resource}/{field}', [UploadController::class, 'store'])->name('uploads.store');
             // A private file: only for someone who may view the record it belongs to.
             Route::get('_nevela/private/{slug}/{id}/{field}', [UploadController::class, 'download'])->name('private.show');
+            Route::post('_nevela/private/{slug}/{id}/{field}/link', [UploadController::class, 'link'])->name('private.link');
 
             // The image profiles, for a client that wants to know which renditions exist.
             Route::get('_nevela/profiles', fn () => response()->json([
