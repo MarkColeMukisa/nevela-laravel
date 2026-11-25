@@ -208,30 +208,67 @@ final class AccountController
     }
 
     /** POST auth/password/forgot: email a link to choose a new password. */
+    /**
+     * POST auth/password/forgot: email a way to choose a new password.
+     *
+     * A link to the dashboard's page, or a 6-digit code to type into the app: a code where
+     * there is no dashboard, or where the app asks for one (`"method": "code"`, as the phone
+     * app does). The answer is the same whether or not the address has an account.
+     */
     public function forgotPassword(Request $request): JsonResponse
     {
-        $input = $request->validate(['email' => ['required', 'email']]);
-        if (! Web::exists()) {
-            // The link would open a dashboard page this app hasn't got. Said the same for every address.
-            return $this->refuse('NO_DASHBOARD', 'This app has no page to choose a new password on. Sign in with a code sent by email, or ask an administrator to set a new password.', 404);
-        }
+        $input = $request->validate(['email' => ['required', 'email'], 'method' => ['nullable', 'in:link,code']]);
+        $method = ! Web::exists() || ($input['method'] ?? null) === 'code' ? 'code' : 'link';
+        $id = mb_strtolower(trim($input['email']));
         if (($user = Account::findByEmail($input['email'])) && ! ClosedAccounts::isClosed($user)) {
-            $token = Challenges::start('reset-password', ['user' => (string) $user->getAuthIdentifier()], self::RESET_SECONDS);
-            $url = Web::url('/reset-password', ['token' => $token], $request);
-            AuthMail::send($user->email, 'Reset your '.AuthMail::app().' password', ['Use this link to choose a new password. It works once and expires in an hour.'], ['Choose a new password', $url], $url);
+            if ($method === 'link') {
+                $token = Challenges::start('reset-password', ['user' => (string) $user->getAuthIdentifier()], self::RESET_SECONDS);
+                $url = Web::url('/reset-password', ['token' => $token], $request);
+                AuthMail::send($user->email, 'Reset your '.AuthMail::app().' password', ['Use this link to choose a new password. It works once and expires in an hour.'], ['Choose a new password', $url], $url);
+            } elseif (Challenges::mayIssue('reset-password-code', $id)) {
+                [$code, $hash] = Challenges::code();
+                Challenges::put('reset-password-code', $id, ['user' => (string) $user->getAuthIdentifier(), 'code' => $hash], self::RESET_SECONDS);
+                AuthMail::send($user->email, 'Reset your '.AuthMail::app().' password', ["Your code to choose a new password is {$code}.", 'Enter it in the app. It works once and expires in an hour.'], null, $code);
+            }
         }
 
-        return response()->json(['sent' => true]);
+        return response()->json(['sent' => true, 'method' => $method]);
     }
 
-    /** POST auth/password/reset */
+    /**
+     * POST auth/password/reset: choose a new password, with the link's `token`, or with the
+     * `email` and the `code` that was sent to it.
+     */
     public function resetPassword(Request $request): JsonResponse
     {
-        $input = $request->validate(['token' => ['required', 'string'], 'newPassword' => Account::passwordRules()]);
-        $pending = Challenges::take('reset-password', $input['token']);
-        $user = $pending ? Account::model()::query()->find($pending['user']) : null;
-        if (! $user) {
-            return $this->refuse('INVALID_TOKEN', 'That reset link has expired or was already used. Ask for a new one.', 401);
+        $input = $request->validate([
+            'token' => ['required_without:code', 'nullable', 'string'],
+            'email' => ['required_with:code', 'nullable', 'email'],
+            'code' => ['required_without:token', 'nullable', 'string', 'max:16'],
+            'newPassword' => Account::passwordRules(),
+        ]);
+        if (($input['token'] ?? null) !== null) {
+            $pending = Challenges::take('reset-password', $input['token']);
+            $user = $pending ? Account::model()::query()->find($pending['user']) : null;
+            if (! $user) {
+                return $this->refuse('INVALID_TOKEN', 'That reset link has expired or was already used. Ask for a new one.', 401);
+            }
+        } else {
+            $id = mb_strtolower(trim((string) $input['email']));
+            $pending = Challenges::get('reset-password-code', $id);
+            if ($pending === null) {
+                return $this->refuse('OTP_EXPIRED', 'That code has expired. Ask for a new one.', 401);
+            }
+            if (! hash_equals($pending['code'], Challenges::hash((string) $input['code']))) {
+                return Challenges::miss('reset-password-code', $id)
+                    ? $this->refuse('INVALID_OTP', "That code isn't right. Check it and try again.", 401)
+                    : $this->refuse('TOO_MANY_ATTEMPTS', 'Too many attempts. Ask for a new code.', 429);
+            }
+            Challenges::forget('reset-password-code', $id);
+            $user = Account::model()::query()->find($pending['user']);
+            if (! $user || ClosedAccounts::isClosed($user)) {
+                return $this->refuse('OTP_EXPIRED', 'That code has expired. Ask for a new one.', 401);
+            }
         }
         // Whoever opened the link owns the address, and every device is signed out:
         // a reset is what someone does when they think another person has got in.
