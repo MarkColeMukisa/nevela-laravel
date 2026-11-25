@@ -230,6 +230,12 @@ final class AccountController
                 Challenges::put('reset-password-code', $id, ['user' => (string) $user->getAuthIdentifier(), 'code' => $hash], self::RESET_SECONDS);
                 AuthMail::send($user->email, 'Reset your '.AuthMail::app().' password', ["Your code to choose a new password is {$code}.", 'Enter it in the app. It works once and expires in an hour.'], null, $code);
             }
+        } elseif ($method === 'code' && Challenges::mayIssue('reset-password-code', $id)) {
+            // No account (or a closed one): a code is waiting all the same, sent to nobody. The
+            // reset that follows then answers as it would for a real account (a wrong code, then
+            // too many tries), so it can't tell anyone which addresses have one.
+            [, $hash] = Challenges::code();
+            Challenges::put('reset-password-code', $id, ['user' => null, 'code' => $hash], self::RESET_SECONDS);
         }
 
         return response()->json(['sent' => true, 'method' => $method]);
@@ -264,8 +270,9 @@ final class AccountController
                     ? $this->refuse('INVALID_OTP', "That code isn't right. Check it and try again.", 401)
                     : $this->refuse('TOO_MANY_ATTEMPTS', 'Too many attempts. Ask for a new code.', 429);
             }
-            Challenges::forget('reset-password-code', $id);
-            $user = Account::model()::query()->find($pending['user']);
+            // Taken the moment it matches, so the code is used once: a second reset with it finds it gone.
+            $pending = Challenges::take('reset-password-code', $id);
+            $user = ($pending['user'] ?? null) === null ? null : Account::model()::query()->find($pending['user']);
             if (! $user || ClosedAccounts::isClosed($user)) {
                 return $this->refuse('OTP_EXPIRED', 'That code has expired. Ask for a new one.', 401);
             }
