@@ -88,6 +88,17 @@ final class Account
         return collect($roles)->contains(fn ($role) => strcasecmp((string) $role, $customer) !== 0);
     }
 
+    /** Whether staff must have two-step sign-in on to use the admin app (nevela.auth.staff_two_factor; unset: in production). */
+    public static function staffTwoFactorRequired(): bool
+    {
+        $setting = config('nevela.auth.staff_two_factor');
+        if ($setting === null || $setting === '') {
+            return app()->isProduction();
+        }
+
+        return filter_var($setting, FILTER_VALIDATE_BOOLEAN);
+    }
+
     /** Whether this account is staff, by isStaff()'s rule. */
     public static function staff(mixed $user): bool
     {

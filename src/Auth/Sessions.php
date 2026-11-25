@@ -84,6 +84,11 @@ final class Sessions
         $refresh = self::newRefreshToken();
         $now = now();
         $absolute = self::absoluteMinutes();
+        // Begun in the staff's admin app: shorter, whatever the app's own limit.
+        if (Web::admin() !== null && Web::claimed($request) === Web::admin()) {
+            $admin = self::minutes(config('nevela.auth.session.admin_absolute', 60 * 12));
+            $absolute = $absolute === null ? $admin : ($admin === null ? $absolute : min($absolute, $admin));
+        }
         [$ip, $agent] = Account::caller($request);
         $session = (object) [
             'id' => (string) Str::uuid(),

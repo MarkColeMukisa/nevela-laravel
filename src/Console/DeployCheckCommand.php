@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Nevela\Laravel\Access\Access;
+use Nevela\Laravel\Auth\Account;
+use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Support\QueueProbe;
 use Throwable;
 
@@ -78,8 +80,15 @@ final class DeployCheckCommand extends Command
         $this->check('Administrators', $admins !== [], implode(', ', array_slice($admins, 0, 3)).(count($admins) > 3 ? ' and '.(count($admins) - 3).' more' : ''), 'none can sign in: php artisan nevela:user --role=ADMIN owner@example.com');
 
         if (isset($web, $secret) && ! $this->option('no-dashboard')) {
-            $this->section('The dashboard');
+            // The triple tier: the site at NEVELA_WEB_URL and the staff's admin at NEVELA_ADMIN_URL, each checked.
+            $adminUrl = rtrim((string) config('nevela.auth.admin_url'), '/');
+            $this->section($adminUrl !== '' ? 'The site' : 'The dashboard');
             $this->dashboard($web, $secret);
+            if ($adminUrl !== '') {
+                $this->section('The admin');
+                $this->dashboard($adminUrl, $secret, admin: true, site: $web);
+                $this->staffRules($adminUrl, $web);
+            }
         }
 
         $this->newLine();
@@ -217,14 +226,20 @@ final class DeployCheckCommand extends Command
     }
 
     /** Ask the dashboard what it sees, with the secret the two share. */
-    private function dashboard(string $web, string $secret): void
+    /**
+     * One of the web apps, as it answers its health check. `$admin`: the staff's admin app
+     * of the triple tier, whose link to the site (NEXT_PUBLIC_SITE_URL) is where customers who
+     * sign in there are sent, so it has to be `$site`.
+     */
+    private function dashboard(string $web, string $secret, bool $admin = false, ?string $site = null): void
     {
+        $setting = $admin ? 'NEVELA_ADMIN_URL' : 'NEVELA_WEB_URL';
         try {
             $response = Http::timeout(10)->acceptJson()
                 ->withHeaders($secret !== '' ? ['X-Nevela-Proxy-Secret' => $secret] : [])
                 ->get("{$web}/api/nevela/health");
         } catch (Throwable) {
-            $this->check('Reachable', false, '', "can't reach {$web}: check NEVELA_WEB_URL, and that the dashboard is deployed and running");
+            $this->check('Reachable', false, '', "can't reach {$web}: check {$setting}, and that the app is deployed and running");
 
             return;
         }
@@ -239,7 +254,19 @@ final class DeployCheckCommand extends Command
             return;
         }
         if (! $response->successful() || $response->json('nevela') !== 'dashboard') {
-            $this->check('Reachable', false, '', "{$web} answered {$response->status()}, and not as a Nevela dashboard: it is older than 0.17 (upgrade it), or NEVELA_WEB_URL isn't its address");
+            $this->check('Reachable', false, '', "{$web} answered {$response->status()}, and not as a Nevela dashboard: it is older than 0.17 (upgrade it), or {$setting} isn't its address");
+
+            return;
+        }
+        // Each address answered by the app it names: the admin at NEVELA_ADMIN_URL, the site at NEVELA_WEB_URL.
+        $app = (string) $response->json('app');
+        if ($admin && $app !== 'admin') {
+            $this->check('Which app', false, '', "{$web} is not the admin app (it says ".($app === '' ? 'it is one app doing both' : "\"{$app}\"")."): NEVELA_ADMIN_URL has to be apps/admin's address");
+
+            return;
+        }
+        if (! $admin && $app === 'admin') {
+            $this->check('Which app', false, '', "{$web} is the admin app: NEVELA_WEB_URL has to be the site's address, and the admin's goes in NEVELA_ADMIN_URL");
 
             return;
         }
@@ -250,14 +277,35 @@ final class DeployCheckCommand extends Command
         foreach (array_slice($problems, 1) as $problem) {
             $this->check('', false, '', (string) $problem);
         }
-        $site = $response->json('siteUrl');
         $origin = fn (string $url) => strtolower((string) parse_url($url, PHP_URL_SCHEME).'://'.parse_url($url, PHP_URL_HOST).(parse_url($url, PHP_URL_PORT) ? ':'.parse_url($url, PHP_URL_PORT) : ''));
+        if ($admin) {
+            // Built into the admin when it was built: set on the host before building, not after.
+            $said = $response->json('siteUrl');
+            $right = is_string($said) && $said !== '' && $site !== null && $origin($said) === $origin($site);
+            $this->check('Link to the site', $right, (string) $said, is_string($said) && $said !== ''
+                ? "NEXT_PUBLIC_SITE_URL in the admin is {$said}, and the site is {$site}: customers who sign in to the admin are sent to {$said}. Set it to {$site} where the admin is built, and build it again"
+                : "NEXT_PUBLIC_SITE_URL isn't set where the admin was built, so customers who sign in there are sent to http://localhost:3000. Set it to {$site} and build it again");
+
+            return;
+        }
+        $site = $response->json('siteUrl');
         if (! is_string($site) || $site === '') {
             $this->note('Site address', "NEXT_PUBLIC_SITE_URL isn't set in the dashboard: links in the blog's feed and shared links say http://localhost:3000. Set it to {$web}");
         } elseif ($origin($site) !== $origin($web)) {
             $this->note('Site address', "NEXT_PUBLIC_SITE_URL is {$site}, and NEVELA_WEB_URL is {$web}: links shared from the blog use {$site}. With a custom domain, set both to it");
         } else {
             $this->check('Site address', true, $site, '');
+        }
+    }
+
+    /** What the admin app asks of staff, and what Google and GitHub need to know of it. */
+    private function staffRules(string $admin, string $site): void
+    {
+        $this->check('Staff two-step sign-in', true, Account::staffTwoFactorRequired() ? 'required in the admin' : 'not required (NEVELA_STAFF_TWO_FACTOR=false)', '');
+        $minutes = (int) config('nevela.auth.session.admin_absolute', 60 * 12);
+        $this->check('Staff sign-ins', true, $minutes > 0 ? 'end after '.($minutes % 60 === 0 ? ($minutes / 60).' hours' : "{$minutes} minutes").' in the admin' : 'no limit of their own', '');
+        if (Social::available() !== []) {
+            $this->note('Google and GitHub', 'register both callback addresses with each provider: '.implode(' and ', array_map(fn ($origin) => "{$origin}/api/auth/oauth/{provider}/callback", [$site, $admin])));
         }
     }
 

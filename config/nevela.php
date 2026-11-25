@@ -93,7 +93,19 @@ return [
             'idle' => env('NEVELA_SESSION_IDLE', 60 * 24 * 7),
             'absolute' => env('NEVELA_SESSION_ABSOLUTE', 60 * 24 * 30),
             'reuse_seconds' => 60,
+            // A sign-in to the staff's admin app (the triple tier) ends this many minutes after
+            // it began, however busy: staff sign in again each working day. Customers keep
+            // the limits above. The admin also signs out after a while with nothing done.
+            'admin_absolute' => env('NEVELA_SESSION_ADMIN_ABSOLUTE', 60 * 12),
         ],
+
+        /*
+        | Whether staff must have two-step sign-in on to use the admin app (the triple tier).
+        | Until they turn it on, the admin shows them only their account's security page.
+        | Customers are never asked. Null, the default: in production only, so a new app opens
+        | on your computer without it.
+        */
+        'staff_two_factor' => env('NEVELA_STAFF_TWO_FACTOR'),
 
         /*
         | Let anyone create their own account at /sign-up. Off by default, and accounts come

@@ -61,6 +61,8 @@ final class PublishedConfig
         'push' => '0.38.0',
         'admin_path' => '0.41.0',
         'auth.admin_url' => '0.41.0',
+        'auth.session.admin_absolute' => '0.41.0',
+        'auth.staff_two_factor' => '0.41.0',
     ];
 
     /**

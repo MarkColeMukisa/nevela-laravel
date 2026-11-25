@@ -74,6 +74,8 @@ final class SignInController
             ],
             'requireEmailVerification' => (bool) config('nevela.auth.require_email_verification', false),
             'closeAccount' => (bool) config('nevela.auth.close_account', true),
+            // Whether the admin app asks staff to have two-step sign-in on first.
+            'staffTwoFactor' => Account::staffTwoFactorRequired(),
             // Switched on, and with their keys: the buttons to draw.
             'social' => Social::available(),
             // Switched on and no provider has its keys. Outside production the sign-in page
