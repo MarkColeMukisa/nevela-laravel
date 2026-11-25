@@ -247,6 +247,10 @@ final class GenerateCommand extends Command
         }
 
         $report = (new Writer($roots, $force))->write($files);
+        // With an admin app and no site (an internal tool), the site's files have nowhere to go, every time: not worth a line each.
+        if (isset($roots['admin']) && ! isset($roots['web'])) {
+            $report = array_values(array_filter($report, fn ($row) => $row['status'] !== 'skipped'));
+        }
         $edited = 0;
         // Shown relative to the Laravel app, like the dashboard's files: ../../nevela
         $rootShown = isset($apiFromRoot) ? rtrim(str_repeat('../', substr_count($apiFromRoot, '/') + 1), '/') : '';

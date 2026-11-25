@@ -56,7 +56,8 @@ final class DevCommand extends Command
         $admin = null;
         $adminPath = config('nevela.admin_path');
         if (! $this->option('api-only') && is_string($adminPath) && $adminPath !== '' && Frontends::isNextApp($adminPath)) {
-            $admin = Process::fromShellCommandline(self::packageManager($adminPath).' run dev', $adminPath, ['NEVELA_API_URL' => "{$url}/api", 'PORT' => (string) self::ADMIN_PORT], null, null);
+            // Beside a site on 3000, the admin on a port of its own. With no site it is the one web app, on 3000.
+            $admin = Process::fromShellCommandline(self::packageManager($adminPath).' run dev', $adminPath, ['NEVELA_API_URL' => "{$url}/api", ...($web ? ['PORT' => (string) self::ADMIN_PORT] : [])], null, null);
         }
 
         // Mail a public form causes is queued, and a queue with nobody working it sends
@@ -72,7 +73,7 @@ final class DevCommand extends Command
             $this->components->twoColumnDetail($admin ? 'Site' : 'Dashboard', ($admin ? 'http://localhost:3000' : 'http://localhost:3000/sign-in').' (see below if that port is taken)');
         }
         if ($admin) {
-            $this->components->twoColumnDetail('Admin', 'http://localhost:'.self::ADMIN_PORT.'/sign-in (see below if that port is taken)');
+            $this->components->twoColumnDetail('Admin', 'http://localhost:'.($web ? self::ADMIN_PORT : 3000).'/sign-in (see below if that port is taken)');
         }
         if ($mobile) {
             $this->components->twoColumnDetail('Mobile app', 'in another terminal: cd apps/mobile && npx expo start');

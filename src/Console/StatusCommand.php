@@ -14,6 +14,7 @@ use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Forms\FormGuard;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
+use Nevela\Laravel\Support\Frontends;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\Releases;
 use Throwable;
@@ -153,11 +154,18 @@ final class StatusCommand extends Command
         // --- dashboard ---
         $web = config('nevela.web_path');
         $hasWeb = $web && is_dir($web);
-        if (! $hasWeb) {
+        // The staff's admin app, in the triple tier, beside the site or (an internal tool) alone.
+        $admin = config('nevela.admin_path');
+        $admin = is_string($admin) && $admin !== '' && Frontends::isNextApp($admin) ? $admin : null;
+        if ($admin !== null) {
+            $adminState = DashboardState::read($admin);
+            $row('Admin', $adminState->template !== null ? "template {$adminState->template}" : '<fg=gray>template version not recorded</>');
+        }
+        if (! $hasWeb && $admin === null) {
             $row('Dashboard', Web::exists() ? '<fg=gray>not found at nevela.web_path</>' : 'none: an API and a mobile app (NEVELA_DASHBOARD=false)');
-        } else {
+        } elseif ($hasWeb) {
             $state = DashboardState::read($web);
-            $row('Dashboard', $state->template !== null ? "template {$state->template}" : '<fg=gray>template version not recorded</>');
+            $row($state->app === 'site' ? 'Site' : 'Dashboard', $state->template !== null ? "template {$state->template}" : '<fg=gray>template version not recorded</>');
 
             // What this app has made its own. An update leaves every one of these alone.
             $changes = $state->yourChanges($web);
@@ -190,8 +198,8 @@ final class StatusCommand extends Command
         // `php nevela dev` may have put the API on another port and told the dashboard (or the
         // mobile app) so, which is fine. Look for this app wherever it is running before judging.
         $mobile = DevCommand::mobilePath();
-        if ($hasWeb || $mobile !== null) {
-            $url = $hasWeb ? self::apiUrl($web) : self::mobileApiUrl($mobile);
+        if ($hasWeb || $admin !== null || $mobile !== null) {
+            $url = $hasWeb ? self::apiUrl($web) : ($admin !== null ? self::apiUrl($admin) : self::mobileApiUrl($mobile));
             $who = self::whoAnswers($url);
             $running = $who === 'this' ? $url : self::findRunning();
 

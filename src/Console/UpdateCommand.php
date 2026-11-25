@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use Nevela\Laravel\Nevela;
 use Nevela\Laravel\Support\DashboardState;
 use Nevela\Laravel\Support\DashboardUpdate;
+use Nevela\Laravel\Support\Frontends;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\Releases;
 use Nevela\Laravel\Support\TemplateSource;
@@ -257,12 +258,46 @@ final class UpdateCommand extends Command
 
     private function updateDashboard(bool $check): int
     {
-        $web = $this->webPath();
-        if ($web === null) {
+        $apps = $this->webApps();
+        if ($apps === []) {
             $this->components->info('No dashboard at nevela.web_path, so there is nothing more to update.');
 
             return self::SUCCESS;
         }
+        // The triple tier has two: the site and the admin, each from the same template.
+        $status = self::SUCCESS;
+        $first = true;
+        foreach ($apps as $label => $web) {
+            $status = max($status, $this->updateApp($web, $label, $check, $first));
+            $first = false;
+        }
+
+        return $status;
+    }
+
+    /**
+     * The project's web apps, by the name they are called here: the dashboard (or the site,
+     * in the triple tier) at nevela.web_path, and the staff's admin at nevela.admin_path.
+     *
+     * @return array<string, string>
+     */
+    private function webApps(): array
+    {
+        $apps = [];
+        if (($web = $this->webPath()) !== null) {
+            $apps[DashboardState::read($web)->app === 'site' ? 'Site' : 'Dashboard'] = $web;
+        }
+        $admin = config('nevela.admin_path');
+        if (is_string($admin) && $admin !== '' && Frontends::isNextApp($admin)) {
+            $apps['Admin'] = rtrim(str_replace('\\', '/', realpath($admin) ?: $admin), '/');
+        }
+
+        return $apps;
+    }
+
+    /** One web app brought to the new template. `$shared`: packages/shared too, done once. */
+    private function updateApp(string $web, string $label, bool $check, bool $shared): int
+    {
         $this->clearLeftovers($web, $check);
         $state = DashboardState::read($web);
         $from = $state->template ?? self::FIRST_TRACKED;
@@ -270,12 +305,12 @@ final class UpdateCommand extends Command
         $to = $check ? (Releases::latest() ?? Nevela::VERSION) : Nevela::VERSION;
 
         if (version_compare($from, $to, '>=')) {
-            $this->components->info("The dashboard is on the latest template ({$from}).");
+            $this->components->info("{$label}: on the latest template ({$from}).");
             // An app from before fingerprints were kept: record them now, so the next update
             // knows what was changed without having to work it out from a download.
             if (! $check && $state->files === null) {
                 try {
-                    $state->adopt($from, TemplateSource::fetch($from)['files']);
+                    $state->adopt($from, TemplateSource::forApp(TemplateSource::fetch($from)['files'], $state->app));
                     $state->write($web);
                 } catch (Throwable) {
                     // Not worth failing an up-to-date app over; the next update can still download it.
@@ -287,11 +322,12 @@ final class UpdateCommand extends Command
 
         try {
             $fetched = TemplateSource::fetch($to);
-            $next = $fetched['files'];
-            $shared = $fetched['shared'];
+            // As this app has it: the site leaves out the dashboard, the admin the public pages.
+            $next = TemplateSource::forApp($fetched['files'], $state->app);
+            $sharedFiles = $fetched['shared'];
             // What the app is on: its recorded fingerprints, or for an older app the old template itself.
             if ($state->files === null) {
-                $state->adopt($from, TemplateSource::fetch($from)['files']);
+                $state->adopt($from, TemplateSource::forApp(TemplateSource::fetch($from)['files'], $state->app, $fetched['files']));
             }
         } catch (Throwable $e) {
             $this->components->error("Couldn't get the dashboard template: {$e->getMessage()}. The dashboard was left as it is; run this again later.");
@@ -311,9 +347,11 @@ final class UpdateCommand extends Command
         unset($base['package.json'], $nextHashes['package.json'], $yours['package.json']);
 
         $plan = DashboardUpdate::plan($base, $nextHashes, $yours);
-        $this->components->info(($check ? 'Dashboard: what would change, ' : 'Dashboard: ')."template {$from} → {$to}");
-        // First: the dashboard's new files may import from it.
-        $this->updateShared($web, $shared, $check);
+        $this->components->info($label.($check ? ': what would change, ' : ': ')."template {$from} → {$to}");
+        // First: the dashboard's new files may import from it. Once, for the first of the apps.
+        if ($shared) {
+            $this->updateShared($web, $sharedFiles, $check);
+        }
 
         $done = [DashboardUpdate::UPDATE => [], DashboardUpdate::ADD => [], DashboardUpdate::CONFLICT => [], DashboardUpdate::REMOVED => []];
         $backup = '.nevela/backups/'.gmdate('Ymd-His')."-{$from}-to-{$to}";
@@ -354,7 +392,7 @@ final class UpdateCommand extends Command
             $this->components->twoColumnDetail("package.json: {$name}", "<fg=yellow>kept yours, {$versions}</>");
         }
         if ($plan === [] && ! ($packages['changed'] ?? [])) {
-            $this->line('  Nothing in the dashboard needed changing.');
+            $this->line("  Nothing in the {$label} needed changing.");
         }
         $this->newLine();
 
@@ -409,12 +447,24 @@ final class UpdateCommand extends Command
     /** Put the dashboard back as it was before the last update that changed it. */
     private function undo(): int
     {
-        $web = $this->webPath();
-        if ($web === null) {
+        $apps = $this->webApps();
+        if ($apps === []) {
             $this->components->error('No dashboard at nevela.web_path.');
 
             return self::FAILURE;
         }
+        foreach ($apps as $label => $web) {
+            if (count($apps) > 1) {
+                $this->components->info($label);
+            }
+            $this->undoApp($web);
+        }
+
+        return self::SUCCESS;
+    }
+
+    private function undoApp(string $web): void
+    {
         $state = DashboardState::read($web);
         $last = null;
         foreach (array_reverse($state->history) as $entry) {
@@ -426,7 +476,7 @@ final class UpdateCommand extends Command
         if ($last === null) {
             $this->components->info('There is no update to undo: no backup was found.');
 
-            return self::SUCCESS;
+            return;
         }
 
         $dir = "{$web}/{$last['backup']}";
@@ -468,8 +518,6 @@ final class UpdateCommand extends Command
         $this->newLine();
         $this->components->info("Put back {$restored} file(s). The dashboard is as it was before the update from {$last['from']} to {$last['to']}.");
         $this->line('  The nevela/laravel package was not changed by this. To go back a version there too: <fg=cyan>composer require nevela/laravel:'.$last['from'].'</>');
-
-        return self::SUCCESS;
     }
 
     /**

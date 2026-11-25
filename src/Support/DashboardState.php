@@ -12,6 +12,9 @@ namespace Nevela\Laravel\Support;
  * - `dependencies`: the template's package.json dependencies at that version, for the
  *   same question about each dependency.
  * - `history`: what each update did.
+ * - `app`: which of the triple tier's two web apps this is, "site" or "admin". Each leaves
+ *   out part of the template (its nevela-split.json), and an update leaves it out too.
+ *   Missing: one app doing both.
  *
  * Commit the file. Backups and incoming files live beside it in .nevela/, which ignores
  * itself.
@@ -27,6 +30,7 @@ final class DashboardState
         public ?array $files = null,
         public ?array $dependencies = null,
         public array $history = [],
+        public ?string $app = null,
     ) {}
 
     public static function path(string $web): string
@@ -46,6 +50,7 @@ final class DashboardState
             isset($data['files']) && is_array($data['files']) ? $data['files'] : null,
             isset($data['dependencies']) && is_array($data['dependencies']) ? $data['dependencies'] : null,
             isset($data['history']) && is_array($data['history']) ? array_values($data['history']) : [],
+            isset($data['app']) && in_array($data['app'], ['site', 'admin'], true) ? $data['app'] : null,
         );
     }
 
@@ -55,6 +60,7 @@ final class DashboardState
         ksort($files);
         file_put_contents(self::path($web), json_encode(array_filter([
             'template' => $this->template,
+            'app' => $this->app,
             'files' => $files ?: null,
             'dependencies' => $this->dependencies,
             'history' => $this->history ?: null,

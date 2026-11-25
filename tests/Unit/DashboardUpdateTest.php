@@ -20,6 +20,39 @@ final class DashboardUpdateTest extends TestCase
         return DashboardUpdate::plan($this->prints($base), $this->prints($next), $this->prints($yours));
     }
 
+    public function test_the_site_and_the_admin_are_updated_without_what_they_leave_out(): void
+    {
+        $split = json_encode(['site' => ['app/dashboard/', 'nevela-split.json'], 'admin' => ['app/page.tsx', 'nevela-split.json']]);
+        $template = ['app/page.tsx' => 'home', 'app/dashboard/page.tsx' => 'dash', 'app/dashboard/x/page.tsx' => 'x', 'app/dashboards.tsx' => 'y', 'lib/a.ts' => 'a', 'nevela-split.json' => $split];
+
+        $this->assertSame(['app/page.tsx', 'app/dashboards.tsx', 'lib/a.ts'], array_keys(TemplateSource::forApp($template, 'site')));
+        $this->assertSame(['app/dashboard/page.tsx', 'app/dashboard/x/page.tsx', 'app/dashboards.tsx', 'lib/a.ts'], array_keys(TemplateSource::forApp($template, 'admin')));
+        // An app doing both, and a template from before the split, keep everything.
+        $this->assertSame($template, TemplateSource::forApp($template, null));
+        $old = array_diff_key($template, ['nevela-split.json' => true]);
+        $this->assertSame($old, TemplateSource::forApp($old, 'site'));
+        // The old template is cut by the new one's list.
+        $this->assertSame(['app/page.tsx', 'app/dashboards.tsx', 'lib/a.ts'], array_keys(TemplateSource::forApp($old, 'site', $template)));
+
+        // So a site's update never brings the dashboard back.
+        $site = TemplateSource::forApp($template, 'site');
+        $this->assertSame([], $this->plan($site, $site, $site));
+    }
+
+    public function test_the_record_says_which_app_it_is(): void
+    {
+        $dir = sys_get_temp_dir().'/nevela-state-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents("{$dir}/.nevela.json", json_encode(['template' => '0.41.0', 'app' => 'admin', 'files' => ['a.ts' => 'x']]));
+        $state = DashboardState::read($dir);
+        $this->assertSame('admin', $state->app);
+        $state->write($dir);
+        $this->assertSame('admin', json_decode((string) file_get_contents("{$dir}/.nevela.json"), true)['app']);
+
+        file_put_contents("{$dir}/.nevela.json", json_encode(['template' => '0.40.0', 'files' => ['a.ts' => 'x']]));
+        $this->assertNull(DashboardState::read($dir)->app);
+    }
+
     public function test_only_files_you_did_not_change_are_updated(): void
     {
         $base = ['a.ts' => 'a1', 'b.ts' => 'b1', 'c.ts' => 'c1', 'same.ts' => 's'];

@@ -156,6 +156,40 @@ final class TemplateSource
         }, ARRAY_FILTER_USE_KEY);
     }
 
+    /**
+     * The template as one of the triple tier's two web apps has it: without what that app
+     * leaves out ("site" or "admin", as the template's own nevela-split.json lists it). An app
+     * doing both (null), and a template from before the split, keep everything.
+     *
+     * The list is read from the template the app is moving to, so a later release that
+     * leaves out more applies to apps made before it.
+     *
+     * @param  array<string, string>  $files  path => contents
+     * @param  array<string, string>  $from  the template whose nevela-split.json decides; $files when omitted
+     * @return array<string, string>
+     */
+    public static function forApp(array $files, ?string $app, ?array $from = null): array
+    {
+        if ($app === null) {
+            return $files;
+        }
+        $split = json_decode(($from ?? $files)['nevela-split.json'] ?? 'null', true);
+        $drops = is_array($split) && isset($split[$app]) && is_array($split[$app]) ? $split[$app] : null;
+        if ($drops === null) {
+            return $files;
+        }
+
+        return array_filter($files, function (string $path) use ($drops) {
+            foreach ($drops as $drop) {
+                if (str_ends_with($drop, '/') ? ($path === rtrim($drop, '/') || str_starts_with($path, $drop)) : $path === $drop) {
+                    return false;
+                }
+            }
+
+            return true;
+        }, ARRAY_FILTER_USE_KEY);
+    }
+
     private static function remove(string $dir): void
     {
         if (! is_dir($dir)) {
