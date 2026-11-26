@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Http;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Nevela\Laravel\Security\Addresses;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -13,7 +14,8 @@ use Symfony\Component\HttpFoundation\Response;
  * `.git` folder, PHPUnit's eval script left in vendor.
  *
  * Each answers 404 at once, before the app does any work, and counts against the address it
- * came from (`nevela-scan:<address>`), so an address that keeps probing can be blocked.
+ * came from (`nevela-scan:<address>`): each is a strike, and an address that keeps probing is
+ * blocked for a while (Security\Addresses).
  * Switched off with nevela.security.scanners = false; more paths in nevela.security.scanner_paths.
  */
 final class ScannerShield
@@ -36,7 +38,12 @@ final class ScannerShield
     public function handle(Request $request, Closure $next): Response
     {
         if (config('nevela.security.scanners', true) && self::isProbe($request->path())) {
-            RateLimiter::hit('nevela-scan:'.$request->ip(), 3600);
+            // Counted for the visitor, never for the web app's own server (Security\Addresses::of).
+            $key = Addresses::of($request);
+            if ($key !== null) {
+                RateLimiter::hit('nevela-scan:'.$key, 3600);
+                Addresses::strike($key, 'scanner');
+            }
 
             return response()->json(['error' => 'Not found.'], 404);
         }

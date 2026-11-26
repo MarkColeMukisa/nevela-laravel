@@ -51,7 +51,7 @@ final class Permissions
         }
 
         self::$own = [];
-        $taken = ['users' => true, 'roles' => true, 'activity' => true];
+        $taken = ['users' => true, 'roles' => true, 'activity' => true, 'blocked_addresses' => true];
         $modules = [[
             'key' => 'access',
             'name' => 'Access',
@@ -63,6 +63,8 @@ final class Permissions
                     ['key' => 'roles', 'name' => 'Roles and permissions', 'actions' => self::ACTIONS],
                     // Who did what to the records they may see (Activity\Activity). Only to read.
                     ['key' => 'activity', 'name' => 'Activity', 'actions' => ['view']],
+                    // The addresses turned away (Security\Addresses): seeing them, blocking one, clearing one.
+                    ['key' => 'blocked_addresses', 'name' => 'Blocked addresses', 'actions' => ['view', 'create', 'delete']],
                 ],
             ]],
         ]];

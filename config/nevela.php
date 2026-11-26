@@ -55,6 +55,15 @@ return [
         'api_per_address' => env('NEVELA_API_PER_ADDRESS', 1200),
         'scanners' => (bool) env('NEVELA_SCANNERS', true),
         'scanner_paths' => [],
+        // Repeat offenders: this many strikes (a scanner's probe, a request beyond the per-address
+        // limit) within block_window minutes, and the address is blocked for block_minutes.
+        // 0 strikes: never blocked by itself. An administrator blocks and clears by hand too.
+        'block_after' => env('NEVELA_BLOCK_AFTER', 20),
+        'block_window' => env('NEVELA_BLOCK_WINDOW', 10),
+        'block_minutes' => env('NEVELA_BLOCK_MINUTES', 60),
+        // Never blocked: addresses and ranges ("203.0.113.0/24", "2001:db8::/32"), such as an
+        // office or a monitor. This computer always is. Comma separated in NEVELA_EXEMPT.
+        'exempt' => array_values(array_filter(array_map('trim', explode(',', (string) env('NEVELA_EXEMPT', ''))))),
     ],
 
     /* URL prefix and middleware for generated resource routes (routes/nevela.php). */

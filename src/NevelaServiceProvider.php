@@ -50,6 +50,7 @@ use Nevela\Laravel\Console\TrashCommand;
 use Nevela\Laravel\Console\UpdateCommand;
 use Nevela\Laravel\Console\UserCommand;
 use Nevela\Laravel\Console\VersionCommand;
+use Nevela\Laravel\Http\Access\BlockedAddressesController;
 use Nevela\Laravel\Http\Access\DeletedAccountsController;
 use Nevela\Laravel\Http\Access\RolesAreSetUp;
 use Nevela\Laravel\Http\Access\RolesController;
@@ -61,6 +62,7 @@ use Nevela\Laravel\Http\Auth\ConfirmController;
 use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\Auth\SocialController;
+use Nevela\Laravel\Http\BlockedAddresses;
 use Nevela\Laravel\Http\PublicThrottle;
 use Nevela\Laravel\Http\ScannerShield;
 use Nevela\Laravel\Http\TokenController;
@@ -75,6 +77,7 @@ use Nevela\Laravel\Media\Uploads;
 use Nevela\Laravel\Notices\Conditions;
 use Nevela\Laravel\Notices\Notice;
 use Nevela\Laravel\Notices\Notices;
+use Nevela\Laravel\Security\Addresses;
 use Nevela\Laravel\Support\Fixed;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
@@ -116,7 +119,7 @@ final class NevelaServiceProvider extends ServiceProvider
             $this->commands([
                 MakeResourceCommand::class, FieldCommand::class, AdoptCommand::class, BlogCommand::class, GenerateCommand::class, SeedCommand::class, UserCommand::class,
                 UpdateCommand::class, DevCommand::class, StatusCommand::class, VersionCommand::class, SetupCommand::class,
-                TrashCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class, OpenApiCommand::class, Console\PushCommand::class,
+                TrashCommand::class, Console\SecurityCommand::class, DigestCommand::class, DisposableCommand::class, PruneSessionsCommand::class, PublishCommand::class, DeployCheckCommand::class, RemoveResourceCommand::class, OpenApiCommand::class, Console\PushCommand::class,
             ]);
 
             // What has been in the trash too long is removed each night, wherever the app's
@@ -128,6 +131,8 @@ final class NevelaServiceProvider extends ServiceProvider
                 $schedule->command(DigestCommand::class)->hourly()->withoutOverlapping();
                 // Sign-ins that have ended, and access tokens long expired.
                 $schedule->command(PruneSessionsCommand::class)->dailyAt('03:50')->withoutOverlapping();
+                // Blocks that have ended (Security\Addresses).
+                $schedule->call(fn () => Addresses::prune())->dailyAt('03:52')->name('nevela:blocked-addresses:prune');
                 // A sign of life, so `nevela deploy:check` can tell the scheduler is running.
                 $schedule->call(fn () => Cache::forever(DeployCheckCommand::HEARTBEAT, time()))->everyFiveMinutes()->name('nevela:heartbeat');
                 // The bell's notices, once kept long enough, and whether a newer Nevela is out.
@@ -221,8 +226,11 @@ final class NevelaServiceProvider extends ServiceProvider
         // (`route:cache`, `optimize`) finds them: the cache keeps the routes, not these.
         $this->limitAttempts();
         Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
-        // Scanners turned away before anything else runs, whatever the route (Http\ScannerShield).
-        $this->app->make(\Illuminate\Contracts\Http\Kernel::class)->prependMiddleware(ScannerShield::class);
+        // Before anything else runs, whatever the route: blocked addresses turned away (Http\BlockedAddresses),
+        // then scanners (Http\ScannerShield). Each is put in front of the last, so the block runs first.
+        $kernel = $this->app->make(\Illuminate\Contracts\Http\Kernel::class);
+        $kernel->prependMiddleware(ScannerShield::class);
+        $kernel->prependMiddleware(BlockedAddresses::class);
 
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
@@ -275,30 +283,21 @@ final class NevelaServiceProvider extends ServiceProvider
                 $limits[] = Limit::perMinute($person)->by('nevela-api-person:'.$user->getAuthIdentifier())->response(self::tooMany(...));
             }
             $address = (int) config('nevela.security.api_per_address', 1200);
-            $from = self::visitorAddress($request);
+            // The visitor's address, never the web app's server (Security\Addresses::of): null when
+            // the web app can't tell who it is for, and then only the person's own limit applies.
+            $from = Addresses::of($request);
             if ($address > 0 && $from !== null) {
-                $limits[] = Limit::perMinute($address)->by('nevela-api-address:'.$from)->response(self::tooMany(...));
+                // Beyond it is a strike against the address (the person's own limit isn't: one
+                // account's trouble shouldn't block everyone behind an office's address).
+                $limits[] = Limit::perMinute($address)->by('nevela-api-address:'.$from)->response(function (Request $request, array $headers) use ($from) {
+                    Addresses::strike($from, 'limit');
+
+                    return self::tooMany($request, $headers);
+                });
             }
 
             return $limits ?: Limit::none();
         });
-    }
-
-    /**
-     * The address a request is for. One the dashboard's server makes for a visitor is that
-     * visitor's, as the dashboard passes it on (X-Nevela-Client, believed only with the shared
-     * secret), not the server's: otherwise everyone using the dashboard would share one
-     * allowance. Null when the dashboard can't tell who it is for: the person's own limit still applies.
-     */
-    public static function visitorAddress(Request $request): ?string
-    {
-        if (Account::fromDashboard($request)) {
-            $visitor = (string) $request->header('X-Nevela-Client', '');
-
-            return filter_var($visitor, FILTER_VALIDATE_IP) ? $visitor : null;
-        }
-
-        return $request->ip();
     }
 
     /** A 429 that says when to try again, in words and in Retry-After. */
@@ -463,6 +462,10 @@ final class NevelaServiceProvider extends ServiceProvider
                 Route::delete('_nevela/deleted-accounts/{id}', [DeletedAccountsController::class, 'destroy'])->name('deleted-accounts.destroy');
                 Route::get('_nevela/blocked-emails', [DeletedAccountsController::class, 'blocked'])->name('blocked-emails.index');
                 Route::delete('_nevela/blocked-emails/{id}', [DeletedAccountsController::class, 'allow'])->name('blocked-emails.allow');
+                // The addresses turned away (Security\Addresses).
+                Route::get('_nevela/blocked-addresses', [BlockedAddressesController::class, 'index'])->name('blocked-addresses.index');
+                Route::post('_nevela/blocked-addresses', [BlockedAddressesController::class, 'store'])->name('blocked-addresses.store');
+                Route::delete('_nevela/blocked-addresses/{id}', [BlockedAddressesController::class, 'destroy'])->name('blocked-addresses.destroy');
 
                 Route::get('_nevela/permissions', [RolesController::class, 'catalog'])->name('permissions');
                 Route::get('_nevela/roles', [RolesController::class, 'index'])->name('roles.index');

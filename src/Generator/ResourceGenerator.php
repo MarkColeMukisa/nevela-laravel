@@ -334,7 +334,7 @@ final class ResourceGenerator
 
         // What you type => the artisan command it runs.
         // "update" is what upgrade was called before 0.3.0; it still works.
-        \$nevela = ['resource', 'field', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check', 'resource:remove'];
+        \$nevela = ['resource', 'field', 'adopt', 'blog', 'generate', 'seed', 'user', 'upgrade', 'update', 'dev', 'status', 'version', 'trash', 'digest', 'disposable', 'publish', 'deploy:check', 'resource:remove', 'security'];
         \$artisan = ['migrate', 'tinker', 'test', 'serve'];
         if (in_array(\$name, ['--version', '-v', '-V'], true)) {
             \$name = 'version';
@@ -372,6 +372,7 @@ final class ResourceGenerator
               php nevela disposable            fetch the current list of throwaway email domains
               php nevela publish               write config/nevela.php, to change settings that have no .env variable
               php nevela deploy:check          on the server: scheduler, queue worker, mail, the dashboard
+              php nevela security blocked      the addresses turned away; security unblock <address> clears one
               php nevela upgrade               bring this app to the latest Nevela
               php nevela version               which Nevela this is
 
