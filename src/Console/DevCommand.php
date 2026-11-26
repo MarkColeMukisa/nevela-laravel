@@ -76,7 +76,7 @@ final class DevCommand extends Command
             $this->components->twoColumnDetail('Admin', 'http://localhost:'.($web ? self::ADMIN_PORT : 3000).'/sign-in (see below if that port is taken)');
         }
         if ($mobile) {
-            $this->components->twoColumnDetail('Mobile app', 'in another terminal: cd apps/mobile && npx expo start');
+            $this->components->twoColumnDetail('Mobile app', 'in another terminal: cd apps/mobile && '.self::runBin(self::packageManager($mobile), 'expo start'));
             $this->line('  <fg=gray>The API is open to this network while this runs, so a phone on the same Wi-Fi can reach it.</>');
         }
         $this->newLine();
@@ -167,6 +167,17 @@ final class DevCommand extends Command
             is_file("{$dir}/yarn.lock") => 'yarn',
             is_file("{$dir}/bun.lockb"), is_file("{$dir}/bun.lock") => 'bun',
             default => 'npm',
+        };
+    }
+
+    /** A command a package brings ("expo start"), run the way the folder's package manager runs one. */
+    public static function runBin(string $manager, string $command): string
+    {
+        return match ($manager) {
+            'bun' => "bunx {$command}",
+            'pnpm' => "pnpm exec {$command}",
+            'yarn' => "yarn {$command}",
+            default => "npx {$command}",
         };
     }
 
