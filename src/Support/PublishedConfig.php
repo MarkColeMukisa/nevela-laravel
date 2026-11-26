@@ -64,6 +64,7 @@ final class PublishedConfig
         'auth.session.admin_absolute' => '0.41.0',
         'auth.staff_two_factor' => '0.41.0',
         'auth.confirm' => '0.42.0',
+        'security' => '0.43.0',
     ];
 
     /**

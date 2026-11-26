@@ -43,6 +43,20 @@ return [
     */
     'root_path' => env('NEVELA_ROOT_PATH'),
 
+    /*
+    | Security in the app itself, on any host (DDoS is the edge's job: see the Laravel Cloud guide).
+    | - api_per_person, api_per_address: requests a minute on the signed-in API, per person and per
+    |   address. A request beyond answers 429 with when to try again. 0 switches one off.
+    | - scanners: requests for /.env, wp-admin, phpMyAdmin and other probes answer 404 at once, and
+    |   count against the address. scanner_paths: more, as regular expressions on the path.
+    */
+    'security' => [
+        'api_per_person' => env('NEVELA_API_PER_PERSON', 600),
+        'api_per_address' => env('NEVELA_API_PER_ADDRESS', 1200),
+        'scanners' => (bool) env('NEVELA_SCANNERS', true),
+        'scanner_paths' => [],
+    ],
+
     /* URL prefix and middleware for generated resource routes (routes/nevela.php). */
     'prefix' => 'api',
     'middleware' => ['api', 'auth:sanctum'],

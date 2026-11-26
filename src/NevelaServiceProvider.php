@@ -28,6 +28,7 @@ use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Activity\Activity;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Access\Visibility;
+use Nevela\Laravel\Auth\Account;
 use Nevela\Laravel\Auth\Sessions;
 use Nevela\Laravel\Console\AdoptCommand;
 use Nevela\Laravel\Console\BlogCommand;
@@ -61,6 +62,7 @@ use Nevela\Laravel\Http\Auth\SecurityController;
 use Nevela\Laravel\Http\Auth\SignInController;
 use Nevela\Laravel\Http\Auth\SocialController;
 use Nevela\Laravel\Http\PublicThrottle;
+use Nevela\Laravel\Http\ScannerShield;
 use Nevela\Laravel\Http\TokenController;
 use Nevela\Laravel\Http\ActionController;
 use Nevela\Laravel\Http\HistoryController;
@@ -219,6 +221,8 @@ final class NevelaServiceProvider extends ServiceProvider
         // (`route:cache`, `optimize`) finds them: the cache keeps the routes, not these.
         $this->limitAttempts();
         Route::aliasMiddleware('nevela.throttle', PublicThrottle::class);
+        // Scanners turned away before anything else runs, whatever the route (Http\ScannerShield).
+        $this->app->make(\Illuminate\Contracts\Http\Kernel::class)->prependMiddleware(ScannerShield::class);
 
         if (! $this->app->routesAreCached()) {
             $this->registerRoutes();
@@ -259,6 +263,54 @@ final class NevelaServiceProvider extends ServiceProvider
 
             return $limits;
         });
+
+        // The signed-in API: lists, records, actions and Nevela's own screens. Per person, so a
+        // stolen token can't be run as fast as a script likes, and per address, so a script
+        // can't spread itself over many accounts. 0 switches either off.
+        RateLimiter::for('nevela-api', function (Request $request) {
+            $limits = [];
+            $person = (int) config('nevela.security.api_per_person', 600);
+            $user = $request->user();
+            if ($person > 0 && $user !== null) {
+                $limits[] = Limit::perMinute($person)->by('nevela-api-person:'.$user->getAuthIdentifier())->response(self::tooMany(...));
+            }
+            $address = (int) config('nevela.security.api_per_address', 1200);
+            $from = self::visitorAddress($request);
+            if ($address > 0 && $from !== null) {
+                $limits[] = Limit::perMinute($address)->by('nevela-api-address:'.$from)->response(self::tooMany(...));
+            }
+
+            return $limits ?: Limit::none();
+        });
+    }
+
+    /**
+     * The address a request is for. One the dashboard's server makes for a visitor is that
+     * visitor's, as the dashboard passes it on (X-Nevela-Client, believed only with the shared
+     * secret), not the server's: otherwise everyone using the dashboard would share one
+     * allowance. Null when the dashboard can't tell who it is for: the person's own limit still applies.
+     */
+    public static function visitorAddress(Request $request): ?string
+    {
+        if (Account::fromDashboard($request)) {
+            $visitor = (string) $request->header('X-Nevela-Client', '');
+
+            return filter_var($visitor, FILTER_VALIDATE_IP) ? $visitor : null;
+        }
+
+        return $request->ip();
+    }
+
+    /** A 429 that says when to try again, in words and in Retry-After. */
+    private static function tooMany(Request $request, array $headers): \Illuminate\Http\JsonResponse
+    {
+        $seconds = max(1, (int) ($headers['Retry-After'] ?? 60));
+
+        return response()->json([
+            'error' => "Too many requests at once. Try again in {$seconds} second".($seconds === 1 ? '' : 's').'.',
+            'code' => 'TOO_MANY_REQUESTS',
+            'retryAfter' => $seconds,
+        ], 429, $headers);
     }
 
     /** Only routes: anything else here would be missing when the routes come from the cache. */
@@ -360,7 +412,9 @@ final class NevelaServiceProvider extends ServiceProvider
         Route::prefix($prefix)->middleware(['api', 'signed:relative', 'throttle:60,1'])->get('_nevela/private-link/{slug}/{id}/{field}', [UploadController::class, 'signed'])
             ->name('nevela.private.signed');
 
-        Route::prefix($prefix)->middleware(config('nevela.middleware', ['api', 'auth:sanctum']))->name('nevela.')->group(function () {
+        // Signed in, and limited (nevela-api, above): after the sign-in, so it knows who is asking.
+        $signedIn = [...(array) config('nevela.middleware', ['api', 'auth:sanctum']), 'throttle:nevela-api'];
+        Route::prefix($prefix)->middleware($signedIn)->name('nevela.')->group(function () {
             Route::put('_nevela/uploads/{resource}/{field}', [UploadController::class, 'store'])->name('uploads.store');
             // A private file: only for someone who may view the record it belongs to.
             Route::get('_nevela/private/{slug}/{id}/{field}', [UploadController::class, 'download'])->name('private.show');
