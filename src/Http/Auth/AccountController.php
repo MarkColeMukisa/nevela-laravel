@@ -11,6 +11,7 @@ use Nevela\Laravel\Access\Access;
 use Nevela\Laravel\Access\ClosedAccounts;
 use Nevela\Laravel\Access\Permissions;
 use Nevela\Laravel\Auth\Account;
+use Nevela\Laravel\Security\SignInGuard;
 use Nevela\Laravel\Auth\AuthMail;
 use Nevela\Laravel\Auth\Challenges;
 use Nevela\Laravel\Auth\Sessions;
@@ -283,6 +284,8 @@ final class AccountController
         // a reset is what someone does when they think another person has got in.
         $user->forceFill(['password' => Hash::make($input['newPassword']), 'email_verified_at' => $user->email_verified_at ?? now()])->save();
         Account::revokeTokens($user);
+        // Locked out by wrong passwords from here? Not any more: the reset proved it's them.
+        SignInGuard::reset($request, (string) $user->email);
         Announce::toSelf($user, 'Your password was reset', 'Every device was signed out. If that wasn\'t you, reset it again and turn on two-step sign-in.', url: '/dashboard/account/sessions');
 
         return response()->json(['reset' => true]);

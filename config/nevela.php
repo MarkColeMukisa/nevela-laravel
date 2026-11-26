@@ -64,6 +64,20 @@ return [
         // Never blocked: addresses and ranges ("203.0.113.0/24", "2001:db8::/32"), such as an
         // office or a monitor. This computer always is. Comma separated in NEVELA_EXEMPT.
         'exempt' => array_values(array_filter(array_map('trim', explode(',', (string) env('NEVELA_EXEMPT', ''))))),
+        // Wrong passwords, by address and account together (Security\SignInGuard). 0 switches one off.
+        // captcha_after: the web sign-in asks for Turnstile (where TURNSTILE_SECRET_KEY is set).
+        // lock_after: that address is locked out of that account for lock_minutes.
+        // account_captcha_after: wrong passwords for one account in an hour, from anywhere, before
+        // the web sign-in to it asks for Turnstile. Never a lockout: anyone could cause one.
+        // stuffing_after: different accounts got wrong from one address in 10 minutes before each
+        // further one is a strike against the address.
+        'sign_in' => [
+            'captcha_after' => env('NEVELA_SIGN_IN_CAPTCHA_AFTER', 3),
+            'lock_after' => env('NEVELA_SIGN_IN_LOCK_AFTER', 10),
+            'lock_minutes' => env('NEVELA_SIGN_IN_LOCK_MINUTES', 15),
+            'account_captcha_after' => 20,
+            'stuffing_after' => 10,
+        ],
     ],
 
     /* URL prefix and middleware for generated resource routes (routes/nevela.php). */

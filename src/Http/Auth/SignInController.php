@@ -14,6 +14,7 @@ use Nevela\Laravel\Auth\Passkeys;
 use Nevela\Laravel\Auth\Social;
 use Nevela\Laravel\Auth\Web;
 use Nevela\Laravel\Models\TwoFactor;
+use Nevela\Laravel\Security\SignInGuard;
 use RuntimeException;
 
 /**
@@ -91,7 +92,15 @@ final class SignInController
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
             'deviceName' => ['nullable', 'string', 'max:255'],
+            'turnstile' => ['nullable', 'string', 'max:2048'],
+            'canCheck' => ['sometimes', 'boolean'],
         ]);
+
+        // Locked out from here, or a person check owed, before the password is looked at: a right
+        // guess during a lockout must not get through (Security\SignInGuard).
+        if ($refused = SignInGuard::before($request, $input['email'])) {
+            return $refused;
+        }
 
         $user = Account::findByEmail($input['email']);
         // A password is checked even when there is no such account, against a hash of
@@ -99,8 +108,11 @@ final class SignInController
         // and the difference tells a visitor which addresses have accounts.
         $right = Hash::check($input['password'], $user ? (string) $user->getAuthPassword() : self::decoy());
         if (! $user || ! $right) {
+            SignInGuard::failed($request, $input['email']);
+
             return $this->refuse('INVALID_EMAIL_OR_PASSWORD', "That email and password don't match.", 401);
         }
+        SignInGuard::succeeded($request, $input['email']);
         if (config('nevela.auth.require_email_verification', false) && $user->email_verified_at === null) {
             AccountController::sendVerification($user, $request);
 

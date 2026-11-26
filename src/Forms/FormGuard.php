@@ -239,13 +239,23 @@ final class FormGuard
      */
     private static function robot(Descriptor $resource, Request $request, array $input): ?Refusal
     {
-        $secret = self::secret();
-        $unconfigured = new Refusal('unconfigured', 503, "This form can't be sent at the moment. Please try again later.");
         $state = self::robotCheck();
         if ($state !== 'on') {
-            return $state === 'refusing' ? $unconfigured : null;
+            return $state === 'refusing' ? new Refusal('unconfigured', 503, "This form can't be sent at the moment. Please try again later.") : null;
         }
-        $token = $input[self::TURNSTILE] ?? $input['cf-turnstile-response'] ?? null;
+
+        return self::solved($request, $input[self::TURNSTILE] ?? $input['cf-turnstile-response'] ?? null, self::action($resource));
+    }
+
+    /**
+     * Whether a Turnstile token was solved by a person, on this site, for `$action` (a form's,
+     * or "sign-in"), and not used before. Null when it was; else why not. Shared by the public
+     * forms and the sign-in (Security\SignInGuard). Only call it with the check switched on.
+     */
+    public static function solved(Request $request, mixed $token, string $action): ?Refusal
+    {
+        $secret = self::secret();
+        $unconfigured = new Refusal('unconfigured', 503, "This form can't be sent at the moment. Please try again later.");
         $failed = new Refusal('robot', 422, self::NOT_A_PERSON);
         // (Cloudflare's tokens are at most 2048 characters. Anything longer is not one.)
         if (! is_string($token) || $token === '' || strlen($token) > 2048) {
@@ -296,7 +306,7 @@ final class FormGuard
             return new Refusal('hostname', 422, self::NOT_A_PERSON);
         }
 
-        if ((string) $response->json('action') !== self::action($resource)) {
+        if ((string) $response->json('action') !== $action) {
             return $failed;
         }
 

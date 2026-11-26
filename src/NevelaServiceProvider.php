@@ -264,9 +264,14 @@ final class NevelaServiceProvider extends ServiceProvider
     {
         RateLimiter::for('nevela-auth', function (Request $request) {
             $who = $request->input('email') ?: $request->input('challenge') ?: $request->input('token') ?: $request->user('sanctum')?->getAuthIdentifier();
-            $limits = [Limit::perMinute((int) config('nevela.auth.attempts_per_address', 300))->by('nevela-auth-address:'.$request->ip())];
+            // The visitor's address, never the web app's server (Security\Addresses::of): through the
+            // web app, every sign-in would otherwise share one allowance. Null: no address limit.
+            $address = Addresses::of($request);
+            $limits = $address === null ? [] : [Limit::perMinute((int) config('nevela.auth.attempts_per_address', 300))->by('nevela-auth-address:'.$address)];
             if (is_scalar($who) && (string) $who !== '') {
-                $limits[] = Limit::perMinute(10)->by('nevela-auth:'.sha1(mb_strtolower((string) $who)));
+                // By the address and the account together: keyed on the account alone, anyone sending
+                // its email ten times a minute would keep its owner from signing in.
+                $limits[] = Limit::perMinute(10)->by('nevela-auth:'.sha1(($address ?? '').'|'.mb_strtolower((string) $who)));
             }
 
             return $limits;
