@@ -78,6 +78,18 @@ final class DeployCheckCommand extends Command
         }
         $admins = Access::ready() ? Access::administratorEmails() : [];
         $this->check('Administrators', $admins !== [], implode(', ', array_slice($admins, 0, 3)).(count($admins) > 3 ? ' and '.(count($admins) - 3).' more' : ''), 'none can sign in: php artisan nevela:user --role=ADMIN owner@example.com');
+        // The activity log's seal: an entry changed or deleted in the database fails here.
+        try {
+            $chain = \Nevela\Laravel\Activity\Chain::verify();
+            if ($chain['ok'] && $chain['unverifiable'] > 0) {
+                // In order, but not all of it could be checked: a warning, not a problem.
+                $this->components->twoColumnDetail('Activity log', "<fg=yellow>{$chain['message']}</>");
+            } else {
+                $this->check('Activity log', $chain['ok'], $chain['message'], $chain['message'].' See Security in the docs: the activity log, sealed');
+            }
+        } catch (\Throwable $e) {
+            $this->check('Activity log', false, '', "couldn't be checked: ".Str::limit($e->getMessage(), 160));
+        }
 
         if (isset($web, $secret) && ! $this->option('no-dashboard')) {
             // The triple tier: the site at NEVELA_WEB_URL and the staff's admin at NEVELA_ADMIN_URL, each checked.

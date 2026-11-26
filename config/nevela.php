@@ -50,6 +50,14 @@ return [
     | - scanners: requests for /.env, wp-admin, phpMyAdmin and other probes answer 404 at once, and
     |   count against the address. scanner_paths: more, as regular expressions on the path.
     */
+    // The activity log's seal (Activity\Chain): each entry is chained to the one before under
+    // this key, so an entry changed or deleted in the database shows. Empty: one derived from
+    // APP_KEY (and APP_PREVIOUS_KEYS, so rotating it leaves older entries verifiable). Set your
+    // own, kept apart from APP_KEY, for a log that holds when APP_KEY is shared more widely.
+    'audit' => [
+        'key' => env('NEVELA_AUDIT_KEY', ''),
+    ],
+
     'security' => [
         'api_per_person' => env('NEVELA_API_PER_PERSON', 600),
         'api_per_address' => env('NEVELA_API_PER_ADDRESS', 1200),
