@@ -123,7 +123,11 @@ final class Addresses
      */
     public static function strike(?string $key, string $why): void
     {
-        if ($key === null || self::exempt($key) || ! self::ready() || self::blocked($key) !== null) {
+        if ($key === null || self::exempt($key)) {
+            return;
+        }
+        SecurityLog::record($key, $why);
+        if (! self::ready() || self::blocked($key) !== null) {
             return;
         }
         $after = (int) config('nevela.security.block_after', 20);
@@ -158,12 +162,13 @@ final class Addresses
             'expires_at' => $until,
         ]);
         Cache::put(self::cacheKey($key), ['id' => $id, 'until' => $until?->toAtomString()], $until ? max(1, now()->diffInSeconds($until)) : 3600);
+        SecurityLog::blocked($key, $reason, $by, $note);
 
         return $id;
     }
 
-    /** Clear the blocks on an address, or one block by its id. How many there were. */
-    public static function unblock(string $keyOrId): int
+    /** Clear the blocks on an address, or one block by its id. How many there were. `$by`: who, by user id. */
+    public static function unblock(string $keyOrId, ?string $by = null): int
     {
         if (! self::ready()) {
             return 0;
@@ -173,6 +178,7 @@ final class Addresses
         foreach ($rows->pluck('address')->unique() as $address) {
             Cache::forget(self::cacheKey((string) $address));
             RateLimiter::clear('nevela-strikes:'.$address);
+            SecurityLog::unblocked((string) $address, $by);
         }
         DB::table(self::TABLE)->whereIn('id', $rows->pluck('id'))->delete();
 

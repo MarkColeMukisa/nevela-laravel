@@ -42,6 +42,7 @@ final class SignInGuard
         $pair = self::pair($request, $email);
         if ($pair !== null && ($until = Cache::get('nevela-signin-lock:'.$pair)) !== null) {
             $seconds = max(1, (int) $until - time());
+            SecurityLog::record(Addresses::of($request), 'locked');
 
             return response()->json([
                 'error' => 'Too many wrong passwords for this account from here. Try again in '.self::inWords($seconds).', sign in another way, or reset the password.',
@@ -84,6 +85,7 @@ final class SignInGuard
             RateLimiter::hit('nevela-signin-pair:'.$pair, $minutes * 60);
             if (self::setting('lock_after', 10) > 0 && RateLimiter::attempts('nevela-signin-pair:'.$pair) >= self::setting('lock_after', 10)) {
                 Cache::put('nevela-signin-lock:'.$pair, time() + $minutes * 60, $minutes * 60);
+                SecurityLog::record($address, 'locked');
                 RateLimiter::clear('nevela-signin-pair:'.$pair);
             }
         }

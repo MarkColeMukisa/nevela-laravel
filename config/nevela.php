@@ -64,6 +64,13 @@ return [
         // Never blocked: addresses and ranges ("203.0.113.0/24", "2001:db8::/32"), such as an
         // office or a monitor. This computer always is. Comma separated in NEVELA_EXEMPT.
         'exempt' => array_values(array_filter(array_map('trim', explode(',', (string) env('NEVELA_EXEMPT', ''))))),
+        // What was turned away (Security\SecurityLog): kept this many days. The bell tells whoever
+        // may see the block list when an address blocks itself, at most notify_blocks_per_hour
+        // times an hour, and warns once an hour when spike_after requests are turned away within
+        // five minutes. Every notice is a push too, hence the caps. 0 switches a warning off.
+        'log_days' => env('NEVELA_SECURITY_LOG_DAYS', 30),
+        'notify_blocks_per_hour' => env('NEVELA_NOTIFY_BLOCKS_PER_HOUR', 5),
+        'spike_after' => env('NEVELA_SPIKE_AFTER', 300),
         // Wrong passwords, by address and account together (Security\SignInGuard). 0 switches one off.
         // captcha_after: the web sign-in asks for Turnstile (where TURNSTILE_SECRET_KEY is set).
         // lock_after: that address is locked out of that account for lock_minutes.

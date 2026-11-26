@@ -5,6 +5,7 @@ namespace Nevela\Laravel\Http;
 use Closure;
 use Illuminate\Http\Request;
 use Nevela\Laravel\Security\Addresses;
+use Nevela\Laravel\Security\SecurityLog;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -17,6 +18,8 @@ final class BlockedAddresses
     {
         $key = Addresses::of($request);
         if ($key !== null && ! Addresses::exempt($key) && ($block = Addresses::blocked($key)) !== null) {
+            SecurityLog::record($key, 'refused');
+
             return response()->json([
                 'error' => $block['until'] === null
                     ? 'Requests from your address are blocked. If that is a mistake, ask the people who run this app.'

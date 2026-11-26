@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Nevela\Laravel\Auth\Confirmation;
 use Nevela\Laravel\Security\Addresses;
+use Nevela\Laravel\Security\SecurityLog;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -15,6 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
  *   GET    _nevela/blocked-addresses          the blocks in force, newest first
  *   POST   _nevela/blocked-addresses          { address, minutes?, note? }  block one
  *   DELETE _nevela/blocked-addresses/{id}     clear a block
+ *   GET    _nevela/security-events            what was turned away: ?days=7, ?address=
  *
  * Blocking and clearing change who can reach the app, so they ask the person to confirm it's
  * them where the app asks for that (Auth\Confirmation). An administrator locked out by a block
@@ -30,6 +32,22 @@ final class BlockedAddressesController
         }
 
         return response()->json(['data' => Addresses::current(), 'exempt' => array_values(array_filter((array) config('nevela.security.exempt', []), 'is_string'))]);
+    }
+
+    /** What was turned away lately, and the blocks made and cleared (Security\SecurityLog). */
+    public function events(Request $request): JsonResponse
+    {
+        Gate::authorize('blocked_addresses.view');
+        if (! SecurityLog::ready()) {
+            return response()->json(['error' => 'The security log needs a migration that has not been run: php nevela migrate', 'code' => 'MIGRATION_NEEDED'], 409);
+        }
+        $input = $request->validate([
+            'days' => ['nullable', 'integer', 'min:1', 'max:365'],
+            'address' => ['nullable', 'string', 'max:64'],
+        ]);
+        $address = isset($input['address']) ? Addresses::parse($input['address']) : null;
+
+        return response()->json(['data' => SecurityLog::recent((int) ($input['days'] ?? 7), $address)]);
     }
 
     public function store(Request $request): JsonResponse
@@ -67,7 +85,7 @@ final class BlockedAddressesController
             return response()->json(['error' => 'No such block. It may have ended, or been cleared already.'], 404);
         }
         Confirmation::requireForAccess($request);
-        Addresses::unblock($id);
+        Addresses::unblock($id, (string) $request->user()->getAuthIdentifier());
 
         return response()->noContent();
     }

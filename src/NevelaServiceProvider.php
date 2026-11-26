@@ -78,6 +78,7 @@ use Nevela\Laravel\Notices\Conditions;
 use Nevela\Laravel\Notices\Notice;
 use Nevela\Laravel\Notices\Notices;
 use Nevela\Laravel\Security\Addresses;
+use Nevela\Laravel\Security\SecurityLog;
 use Nevela\Laravel\Support\Fixed;
 use Nevela\Laravel\Support\PublishedConfig;
 use Nevela\Laravel\Support\SchemaFacts;
@@ -131,8 +132,8 @@ final class NevelaServiceProvider extends ServiceProvider
                 $schedule->command(DigestCommand::class)->hourly()->withoutOverlapping();
                 // Sign-ins that have ended, and access tokens long expired.
                 $schedule->command(PruneSessionsCommand::class)->dailyAt('03:50')->withoutOverlapping();
-                // Blocks that have ended (Security\Addresses).
-                $schedule->call(fn () => Addresses::prune())->dailyAt('03:52')->name('nevela:blocked-addresses:prune');
+                // Blocks that have ended (Security\Addresses), and the security log past its days.
+                $schedule->call(fn () => Addresses::prune() + SecurityLog::prune())->dailyAt('03:52')->name('nevela:blocked-addresses:prune');
                 // A sign of life, so `nevela deploy:check` can tell the scheduler is running.
                 $schedule->call(fn () => Cache::forever(DeployCheckCommand::HEARTBEAT, time()))->everyFiveMinutes()->name('nevela:heartbeat');
                 // The bell's notices, once kept long enough, and whether a newer Nevela is out.
@@ -471,6 +472,7 @@ final class NevelaServiceProvider extends ServiceProvider
                 Route::get('_nevela/blocked-addresses', [BlockedAddressesController::class, 'index'])->name('blocked-addresses.index');
                 Route::post('_nevela/blocked-addresses', [BlockedAddressesController::class, 'store'])->name('blocked-addresses.store');
                 Route::delete('_nevela/blocked-addresses/{id}', [BlockedAddressesController::class, 'destroy'])->name('blocked-addresses.destroy');
+                Route::get('_nevela/security-events', [BlockedAddressesController::class, 'events'])->name('security-events.index');
 
                 Route::get('_nevela/permissions', [RolesController::class, 'catalog'])->name('permissions');
                 Route::get('_nevela/roles', [RolesController::class, 'index'])->name('roles.index');
