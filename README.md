@@ -11,11 +11,11 @@ nevela resource Product --fields="name:string, sku:string!, price:money, kind:en
 The quickest way is the `nevela` command, which sets up Laravel, this package and the dashboard together:
 
 ```sh
-npm install -g create-nevela    # once
+bun add -g create-nevela        # once (npm install -g create-nevela without Bun)
 nevela new my-app
 ```
 
-Without installing it, `pnpm create nevela my-app` does the same.
+Without installing it, `bun create nevela@latest my-app` (or `npm create nevela@latest my-app`) does the same.
 
 ## Add it to an existing Laravel app
 
