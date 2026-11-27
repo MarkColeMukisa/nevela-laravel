@@ -24,7 +24,7 @@ use Nevela\Laravel\Support\Naming;
 final class Nevela
 {
     /** Written by `pnpm release`; the same number as the repository's git tag. */
-    public const VERSION = '0.44.0';
+    public const VERSION = '0.45.0';
 
     /** Nevela runs on the latest PHP. composer.json says the same; status and deploy:check say so where it isn't. */
     public const PHP_MINIMUM = '8.5.0';
